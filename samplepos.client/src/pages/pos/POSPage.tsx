@@ -10,6 +10,8 @@ import { useLayoutTier } from '../../hooks/useLayoutTier';
 import { shouldShowCoach } from '../../lib/adaptiveChrome';
 import PrintReceiptDialog from '../../components/pos/PrintReceiptDialog';
 import CustomerSelector from '../../components/pos/CustomerSelector';
+import { SearchSoftKeyboardInput } from '../../components/keyboard/SearchSoftKeyboardInput';
+import { NumericSoftKeyboardInput } from '../../components/keyboard/NumericSoftKeyboardInput';
 import {
   fetchReceiptPrintConfig,
   shouldAutoPrintAfterSale,
@@ -4094,13 +4096,14 @@ export default function POSPage() {
                         >
                           −
                         </button>
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min="1"
-                          step="1"
-                          value={item.quantity}
-                          onChange={(e) => handleQuantityChange(idx, parseFloat(e.target.value) || 0)}
+                        <NumericSoftKeyboardInput
+                          mode="integer"
+                          showToggle={false}
+                          min={1}
+                          value={String(item.quantity)}
+                          onChange={(raw) =>
+                            handleQuantityChange(idx, parseInt(raw, 10) || 0)
+                          }
                           onFocus={() => setFocusedCartIndex(idx)}
                           className={`w-12 h-8 border-x px-1 text-center text-sm focus:ring-2 focus:ring-blue-500 focus:z-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${lineQtyOverStock ? 'bg-red-50' : ''}`}
                           aria-label={`Quantity in ${stockUom.uomLabel} for ${item.name}`}
@@ -4281,16 +4284,16 @@ export default function POSPage() {
                           )}
                         </td>
                         <td className="px-2 py-2 text-right">
-                          <input
-                            type="number"
-                            min="1"
-                            step="1"
-                            value={item.quantity}
-                            onChange={(e) =>
-                              handleQuantityChange(idx, parseFloat(e.target.value) || 0)
+                          <NumericSoftKeyboardInput
+                            mode="integer"
+                            showToggle={false}
+                            min={1}
+                            value={String(item.quantity)}
+                            onChange={(raw) =>
+                              handleQuantityChange(idx, parseInt(raw, 10) || 0)
                             }
                             onFocus={() => setFocusedCartIndex(idx)}
-                            className={`w-14 sm:w-20 border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 ${lineQtyOverStock ? 'border-red-500 bg-red-50' : ''}`}
+                            className={`w-14 sm:w-20 border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${lineQtyOverStock ? 'border-red-500 bg-red-50' : ''}`}
                             aria-label={`Quantity in ${stockUom.uomLabel} for ${item.name}`}
                           />
                           {(lineQtyOverStock || stockUom.stockHint) && (
@@ -4957,16 +4960,15 @@ export default function POSPage() {
                 Payment Amount
               </label>
               <div className="flex gap-2 sm:gap-3">
-                <input
-                  type="number"
+                <NumericSoftKeyboardInput
+                  mode="decimal"
                   value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(e.target.value)}
+                  onChange={setPaymentAmount}
                   onKeyDown={handlePaymentAmountKeyDown}
-                  className="flex-1 px-3 sm:px-4 py-3 sm:py-4 border-2 border-gray-300 rounded-lg focus:ring-2 sm:focus:ring-4 focus:ring-blue-300 focus:border-blue-500 text-lg sm:text-xl font-bold text-gray-900"
-                  placeholder="0.00"
-                  step="1000"
-                  min="0"
                   autoFocus
+                  className="flex-1 px-3 sm:px-4 py-3 sm:py-4 border-2 border-gray-300 rounded-lg focus:ring-2 sm:focus:ring-4 focus:ring-blue-300 focus:border-blue-500 text-lg sm:text-xl font-bold text-gray-900 pr-12"
+                  placeholder="0.00"
+                  aria-label="Payment amount"
                 />
                 <button
                   onClick={handleQuickFill}
@@ -5548,13 +5550,13 @@ export default function POSPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Validity (Days)
               </label>
-              <input
-                type="number"
-                value={quoteValidityDays}
-                onChange={(e) => setQuoteValidityDays(parseInt(e.target.value) || 30)}
+              <NumericSoftKeyboardInput
+                mode="integer"
+                value={String(quoteValidityDays)}
+                onChange={(raw) => setQuoteValidityDays(parseInt(raw, 10) || 30)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                min="1"
-                max="365"
+                min={1}
+                max={365}
                 aria-label="Quote validity in days"
               />
               <p className="text-xs text-gray-500 mt-1">
@@ -5627,13 +5629,13 @@ export default function POSPage() {
             {/* Search Box */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Search Quotes</label>
-              <input
-                type="text"
+              <SearchSoftKeyboardInput
                 value={quoteSearchTerm}
-                onChange={(e) => setQuoteSearchTerm(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Search by quote number or customer name..."
+                onChange={setQuoteSearchTerm}
                 autoFocus
+                className="w-full px-3 py-2 pr-11 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Search by quote number or customer name..."
+                aria-label="Search quotes"
               />
             </div>
 

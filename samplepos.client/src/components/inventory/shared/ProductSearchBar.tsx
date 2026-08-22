@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { SearchSoftKeyboardInput } from '../../components/keyboard/SearchSoftKeyboardInput';
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/utils/api";
 import { productKeys } from "@/hooks/useProducts";
@@ -76,16 +77,15 @@ export function ProductSearchBar({
     <div className={className}>
       <div className="flex gap-2">
         <div className="flex-1 relative">
-          <input
-            type="text"
+          <SearchSoftKeyboardInput
             value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
+            onChange={(next) => {
+              setSearch(next);
               setShowDropdown(true);
             }}
             onFocus={() => setShowDropdown(true)}
             placeholder={placeholder}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full px-3 py-2 pr-11 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             disabled={disabled}
           />
           {/* Loading indicator */}

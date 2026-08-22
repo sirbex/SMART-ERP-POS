@@ -46,6 +46,8 @@ interface AuthContextType {
   isLoading: boolean;
   /** Pre-loaded permission keys (session-embedded, no async race) */
   permissions: Set<string>;
+  /** RBAC role display names from /rbac/me/permissions (for FOH ownership override). */
+  rbacRoleNames: string[];
   /** Force re-fetch permissions (e.g. after role change) */
   refreshPermissions: () => Promise<void>;
   login: (userData: User, token: string, refreshToken?: string, expiresIn?: number) => Promise<void>;
@@ -63,16 +65,18 @@ interface AuthProviderProps {
 // Setup axios interceptors once on load
 setupAxiosInterceptors();
 
+type PermissionFetchResult = { keys: string[]; roleNames: string[] };
+
 /**
  * Fetch permissions from /rbac/me/permissions using raw fetch (no axios dependency
- * risk during auth init). Returns an array of permission key strings.
- * Empty array means "unavailable / failed" — callers must not treat it as
+ * risk during auth init). Returns permission keys + RBAC role names when present.
+ * Empty keys means "unavailable / failed" — callers must not treat it as
  * "user has zero permissions" without consulting same-user cache policy.
  */
-async function fetchPermissionKeys(): Promise<string[]> {
+async function fetchPermissionPayload(): Promise<PermissionFetchResult> {
   try {
     const token = localStorage.getItem('auth_token');
-    if (!token) return [];
+    if (!token) return { keys: [], roleNames: [] };
 
     const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
     const res = await fetch(`${baseUrl}/rbac/me/permissions`, {
@@ -80,19 +84,23 @@ async function fetchPermissionKeys(): Promise<string[]> {
     });
     if (!res.ok) {
       console.warn(`[Auth] Permission fetch HTTP ${res.status} — keeping prior same-user cache if any`);
-      return [];
+      return { keys: [], roleNames: [] };
     }
 
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      return json.data.map((p: { permissionKey: string }) => p.permissionKey);
+      const roleNames = new Set<string>();
+      const keys = json.data.map((p: { permissionKey: string; roleName?: string }) => {
+        if (p.roleName) roleNames.add(p.roleName);
+        return p.permissionKey;
+      });
+      return { keys, roleNames: [...roleNames] };
     }
     console.warn('[Auth] Permission fetch returned unexpected shape');
-    return [];
+    return { keys: [], roleNames: [] };
   } catch (err) {
-    // Network error / offline — use cached permissions (same-user only at call site)
     console.warn('[Auth] Permission fetch failed (offline/network):', err instanceof Error ? err.message : err);
-    return [];
+    return { keys: [], roleNames: [] };
   }
 }
 
@@ -102,6 +110,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [permissionKeys, setPermissionKeys] = useState<string[]>([]);
+  const [rbacRoleNames, setRbacRoleNames] = useState<string[]>([]);
   const pendingIdleLogoutRef = useRef(false);
   // Idle auto-logout: 60 minutes with no deliberate keyboard/mouse/touch (SSOT).
   // SHARED vs PERSONAL share the same window; walk-up security is actor-lock + cold-start PIN.
@@ -246,10 +255,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
           }
 
           // Then fetch fresh permissions from server (updates cache)
-          const freshPerms = await fetchPermissionKeys();
-          if (freshPerms.length > 0) {
-            setPermissionKeys(freshPerms);
-            persistAuthStorage('rbac_permissions', JSON.stringify(freshPerms));
+          const freshPerms = await fetchPermissionPayload();
+          if (freshPerms.keys.length > 0) {
+            setPermissionKeys(freshPerms.keys);
+            setRbacRoleNames(freshPerms.roleNames);
+            persistAuthStorage('rbac_permissions', JSON.stringify(freshPerms.keys));
           }
         }
       } catch (error) {
@@ -285,6 +295,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(null);
         setIsAuthenticated(false);
         setPermissionKeys([]);
+        setRbacRoleNames([]);
         if (!isAuthRecoveryPath(window.location.pathname)) {
           window.location.replace(`${window.location.origin}/login`);
         }
@@ -296,6 +307,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(null);
         setIsAuthenticated(false);
         setPermissionKeys([]);
+        setRbacRoleNames([]);
         try {
           sessionStorage.setItem('session_expired', '1');
         } catch {
@@ -345,16 +357,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     // ERP pattern: fetch permissions BEFORE marking authenticated
     // This prevents the race where routes render with empty permissions
-    const perms = await fetchPermissionKeys();
-    if (perms.length > 0) {
-      setPermissionKeys(perms);
-      persistAuthStorage('rbac_permissions', JSON.stringify(perms));
+    const perms = await fetchPermissionPayload();
+    if (perms.keys.length > 0) {
+      setPermissionKeys(perms.keys);
+      setRbacRoleNames(perms.roleNames);
+      persistAuthStorage('rbac_permissions', JSON.stringify(perms.keys));
     } else if (sameUserCachedPerms && sameUserCachedPerms.length > 0) {
       // Same actor offline / fetch miss — keep last known rights for that user only
       setPermissionKeys(sameUserCachedPerms);
     } else {
       // Different actor or no cache — never inherit foreign RBAC
       setPermissionKeys([]);
+      setRbacRoleNames([]);
       localStorage.removeItem('rbac_permissions');
     }
 
@@ -373,10 +387,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   /** Force re-fetch permissions from server */
   const refreshPermissions = useCallback(async () => {
-    const perms = await fetchPermissionKeys();
-    if (perms.length > 0) {
-      setPermissionKeys(perms);
-      persistAuthStorage('rbac_permissions', JSON.stringify(perms));
+    const perms = await fetchPermissionPayload();
+    if (perms.keys.length > 0) {
+      setPermissionKeys(perms.keys);
+      setRbacRoleNames(perms.roleNames);
+      persistAuthStorage('rbac_permissions', JSON.stringify(perms.keys));
     }
   }, []);
 
@@ -413,6 +428,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setUser(null);
       setIsAuthenticated(false);
       setPermissionKeys([]);
+      setRbacRoleNames([]);
 
       // Drop floor cache so next login cannot reuse this session's RQ entries.
       refreshRestaurantFloorSession(queryClient);
@@ -517,7 +533,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   });
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, isLoading, permissions, refreshPermissions, login, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, isLoading, permissions, rbacRoleNames, refreshPermissions, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

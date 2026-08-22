@@ -9,6 +9,7 @@ import {
   AdaptiveFormField,
   AdaptiveFormLayout,
 } from '../adaptive';
+import { NumericSoftKeyboardInput } from '../keyboard/NumericSoftKeyboardInput';
 
 interface DiscountDialogProps {
   isOpen: boolean;
@@ -168,17 +169,17 @@ export default function DiscountDialog({
             <label htmlFor="discount-value" className="block text-sm font-medium text-gray-700 mb-1">
               {discountType === 'PERCENTAGE' ? 'Discount Percentage' : 'Discount Amount'}
             </label>
-            <input
-              ref={valueInputRef}
+            <NumericSoftKeyboardInput
+              inputRef={valueInputRef}
               id="discount-value"
-              type="number"
-              min="0"
-              max={discountType === 'PERCENTAGE' ? '100' : originalAmount.toString()}
-              step={discountType === 'PERCENTAGE' ? '1' : '100'}
+              mode="decimal"
+              min={0}
+              max={discountType === 'PERCENTAGE' ? 100 : originalAmount}
               value={discountValue}
-              onChange={(e) => setDiscountValue(e.target.value)}
+              onChange={setDiscountValue}
               className={touchControl}
               placeholder={discountType === 'PERCENTAGE' ? 'Enter percentage (0-100)' : 'Enter amount'}
+              aria-label={discountType === 'PERCENTAGE' ? 'Discount percentage' : 'Discount amount'}
             />
             {discountType === 'PERCENTAGE' && (
               <p className="text-xs text-gray-500 mt-1">

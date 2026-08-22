@@ -21,6 +21,7 @@ import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { NumericSoftKeyboardInput } from '../keyboard/NumericSoftKeyboardInput';
 import { Label } from '../ui/label';
 import {
     Select,
@@ -209,18 +210,14 @@ export function CashMovementDialog({
                     {/* Amount */}
                     <div className="space-y-2">
                         <Label htmlFor="amount">Amount (UGX)</Label>
-                        <Input
+                        <NumericSoftKeyboardInput
                             id="amount"
-                            type="text"
-                            inputMode="numeric"
-                            pattern="[0-9]*"
+                            mode="integer"
                             placeholder="Enter amount"
                             value={amount}
-                            onChange={(e) => {
-                                const value = e.target.value.replace(/[^0-9]/g, '');
-                                setAmount(value);
-                            }}
-                            className="text-lg"
+                            onChange={(value) => setAmount(value.replace(/[^0-9]/g, ''))}
+                            className="text-lg pr-12"
+                            aria-label="Cash movement amount"
                         />
                         {amount && parseFloat(amount) <= 0 && (
                             <p className="text-xs text-red-500">Amount must be greater than 0</p>

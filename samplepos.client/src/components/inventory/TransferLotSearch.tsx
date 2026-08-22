@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Input } from '@/components/ui/input';
+import { SearchSoftKeyboardInput } from '@/components/keyboard/SearchSoftKeyboardInput';
 import { Label } from '@/components/ui/label';
 import type { WarehouseLotRow } from '../../hooks/useWarehouse';
 
@@ -115,17 +115,17 @@ export function TransferLotSearch({
     <div className="space-y-2">
       <div>
         <Label htmlFor="transfer-lot-search">Search lots</Label>
-        <Input
+        <SearchSoftKeyboardInput
           id="transfer-lot-search"
-          ref={inputRef}
-          type="text"
+          inputRef={inputRef}
           value={query}
+          onChange={setQuery}
           disabled={disabled}
           autoComplete="off"
           placeholder="Search or scan barcode…"
-          className="mt-1"
-          onChange={(e) => setQuery(e.target.value)}
+          className="mt-1 pr-11"
           onKeyDown={handleKeyDown}
+          aria-label="Search lots"
         />
         <p className="text-xs text-gray-500 mt-1">{hint}</p>
       </div>

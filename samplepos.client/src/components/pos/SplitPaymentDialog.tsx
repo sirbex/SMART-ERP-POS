@@ -7,6 +7,7 @@ import { useState, useEffect, useMemo } from 'react';
 import Decimal from 'decimal.js';
 import { formatCurrency } from '../../utils/currency';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
+import { NumericSoftKeyboardInput } from '../keyboard/NumericSoftKeyboardInput';
 
 // Payment segment type (replaces import from shared schema)
 interface PaymentSegment {
@@ -297,14 +298,13 @@ export default function SplitPaymentDialog({
                 Amount {remaining > 0 && `(${formatCurrency(remaining)} remaining)`}
               </label>
               <div className="flex gap-2">
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                <NumericSoftKeyboardInput
+                  mode="decimal"
                   value={enteredAmount}
-                  onChange={(e) => setEnteredAmount(e.target.value)}
-                  className="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-purple-600"
+                  onChange={setEnteredAmount}
+                  className="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-purple-600 pr-12"
                   placeholder="Enter amount"
+                  aria-label="Split payment amount"
                 />
                 {remaining > 0 && (
                   <button

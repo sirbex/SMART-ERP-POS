@@ -6,6 +6,7 @@ import {
 import { api } from '../../utils/api';
 import { formatCurrency } from '../../utils/currency';
 import { handleApiError } from '../../utils/errorHandler';
+import { SearchSoftKeyboardInput } from '../keyboard/SearchSoftKeyboardInput';
 
 interface CustomerOption {
   id: string;
@@ -178,12 +179,12 @@ export function SaleCustomerReassignmentModal({
           <div className="space-y-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Correct customer</label>
-              <input
-                type="search"
+              <SearchSoftKeyboardInput
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={setSearch}
                 placeholder="Search customers…"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-2"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-11 text-sm mb-2"
+                aria-label="Search customers"
               />
               <select
                 value={toCustomerId}

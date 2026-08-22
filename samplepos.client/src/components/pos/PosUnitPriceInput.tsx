@@ -1,15 +1,15 @@
 import { formatCurrency } from '../../utils/currency';
 import { isPosUnitPriceBelowCatalogCost, normalizePosUnitPrice } from '../../utils/posCartLine';
+import { parseNumericPadValue } from '../../lib/numericPadLogic';
+import { NumericSoftKeyboardInput } from '../keyboard/NumericSoftKeyboardInput';
 
 interface PosUnitPriceInputProps {
   value: number;
-  /** Minimum allowed unit price (FEFO/cost floor for this line). */
   minUnitPrice: number;
   uomLabel: string;
   productName: string;
   atCostLine?: boolean;
   onChange: (unitPrice: number) => void;
-  /** Fired on blur after normalize — use for validation toasts. */
   onCommit?: (unitPrice: number) => void;
   onFocus?: () => void;
   compact?: boolean;
@@ -29,26 +29,22 @@ export default function PosUnitPriceInput({
   manualOverride = false,
 }: PosUnitPriceInputProps) {
   const belowCost = isPosUnitPriceBelowCatalogCost(value, minUnitPrice);
+  const display = Number.isFinite(value) ? String(value) : '0';
+
+  const commit = (raw: string) => {
+    const normalized = normalizePosUnitPrice(parseNumericPadValue(raw, 0));
+    onChange(normalized);
+    onCommit?.(normalized);
+  };
 
   return (
     <div className={compact ? 'inline-flex flex-col items-end' : 'flex flex-col items-end'}>
-      <input
-        type="number"
-        min={0}
-        step={1}
-        value={Number.isFinite(value) ? value : 0}
-        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-        onBlur={(e) => {
-          const normalized = normalizePosUnitPrice(parseFloat(e.target.value) || 0);
-          onChange(normalized);
-          onCommit?.(normalized);
-        }}
+      <NumericSoftKeyboardInput
+        mode="decimal"
+        value={display}
+        onChange={(raw) => onChange(parseNumericPadValue(raw, 0))}
+        onCommit={commit}
         onFocus={onFocus}
-        className={
-          (compact ? 'w-20' : 'w-24 sm:w-28') +
-          ' border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 ' +
-          (belowCost ? 'border-red-500 bg-red-50 text-red-900' : 'border-gray-300')
-        }
         aria-label={`Unit price per ${uomLabel} for ${productName}`}
         title={
           [
@@ -62,6 +58,12 @@ export default function PosUnitPriceInput({
             .filter(Boolean)
             .join(' ') || undefined
         }
+        className={
+          (compact ? 'w-20' : 'w-24 sm:w-28') +
+          ' border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 ' +
+          (belowCost ? 'border-red-500 bg-red-50 text-red-900' : 'border-gray-300')
+        }
+        toggleClassName="h-7 w-7"
       />
       {!compact && (
         <div className="text-[10px] text-gray-500 mt-0.5">per {uomLabel}</div>

@@ -7,6 +7,8 @@ import {
   resolveFloorplanFromWorkspace,
   type AdaptiveSearchPresentation,
 } from '../../lib/adaptiveFloorplan';
+import { requestSoftKeyboard } from '../../lib/softKeyboard';
+import { SearchSoftKeyboardInput } from '../keyboard/SearchSoftKeyboardInput';
 
 type AdaptiveSearchProps = {
   value: string;
@@ -35,6 +37,7 @@ type AdaptiveSearchProps = {
 /**
  * Adaptive search field — presentation only.
  * Parent owns query → API / offline catalog lookup (same command on every device).
+ * Typing without a physical keyboard: SearchSoftKeyboardInput SSOT.
  */
 export function AdaptiveSearch({
   value,
@@ -63,19 +66,19 @@ export function AdaptiveSearch({
 
   useEffect(() => {
     if (autoFocus && presentation !== 'icon-sheet' && refToUse.current) {
-      refToUse.current.focus();
+      requestSoftKeyboard(refToUse.current);
     }
   }, [autoFocus, presentation, refToUse]);
 
   useEffect(() => {
     if (sheetOpen && refToUse.current) {
-      refToUse.current.focus();
+      requestSoftKeyboard(refToUse.current);
     }
   }, [sheetOpen, refToUse]);
 
   const touchMin = 'min-h-[var(--layout-touch-target)]';
   const inputClass = [
-    'w-full rounded-md border border-stone-300 bg-white px-3 text-stone-900',
+    'w-full rounded-md border border-stone-300 bg-white pl-3 pr-11 text-stone-900',
     'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
     touchMin,
     presentation === 'compact' ? 'text-sm py-1.5' : 'text-sm py-2',
@@ -88,30 +91,23 @@ export function AdaptiveSearch({
   const field = (
     <div className={`flex items-center gap-2 ${className}`.trim()}>
       {leading}
-      <div className="relative min-w-0 flex-1">
-        <label htmlFor={inputId} className="sr-only">
-          {label}
-        </label>
-        <input
-          id={inputId}
-          ref={refToUse}
-          type="search"
-          value={value}
-          disabled={disabled}
-          autoComplete="off"
-          placeholder={placeholder}
-          aria-label={label}
-          className={inputClass}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            onKeyDown?.(e);
-            if (e.key === 'Enter') {
-              onSubmit?.(value);
-            }
-          }}
-          data-adaptive-search-input="true"
-        />
-      </div>
+      <label htmlFor={inputId} className="sr-only">
+        {label}
+      </label>
+      <SearchSoftKeyboardInput
+        id={inputId}
+        inputRef={refToUse}
+        value={value}
+        onChange={onChange}
+        onEnter={() => onSubmit?.(value)}
+        disabled={disabled}
+        placeholder={placeholder}
+        aria-label={label}
+        wrapClassName="min-w-0 flex-1"
+        className={inputClass}
+        onKeyDown={onKeyDown}
+        data-adaptive-search-input="true"
+      />
       {trailing}
       {onSubmit ? (
         <button

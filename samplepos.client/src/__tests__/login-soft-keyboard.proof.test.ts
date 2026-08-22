@@ -1,9 +1,9 @@
 /**
- * BEHAVIORAL proof — PIN pad logic + soft keyboard helpers (not structure-only greps).
- * Writes PROOF_LOGIN_SOFT_KEYBOARD.md at repo root on PASS.
+ * BEHAVIORAL proof — PIN pad logic + soft keyboard helpers only.
+ * No grep / readFile wiring checks. Writes PROOF_LOGIN_SOFT_KEYBOARD.md on PASS.
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   applyPinPadKey,
@@ -76,15 +76,6 @@ describe('PROOF: PIN number pad behavior', () => {
     expect(KEYS).toContain('⌫');
     pass('12-key inventory');
   });
-
-  it('PinNumPad UI wires pinNumPadLogic SSOT', () => {
-    const pad = readFileSync(join(__dirname, '../components/auth/PinNumPad.tsx'), 'utf8');
-    expect(pad).toMatch(/from ['"].*pinNumPadLogic['"]/);
-    expect(pad).toMatch(/applyPinPadKey/);
-    expect(pad).toMatch(/mapKeyboardEventToPinKey/);
-    expect(pad).toMatch(/canSubmitPin/);
-    pass('PinNumPad → pinNumPadLogic');
-  });
 });
 
 describe('PROOF: soft keyboard helpers', () => {
@@ -105,7 +96,12 @@ describe('PROOF: soft keyboard helpers', () => {
       enterKeyHint: 'go',
       spellCheck: false,
     });
-    pass('softKeyboardAttrs email/password');
+    expect(softKeyboardAttrs('numeric', 'done')).toMatchObject({
+      inputMode: 'numeric',
+      enterKeyHint: 'done',
+      spellCheck: false,
+    });
+    pass('softKeyboardAttrs email/password/numeric');
   });
 
   it('requestSoftKeyboard focuses element and calls VirtualKeyboard.show when present', () => {
@@ -133,34 +129,22 @@ describe('PROOF: soft keyboard helpers', () => {
   });
 });
 
-describe('PROOF: wiring (surfaces consume helpers)', () => {
-  const root = join(__dirname, '..');
-  const read = (rel: string) => readFileSync(join(root, rel), 'utf8');
-
-  it('login / quick-login / manager / 2FA / platform consume pad or soft keyboard', () => {
-    expect(read('pages/pos/QuickLoginScreen.tsx')).toMatch(/PinNumPad/);
-    expect(read('pages/LoginPage.tsx')).toMatch(/requestSoftKeyboard/);
-    expect(read('pages/LoginPage.tsx')).toMatch(/softKeyboardAttrs\('email'/);
-    expect(read('components/pos/ManagerApprovalDialog.tsx')).toMatch(/minLength=\{4\}/);
-    expect(read('components/auth/TwoFactorVerifyModal.tsx')).toMatch(/PinNumPad/);
-    expect(read('pages/platform/PlatformLoginPage.tsx')).toMatch(/requestSoftKeyboard/);
-    pass('surface wiring');
-  });
-});
-
 afterAll(() => {
   const body = [
     '# PROOF: Login soft keyboard + PIN number pad',
     '',
     `- Date: ${new Date().toISOString()}`,
-    '- Runner: `npx vitest run src/__tests__/login-soft-keyboard.proof.test.ts`',
+    '- Runner: `npm run proof:soft-keyboard` (login section) or `npx vitest run src/__tests__/login-soft-keyboard.proof.test.ts`',
+    '',
+    '## Policy',
+    'Behavioral tests only — grep/source-scan evidence is **not** accepted.',
     '',
     '## Results',
     ...results,
     '',
     '## Verdict',
-    results.length >= 10
-      ? '**PASS** — behavioral + wiring proof for login keyboard/numpad.'
+    results.length >= 9
+      ? '**PASS** — behavioral proof for PIN pad logic + soft keyboard helpers.'
       : '**FAIL** — incomplete result set.',
     '',
   ].join('\n');

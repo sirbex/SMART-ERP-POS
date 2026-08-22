@@ -15,6 +15,8 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search, X } from 'lucide-react';
+import { requestSoftKeyboard } from '../../lib/softKeyboard';
+import { SearchSoftKeyboardInput } from '../../components/keyboard/SearchSoftKeyboardInput';
 import Layout from '../../components/Layout';
 import { AdaptiveDialog } from '../../components/adaptive';
 import { api, getStructuredError } from '../../utils/api';
@@ -926,7 +928,7 @@ export default function RestaurantPosPage() {
     [companyBranding, guestBillInvoiceFields],
   );
   const taxName = config.tax?.name || 'VAT';
-  const { user, permissions, logout } = useAuth();
+  const { user, permissions, rbacRoleNames, logout } = useAuth();
   const { isOnline } = useOfflineContext();
   const { tier, chrome, height, width, touchFirst, tokens } = useLayoutTier();
   // dense/ultra from SSOT (tier + height + touch) — Sunmi short landscape packs ultra.
@@ -959,6 +961,7 @@ export default function RestaurantPosPage() {
     userId: user?.id || '',
     role: user?.role,
     permissions,
+    rbacRoleNames,
   });
   const isWaiterProfile = isRestaurantWaiterProfile({
     role: user?.role,
@@ -1557,7 +1560,7 @@ export default function RestaurantPosPage() {
       }
       if (e.key === 'F3') {
         e.preventDefault();
-        searchInputRef.current?.focus();
+        requestSoftKeyboard(searchInputRef.current);
         searchInputRef.current?.select();
         return;
       }
@@ -5382,34 +5385,34 @@ export default function RestaurantPosPage() {
                   <label className="relative block">
                     <span className="sr-only">Search products</span>
                     <Search
-                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-stone-400"
+                      className="pointer-events-none absolute left-3 top-1/2 z-[1] -translate-y-1/2 h-5 w-5 text-stone-400"
                       aria-hidden
                     />
-                    <input
-                      ref={searchInputRef}
-                      type="search"
-                      inputMode="search"
-                      enterKeyHint="search"
-                      autoComplete="off"
-                      autoCorrect="off"
-                      spellCheck={false}
+                    <SearchSoftKeyboardInput
+                      inputRef={searchInputRef}
                       value={menuSearch}
-                      onChange={(e) => setMenuSearch(e.target.value)}
-                      onFocus={(e) => e.currentTarget.select()}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && quickAddProduct) {
-                          e.preventDefault();
+                      onChange={setMenuSearch}
+                      selectOnFocus
+                      enterLabel="Add"
+                      onEnter={() => {
+                        if (quickAddProduct) {
                           addItemMutation.mutate(quickAddProduct, {
                             onSuccess: () => setMenuSearch(''),
                           });
-                        } else if (e.key === 'Escape') {
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
                           e.preventDefault();
                           setMenuSearch('');
                           (e.target as HTMLInputElement).blur();
                         }
                       }}
                       placeholder="Search menu — name, category, station"
-                      className="w-full min-h-12 h-12 pl-11 pr-12 rounded-xl border border-stone-300 bg-stone-50 text-base text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:bg-white touch-manipulation"
+                      aria-label="Search products"
+                      wrapClassName="w-full"
+                      toggleClassName="right-1.5 h-10 w-10 rounded-xl"
+                      className="w-full min-h-12 h-12 pl-11 pr-24 rounded-xl border border-stone-300 bg-stone-50 text-base text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:bg-white touch-manipulation"
                     />
                     {menuSearch ? (
                       <button
@@ -5417,9 +5420,9 @@ export default function RestaurantPosPage() {
                         aria-label="Clear search"
                         onClick={() => {
                           setMenuSearch('');
-                          searchInputRef.current?.focus();
+                          requestSoftKeyboard(searchInputRef.current);
                         }}
-                        className={`${TOUCH} absolute right-1.5 top-1/2 -translate-y-1/2 h-10 w-10 inline-flex items-center justify-center rounded-xl text-stone-500 active:bg-stone-200`}
+                        className={`${TOUCH} absolute right-12 top-1/2 z-[2] -translate-y-1/2 h-10 w-10 inline-flex items-center justify-center rounded-xl text-stone-500 active:bg-stone-200`}
                       >
                         <X className="h-5 w-5" />
                       </button>

@@ -1,7 +1,10 @@
 # PROOF: Login soft keyboard + PIN number pad
 
-- Date: 2026-08-01T23:03:24.626Z
-- Runner: `npx vitest run src/__tests__/login-soft-keyboard.proof.test.ts`
+- Date: 2026-08-22T06:54:02.537Z
+- Runner: `npm run proof:soft-keyboard` (login section) or `npx vitest run src/__tests__/login-soft-keyboard.proof.test.ts`
+
+## Policy
+Behavioral tests only — grep/source-scan evidence is **not** accepted.
 
 ## Results
 - PASS 4-digit complete signal
@@ -10,11 +13,9 @@
 - PASS hardware key map
 - PASS manager 4–6 submit gate
 - PASS 12-key inventory
-- PASS PinNumPad → pinNumPadLogic
-- PASS softKeyboardAttrs email/password
+- PASS softKeyboardAttrs email/password/numeric
 - PASS requestSoftKeyboard focus + VirtualKeyboard.show
 - PASS requestSoftKeyboard null-safe
-- PASS surface wiring
 
 ## Verdict
-**PASS** — behavioral + wiring proof for login keyboard/numpad.
+**PASS** — behavioral proof for PIN pad logic + soft keyboard helpers.

@@ -20,6 +20,14 @@ import { legacyRoleGrantsPermission } from '../../../../shared/authorization/leg
 function ownershipActorFromReq(req: Request): OwnershipActor {
   const rbac = req.authContext?.permissions;
   const permissions = new Set<string>(rbac ? [...rbac] : []);
+  const rbacRoleNames = new Set<string>();
+  if (req.authContext?.scopedPermissions) {
+    for (const entries of req.authContext.scopedPermissions.values()) {
+      for (const entry of entries) {
+        if (entry.roleName) rbacRoleNames.add(entry.roleName);
+      }
+    }
+  }
   if (req.user?.role) {
     for (const key of [
       'restaurant.pay',
@@ -33,6 +41,7 @@ function ownershipActorFromReq(req: Request): OwnershipActor {
     userId: req.user!.id,
     role: req.user!.role,
     permissions,
+    rbacRoleNames,
   };
 }
 

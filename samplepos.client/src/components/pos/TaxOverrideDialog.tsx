@@ -7,6 +7,7 @@ import {
   AdaptiveFormField,
   AdaptiveFormLayout,
 } from '../adaptive';
+import { NumericSoftKeyboardInput } from '../keyboard/NumericSoftKeyboardInput';
 
 interface TaxOverrideDialogProps {
   isOpen: boolean;
@@ -109,15 +110,15 @@ export default function TaxOverrideDialog({
             <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="tax-override-rate">
               Tax rate (%)
             </label>
-            <input
+            <NumericSoftKeyboardInput
               id="tax-override-rate"
-              type="number"
+              mode="decimal"
               min={0}
-              step="0.01"
               className={touchControl}
               value={rate}
-              onChange={(e) => setRate(e.target.value)}
+              onChange={setRate}
               data-tax-override-rate="true"
+              aria-label="Tax rate percent"
             />
           </AdaptiveFormField>
         )}

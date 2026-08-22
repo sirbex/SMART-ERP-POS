@@ -6,6 +6,7 @@ import {
   formatMultiUomQuantity,
   productFromApiUoms,
 } from '@/utils/formatQuantity';
+import { SearchSoftKeyboardInput } from '../../keyboard/SearchSoftKeyboardInput';
 
 // ── Procurement (PO / GR) ─────────────────────────────────────────────
 
@@ -464,12 +465,11 @@ export function EnterpriseProductSearch(props: EnterpriseProductSearchProps) {
 
   return (
     <div className={`relative ${className}`}>
-      <input
-        ref={inputElementRef}
-        type="text"
+      <SearchSoftKeyboardInput
+        inputRef={inputElementRef}
         value={search}
-        onChange={(e) => {
-          setSearch(e.target.value);
+        onChange={(next) => {
+          setSearch(next);
           setShowDropdown(true);
         }}
         onFocus={() => {
@@ -477,7 +477,7 @@ export function EnterpriseProductSearch(props: EnterpriseProductSearchProps) {
         }}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
-        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+        className="w-full px-3 py-2 pr-11 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
         disabled={searchDisabled}
         autoComplete="off"
         role="combobox"

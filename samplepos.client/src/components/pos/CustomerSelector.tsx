@@ -7,6 +7,7 @@ import { formatCurrency } from '../../utils/currency';
 import QuickAddCustomerModal from '../customers/QuickAddCustomerModal';
 import { useOfflineContext } from '../../contexts/OfflineContext';
 import { searchCustomers as searchOfflineCustomers, getAllCustomers, type OfflineCustomer } from '../../lib/offlineDb';
+import { SearchSoftKeyboardInput } from '../keyboard/SearchSoftKeyboardInput';
 
 function offlineToCustomer(c: OfflineCustomer): Customer {
   return {
@@ -248,22 +249,18 @@ export default function CustomerSelector({
           <div className="space-y-2">
             <div className="flex gap-2">
               <div className={`flex-1 ${compact ? '' : 'relative'}`}>
-                <input
-                  type="search"
-                  inputMode="search"
-                  enterKeyHint="search"
-                  autoComplete="off"
+                <SearchSoftKeyboardInput
                   value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
+                  onChange={(next) => {
+                    setSearch(next);
                     setShowDropdown(true);
                   }}
                   onFocus={() => setShowDropdown(true)}
                   placeholder={placeholder}
                   className={
                     compact
-                      ? touchSearch
-                      : 'w-full px-2 sm:px-3 py-2 text-xs sm:text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500'
+                      ? `${touchSearch} pr-11`
+                      : 'w-full px-2 sm:px-3 py-2 pr-11 text-xs sm:text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500'
                   }
                   aria-label="Search customers"
                 />

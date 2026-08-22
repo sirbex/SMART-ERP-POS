@@ -1,5 +1,7 @@
 import { useRef, useEffect, RefObject } from 'react';
 import POSButton from './POSButton';
+import { requestSoftKeyboard } from '../../lib/softKeyboard';
+import { SearchSoftKeyboardInput } from '../keyboard/SearchSoftKeyboardInput';
 
 interface POSSearchBarProps {
   value: string;
@@ -24,24 +26,22 @@ export default function POSSearchBar({
   const refToUse = inputRef || internalRef;
 
   useEffect(() => {
-    if (autoFocus && refToUse.current) refToUse.current.focus();
+    if (autoFocus && refToUse.current) requestSoftKeyboard(refToUse.current);
   }, [autoFocus, refToUse]);
 
   return (
     <div className="flex items-center gap-2">
-      <input
-        ref={refToUse}
-        type="text"
+      <SearchSoftKeyboardInput
+        inputRef={refToUse}
         value={value}
-        onChange={e => onChange(e.target.value)}
-        onKeyDown={e => {
-          if (onKeyDown) onKeyDown(e);
-          if (e.key === 'Enter' && onSearch) onSearch();
-        }}
-        autoComplete="off"
-        className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+        onChange={onChange}
+        onEnter={onSearch}
+        autoFocus={autoFocus}
+        onKeyDown={onKeyDown}
         placeholder={placeholder}
         aria-label="POS product search"
+        wrapClassName="min-w-0 flex-1"
+        className="w-full px-3 py-2 pr-11 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
       />
       <POSButton variant="primary" onClick={onSearch}>Search</POSButton>
     </div>

@@ -8,6 +8,8 @@
  * - Service counters (Takeaway / Delivery / Quick): counter staff only — NOT floor waiters
  */
 
+import { isSystemAdminRbacRoleName } from '../authorization/rbacAdminRole.js';
+
 export const RESTAURANT_EDIT_OTHERS_PERMISSION = 'restaurant.edit_others';
 
 export type OwnershipActor = {
@@ -15,6 +17,8 @@ export type OwnershipActor = {
   role?: string | null;
   /** Permission keys the actor holds (RBAC + legacy expanded). */
   permissions?: Iterable<string> | null;
+  /** Assigned RBAC role names (from auth context) — not legacy users.role. */
+  rbacRoleNames?: Iterable<string> | null;
 };
 
 function permissionSet(permissions?: Iterable<string> | null): Set<string> {
@@ -27,11 +31,21 @@ function permissionSet(permissions?: Iterable<string> | null): Set<string> {
  * Industry: Toast "Edit Other Employees' Orders" + Change Server;
  * Aloha: Take ownership (often with manager approval).
  */
+function hasAdminRbacRole(actor: OwnershipActor): boolean {
+  if (!actor.rbacRoleNames) return false;
+  for (const name of actor.rbacRoleNames) {
+    if (isSystemAdminRbacRoleName(name)) return true;
+  }
+  return false;
+}
+
 export function canEditOtherWaitersChecks(actor: OwnershipActor): boolean {
   const role = (actor.role || '').toUpperCase();
   // Legacy users.role SSOT — cashiers settle every open check even when RBAC
   // permissions were omitted on the actor (ownershipActor must still pass role).
   if (role === 'ADMIN' || role === 'MANAGER' || role === 'CASHIER') return true;
+
+  if (hasAdminRbacRole(actor)) return true;
 
   const perms = permissionSet(actor.permissions);
   if (perms.has('*')) return true;

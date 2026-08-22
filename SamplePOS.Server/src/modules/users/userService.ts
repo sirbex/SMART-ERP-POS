@@ -6,6 +6,7 @@ import type { User, CreateUser, UpdateUser, ChangePassword, AdminResetPassword, 
 import logger from '../../utils/logger.js';
 import { BusinessError, NotFoundError } from '../../middleware/errorHandler.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
+import { rbacRoleNameMapsToLegacyAdmin } from '../../../../shared/authorization/rbacAdminRole.js';
 
 const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -15,7 +16,7 @@ const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000001';
  */
 function mapRbacRoleToLegacy(rbacRoleName: string): UserRole {
   const name = rbacRoleName.toLowerCase();
-  if (name.includes('administrator') || name === 'super administrator') return 'ADMIN';
+  if (rbacRoleNameMapsToLegacyAdmin(rbacRoleName)) return 'ADMIN';
   if (name.includes('manager')) return 'MANAGER';
   if (name === 'cashier') return 'CASHIER';
   // Waiter / kitchen staff / custom roles → STAFF (CHECK constraint has no WAITER)

@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import POSModal from './POSModal';
 import Decimal from 'decimal.js';
 import { formatCurrency } from '../../utils/currency';
+import { parseNumericPadValue } from '../../lib/numericPadLogic';
+import { NumericSoftKeyboardInput } from '../keyboard/NumericSoftKeyboardInput';
 
 interface ServiceItemFormData {
     name: string;
@@ -198,29 +200,39 @@ export default function AddServiceItemDialog({ open, onOpenChange, onAdd }: AddS
                             <label htmlFor="service-item-price" className="block text-sm font-medium text-gray-700 mb-1">
                                 Unit Price <span className="text-red-500">*</span>
                             </label>
-                            <input
+                            <NumericSoftKeyboardInput
                                 id="service-item-price"
-                                type="number"
-                                min="0"
-                                step="100"
-                                value={formData.unitPrice || ''}
-                                onChange={(e) => { setFormData(prev => ({ ...prev, unitPrice: Number(e.target.value) || 0 })); setError(null); }}
+                                mode="decimal"
+                                value={formData.unitPrice ? String(formData.unitPrice) : ''}
+                                onChange={(raw) => {
+                                    setFormData(prev => ({
+                                        ...prev,
+                                        unitPrice: parseNumericPadValue(raw, 0),
+                                    }));
+                                    setError(null);
+                                }}
                                 placeholder="0"
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                aria-label="Service item unit price"
                             />
                         </div>
                         <div>
                             <label htmlFor="service-item-qty" className="block text-sm font-medium text-gray-700 mb-1">
                                 Quantity
                             </label>
-                            <input
+                            <NumericSoftKeyboardInput
                                 id="service-item-qty"
-                                type="number"
-                                min="1"
-                                step="1"
-                                value={formData.quantity}
-                                onChange={(e) => setFormData(prev => ({ ...prev, quantity: Number(e.target.value) || 1 }))}
+                                mode="integer"
+                                showToggle={false}
+                                value={String(formData.quantity)}
+                                onChange={(raw) =>
+                                    setFormData(prev => ({
+                                        ...prev,
+                                        quantity: parseNumericPadValue(raw, 1) || 1,
+                                    }))
+                                }
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                aria-label="Service item quantity"
                             />
                         </div>
                     </div>
@@ -249,13 +261,20 @@ export default function AddServiceItemDialog({ open, onOpenChange, onAdd }: AddS
                         </div>
                         <div className="flex items-center gap-2">
                             {formData.isTaxable && (
-                                <input
-                                    type="number"
-                                    min="0"
-                                    max="100"
-                                    value={formData.taxRate}
-                                    onChange={(e) => setFormData(prev => ({ ...prev, taxRate: Number(e.target.value) || 0 }))}
+                                <NumericSoftKeyboardInput
+                                    mode="integer"
+                                    showToggle={false}
+                                    min={0}
+                                    max={100}
+                                    value={String(formData.taxRate)}
+                                    onChange={(raw) =>
+                                        setFormData(prev => ({
+                                            ...prev,
+                                            taxRate: parseNumericPadValue(raw, 0),
+                                        }))
+                                    }
                                     className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center"
+                                    aria-label="Tax rate percent"
                                 />
                             )}
                             {formData.isTaxable && <span className="text-sm text-gray-500">%</span>}
