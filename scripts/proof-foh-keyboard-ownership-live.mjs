@@ -24,9 +24,9 @@ const bases = (
 /** Minification-safe markers — function/class names are stripped in prod bundles. */
 const needles = [
   'data-numeric-soft-keyboard',
-  'data-search-soft-keyboard',
+  'data-search-soft-keyboard-input',
+  'data-soft-keyboard-pad',
   'SearchSoftKeyboardInput',
-  'softKeyboard',
   'rbacRoleNames',
   'belongs to another waiter',
   'restaurant.edit_others',

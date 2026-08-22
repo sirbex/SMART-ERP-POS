@@ -1,25 +1,25 @@
 # PROOF: FOH keyboard + ownership LIVE
 
-- Date: 2026-08-22T12:26:04.439Z
-- Commit: `91aacf6b63becb5cad4a4de8731e0853f94bd328` (91aacf6b63be)
+- Date: 2026-08-22T13:06:04.762Z
+- Commit: `d80427e435de59f4ac28f4f5ae97e9187beceacb` (d80427e435de)
 - Runner: `node scripts/proof-foh-keyboard-ownership-live.mjs`
 
 ## Hosts
-- **https://henber.wizarddigital-inv.com** — health 200, healthy=true, scanned 194 chunks
-- **https://wizarddigital-inv.com** — health 200, healthy=true, scanned 194 chunks
+- **https://henber.wizarddigital-inv.com** — health 200, healthy=true, scanned 193 chunks
+- **https://wizarddigital-inv.com** — health 200, healthy=true, scanned 193 chunks
 
 ## Markers
 - PASS `data-numeric-soft-keyboard` on https://henber.wizarddigital-inv.com
-- PASS `data-search-soft-keyboard` on https://henber.wizarddigital-inv.com
+- PASS `data-search-soft-keyboard-input` on https://henber.wizarddigital-inv.com
+- PASS `data-soft-keyboard-pad` on https://henber.wizarddigital-inv.com
 - PASS `SearchSoftKeyboardInput` on https://henber.wizarddigital-inv.com
-- PASS `softKeyboard` on https://henber.wizarddigital-inv.com
 - PASS `rbacRoleNames` on https://henber.wizarddigital-inv.com
 - PASS `belongs to another waiter` on https://henber.wizarddigital-inv.com
 - PASS `restaurant.edit_others` on https://henber.wizarddigital-inv.com
 - PASS `data-numeric-soft-keyboard` on https://wizarddigital-inv.com
-- PASS `data-search-soft-keyboard` on https://wizarddigital-inv.com
+- PASS `data-search-soft-keyboard-input` on https://wizarddigital-inv.com
+- PASS `data-soft-keyboard-pad` on https://wizarddigital-inv.com
 - PASS `SearchSoftKeyboardInput` on https://wizarddigital-inv.com
-- PASS `softKeyboard` on https://wizarddigital-inv.com
 - PASS `rbacRoleNames` on https://wizarddigital-inv.com
 - PASS `belongs to another waiter` on https://wizarddigital-inv.com
 - PASS `restaurant.edit_others` on https://wizarddigital-inv.com

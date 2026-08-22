@@ -1,16 +1,16 @@
 {
-  "started": "2026-08-22T12:26:04.439Z",
-  "commit": "91aacf6b63becb5cad4a4de8731e0853f94bd328",
-  "short": "91aacf6b63be",
+  "started": "2026-08-22T13:06:04.762Z",
+  "commit": "d80427e435de59f4ac28f4f5ae97e9187beceacb",
+  "short": "d80427e435de",
   "bases": [
     "https://henber.wizarddigital-inv.com",
     "https://wizarddigital-inv.com"
   ],
   "needles": [
     "data-numeric-soft-keyboard",
-    "data-search-soft-keyboard",
+    "data-search-soft-keyboard-input",
+    "data-soft-keyboard-pad",
     "SearchSoftKeyboardInput",
-    "softKeyboard",
     "rbacRoleNames",
     "belongs to another waiter",
     "restaurant.edit_others"
@@ -20,13 +20,13 @@
       "base": "https://henber.wizarddigital-inv.com",
       "healthStatus": 200,
       "healthOk": true,
-      "uptime": 69.74306542,
-      "scanned": 194,
+      "uptime": 258.832369163,
+      "scanned": 193,
       "hits": {
         "data-numeric-soft-keyboard": true,
-        "data-search-soft-keyboard": true,
+        "data-search-soft-keyboard-input": true,
+        "data-soft-keyboard-pad": true,
         "SearchSoftKeyboardInput": true,
-        "softKeyboard": true,
         "rbacRoleNames": true,
         "belongs to another waiter": true,
         "restaurant.edit_others": true
@@ -36,13 +36,13 @@
       "base": "https://wizarddigital-inv.com",
       "healthStatus": 200,
       "healthOk": true,
-      "uptime": 133.01336383,
-      "scanned": 194,
+      "uptime": 340.415789318,
+      "scanned": 193,
       "hits": {
         "data-numeric-soft-keyboard": true,
-        "data-search-soft-keyboard": true,
+        "data-search-soft-keyboard-input": true,
+        "data-soft-keyboard-pad": true,
         "SearchSoftKeyboardInput": true,
-        "softKeyboard": true,
         "rbacRoleNames": true,
         "belongs to another waiter": true,
         "restaurant.edit_others": true
