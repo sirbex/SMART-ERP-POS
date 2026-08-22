@@ -17,6 +17,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search, X } from 'lucide-react';
 import { requestSoftKeyboard } from '../../lib/softKeyboard';
 import { SearchSoftKeyboardInput } from '../../components/keyboard/SearchSoftKeyboardInput';
+import { FohLineQtyEditors } from '../../components/foh/FohLineQtyEditors';
 import Layout from '../../components/Layout';
 import { AdaptiveDialog } from '../../components/adaptive';
 import { api, getStructuredError } from '../../utils/api';
@@ -6184,57 +6185,15 @@ export default function RestaurantPosPage() {
                       const showQtyEditors =
                         showInlineRowEditors(chrome) && !group.kitchenSent && !!group.productId;
                       const qtyEditors = showQtyEditors ? (
-                        <div
-                          className={`inline-flex items-center gap-0.5 shrink-0 ${
-                            sameLineEditors ? '' : 'mt-2'
-                          }`}
-                          onClick={(e) => e.stopPropagation()}
-                          data-row-editors={sameLineEditors ? 'same-line' : 'stacked'}
-                        >
-                          <button
-                            type="button"
-                            aria-label="Decrease quantity"
-                            disabled={busy}
-                            onClick={() => void handleLineMinusOne(group)}
-                            className={`${TOUCH} ${
-                              sameLineEditors ? 'min-h-9 min-w-9 text-base' : 'min-h-10 min-w-10 text-lg'
-                            } rounded-lg border border-stone-300 bg-stone-50 font-bold text-stone-800`}
-                          >
-                            −
-                          </button>
-                          {!sameLineEditors ? (
-                            <button
-                              type="button"
-                              aria-label="Set quantity"
-                              disabled={busy}
-                              onClick={() => handleLineSetQty(group)}
-                              className={`${TOUCH} min-h-10 min-w-12 rounded-lg border border-stone-300 bg-white text-sm font-bold text-stone-900`}
-                            >
-                              {group.quantity}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              aria-label="Set quantity"
-                              disabled={busy}
-                              onClick={() => handleLineSetQty(group)}
-                              className={`${TOUCH} min-h-9 min-w-9 rounded-lg border border-stone-300 bg-white text-xs font-bold tabular-nums text-stone-900`}
-                            >
-                              {group.quantity}
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            aria-label="Increase quantity"
-                            disabled={busy}
-                            onClick={() => void handleLinePlusOne(group)}
-                            className={`${TOUCH} ${
-                              sameLineEditors ? 'min-h-9 min-w-9 text-base' : 'min-h-10 min-w-10 text-lg'
-                            } rounded-lg border border-stone-300 bg-stone-50 font-bold text-stone-800`}
-                          >
-                            +
-                          </button>
-                        </div>
+                        <FohLineQtyEditors
+                          variant="restaurant"
+                          quantity={group.quantity}
+                          sameLineEditors={sameLineEditors}
+                          disabled={busy}
+                          onDecrease={() => void handleLineMinusOne(group)}
+                          onIncrease={() => void handleLinePlusOne(group)}
+                          onSetQuantity={() => handleLineSetQty(group)}
+                        />
                       ) : null;
                       return (
                         <li

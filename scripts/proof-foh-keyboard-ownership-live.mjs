@@ -26,6 +26,8 @@ const needles = [
   'data-numeric-soft-keyboard',
   'data-search-soft-keyboard-input',
   'data-soft-keyboard-pad',
+  'data-foh-line-qty-editors',
+  'data-foh-qty-inc',
   'data-pos-qty-stepper',
   'data-pos-qty-inc',
   'SearchSoftKeyboardInput',

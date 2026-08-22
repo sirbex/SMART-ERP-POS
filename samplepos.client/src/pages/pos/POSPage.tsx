@@ -64,7 +64,7 @@ import {
   type AtCostLayerSegment,
 } from '../../utils/posCartAtCost';
 import PosUnitPriceInput from '../../components/pos/PosUnitPriceInput';
-import PosQuantityStepper from '../../components/pos/PosQuantityStepper';
+import { FohLineQtyEditors } from '../../components/foh/FohLineQtyEditors';
 import { useCreatePOSSale } from '../../hooks/usePOSSales';
 import { useOfflineMode } from '../../hooks/useOfflineMode';
 import { useCreateInvoice } from '../../hooks/useApi';
@@ -4172,14 +4172,17 @@ export default function POSPage() {
                           )}
                         </td>
                         <td className={POS_ADAPTIVE_CLASSES.cartColQty}>
-                          <PosQuantityStepper
-                            value={item.quantity}
-                            overStock={lineQtyOverStock}
-                            uomLabel={stockUom.uomLabel}
-                            productName={item.name}
-                            onFocus={() => setFocusedCartIndex(idx)}
-                            onChange={(qty) => handleQuantityChange(idx, qty)}
-                          />
+                          <div className="ml-auto w-[7.25rem] max-w-full overflow-hidden">
+                            <FohLineQtyEditors
+                              variant="retail"
+                              value={item.quantity}
+                              overStock={lineQtyOverStock}
+                              uomLabel={stockUom.uomLabel}
+                              productName={item.name}
+                              onFocus={() => setFocusedCartIndex(idx)}
+                              onChange={(qty) => handleQuantityChange(idx, qty)}
+                            />
+                          </div>
                           {(lineQtyOverStock || stockUom.stockHint) && (
                             <div className="text-red-600 text-[10px] mt-0.5 whitespace-nowrap">
                               {stockUom.stockHint ??

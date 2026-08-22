@@ -3,7 +3,7 @@ import POSModal from './POSModal';
 import Decimal from 'decimal.js';
 import { formatCurrency } from '../../utils/currency';
 import { parseNumericPadValue } from '../../lib/numericPadLogic';
-import PosQuantityStepper from './PosQuantityStepper';
+import { FohLineQtyEditors } from '../foh/FohLineQtyEditors';
 import { NumericSoftKeyboardInput } from '../keyboard/NumericSoftKeyboardInput';
 
 interface ServiceItemFormData {
@@ -221,7 +221,8 @@ export default function AddServiceItemDialog({ open, onOpenChange, onAdd }: AddS
                             <label htmlFor="service-item-qty" className="block text-sm font-medium text-gray-700 mb-1">
                                 Quantity
                             </label>
-                            <PosQuantityStepper
+                            <FohLineQtyEditors
+                                variant="retail"
                                 value={formData.quantity}
                                 productName={formData.name.trim() || 'service item'}
                                 onChange={(qty) => {

@@ -92,8 +92,10 @@ export function NumericSoftKeyboardInput({
   const inputMode =
     kb.open && !hasHwKeyboard ? 'none' : allowDecimal ? 'decimal' : 'numeric';
 
+  const wrapClasses = wrapClassName.trim() || 'w-full';
+
   return (
-    <div className={`relative min-w-0 w-full ${wrapClassName}`.trim()}>
+    <div className={`relative min-w-0 ${wrapClasses}`.trim()}>
       <input
         {...rest}
         ref={refToUse}

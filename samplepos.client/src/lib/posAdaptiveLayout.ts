@@ -59,8 +59,8 @@ export const POS_ADAPTIVE_CLASSES = {
   cartTableFixed: 'w-full table-auto lg:table-fixed',
   cartProductName: 'font-medium text-gray-900 truncate',
   cartProductCell: 'px-2 py-2 min-w-0 align-top',
-  /** − qty + stepper needs ~6.5rem; do not squeeze below this in table-fixed layout */
-  cartColQty: 'px-1 py-2 text-right align-top min-w-[6.75rem] w-[6.75rem]',
+  /** FOH − qty + grid (3×2.25rem + gaps) — overflow hidden so + never paints in unit price */
+  cartColQty: 'px-1 py-2 text-right align-top overflow-hidden w-[7.25rem] max-w-[7.25rem]',
   cartColUnitPrice: 'px-2 py-2 text-right align-top whitespace-nowrap tabular-nums',
   cartColSubtotal: 'px-2 py-2 text-right align-top whitespace-nowrap tabular-nums font-semibold min-w-[5.5rem]',
   cartColActions: 'px-1 py-2 text-center align-top w-[3.25rem]',
@@ -78,11 +78,14 @@ export const POS_ADAPTIVE_CLASSES = {
   orderModeText: 'hidden min-[1600px]:flex',
 } as const;
 
+/** Fixed qty column — percentage cols squeezed below this and + spilled into unit price. */
+export const POS_CART_COL_QTY_WIDTH = '7.25rem';
+
 /** Colgroup widths when margin column is hidden (lg–1599px desktop). */
 export const POS_CART_COL_WIDTHS_COMPACT = [
   '34%',
   '9%',
-  '14%',
+  POS_CART_COL_QTY_WIDTH,
   '15%',
   '20%',
   '8%',
@@ -92,7 +95,7 @@ export const POS_CART_COL_WIDTHS_COMPACT = [
 export const POS_CART_COL_WIDTHS_FULL = [
   '30%',
   '8%',
-  '13%',
+  POS_CART_COL_QTY_WIDTH,
   '14%',
   '16%',
   '8%',
