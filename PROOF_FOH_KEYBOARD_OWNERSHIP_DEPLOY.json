@@ -1,7 +1,7 @@
 {
-  "started": "2026-08-22T20:24:19.648Z",
-  "commit": "fe09361a0b644f6f88747b368407e2134694337e",
-  "short": "fe09361a0b64",
+  "started": "2026-08-22T20:29:53.408Z",
+  "commit": "39f548f4f51cbae2c85a3b3eb3e20bf96c5945a9",
+  "short": "39f548f4f51c",
   "verdict": "PASS",
   "gates": [
     {
@@ -26,13 +26,13 @@
       "id": "PROOF_POS_CART_COMPACT",
       "label": "Behavioral: retail POS compact cart line alerts",
       "ok": true,
-      "detail": "3s"
+      "detail": "4s"
     },
     {
       "id": "PROOF_POS_QUANTITY_STEPPER",
       "label": "Behavioral: POS quantity stepper (− input +) SSOT",
       "ok": true,
-      "detail": "3s"
+      "detail": "4s"
     },
     {
       "id": "PROOF_POS_SEARCH_TYPING_PERF",
@@ -56,13 +56,13 @@
       "id": "CLIENT_VITE_BUILD",
       "label": "Client production bundle (vite build — matches Dockerfile.deploy)",
       "ok": true,
-      "detail": "28s"
+      "detail": "29s"
     },
     {
       "id": "SERVER_TSC",
       "label": "Server TypeScript compile",
       "ok": true,
-      "detail": "45s"
+      "detail": "43s"
     }
   ],
   "proofArtifacts": [
