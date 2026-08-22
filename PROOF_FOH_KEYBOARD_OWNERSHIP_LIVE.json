@@ -1,0 +1,54 @@
+{
+  "started": "2026-08-22T09:17:42.738Z",
+  "commit": "c79d383be1a7569164e7ebab6908c1281dc066ef",
+  "short": "c79d383be1a7",
+  "bases": [
+    "https://henber.wizarddigital-inv.com",
+    "https://wizarddigital-inv.com"
+  ],
+  "needles": [
+    "data-numeric-soft-keyboard",
+    "data-search-soft-keyboard",
+    "SearchSoftKeyboardInput",
+    "softKeyboard",
+    "rbacRoleNames",
+    "belongs to another waiter",
+    "restaurant.edit_others"
+  ],
+  "rows": [
+    {
+      "base": "https://henber.wizarddigital-inv.com",
+      "healthStatus": 200,
+      "healthOk": true,
+      "uptime": 95.793843907,
+      "scanned": 194,
+      "hits": {
+        "data-numeric-soft-keyboard": true,
+        "data-search-soft-keyboard": true,
+        "SearchSoftKeyboardInput": true,
+        "softKeyboard": true,
+        "rbacRoleNames": true,
+        "belongs to another waiter": true,
+        "restaurant.edit_others": true
+      }
+    },
+    {
+      "base": "https://wizarddigital-inv.com",
+      "healthStatus": 200,
+      "healthOk": true,
+      "uptime": 143.510009116,
+      "scanned": 194,
+      "hits": {
+        "data-numeric-soft-keyboard": true,
+        "data-search-soft-keyboard": true,
+        "SearchSoftKeyboardInput": true,
+        "softKeyboard": true,
+        "rbacRoleNames": true,
+        "belongs to another waiter": true,
+        "restaurant.edit_others": true
+      }
+    }
+  ],
+  "failCount": 0,
+  "verdict": "PASS"
+}
