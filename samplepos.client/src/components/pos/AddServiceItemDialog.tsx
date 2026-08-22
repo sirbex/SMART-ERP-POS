@@ -3,6 +3,7 @@ import POSModal from './POSModal';
 import Decimal from 'decimal.js';
 import { formatCurrency } from '../../utils/currency';
 import { parseNumericPadValue } from '../../lib/numericPadLogic';
+import PosQuantityStepper from './PosQuantityStepper';
 import { NumericSoftKeyboardInput } from '../keyboard/NumericSoftKeyboardInput';
 
 interface ServiceItemFormData {
@@ -220,19 +221,13 @@ export default function AddServiceItemDialog({ open, onOpenChange, onAdd }: AddS
                             <label htmlFor="service-item-qty" className="block text-sm font-medium text-gray-700 mb-1">
                                 Quantity
                             </label>
-                            <NumericSoftKeyboardInput
-                                id="service-item-qty"
-                                mode="integer"
-                                showToggle={false}
-                                value={String(formData.quantity)}
-                                onChange={(raw) =>
-                                    setFormData(prev => ({
-                                        ...prev,
-                                        quantity: parseNumericPadValue(raw, 1) || 1,
-                                    }))
-                                }
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                                aria-label="Service item quantity"
+                            <PosQuantityStepper
+                                value={formData.quantity}
+                                productName={formData.name.trim() || 'service item'}
+                                onChange={(qty) => {
+                                    setFormData(prev => ({ ...prev, quantity: Math.max(1, qty) }));
+                                    setError(null);
+                                }}
                             />
                         </div>
                     </div>

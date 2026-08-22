@@ -84,6 +84,15 @@ allOk =
 
 allOk =
   runGate(
+    'PROOF_POS_QUANTITY_STEPPER',
+    'Behavioral: POS quantity stepper (− input +) SSOT',
+    'npm',
+    ['run', 'proof:pos-quantity-stepper'],
+    clientRoot,
+  ) && allOk;
+
+allOk =
+  runGate(
     'PROOF_POS_SEARCH_TYPING_PERF',
     'Behavioral: POS search debounced filter (soft keyboard responsiveness)',
     'npm',
@@ -140,6 +149,7 @@ const report = {
     'PROOF_TOUCH_KEYBOARD_POS.md',
     'PROOF_POS_SEARCH_TYPING_PERF.md',
     'PROOF_POS_ADAPTIVE_LAYOUT.md',
+    'PROOF_POS_QUANTITY_STEPPER.md',
     'PROOF_RESTAURANT_CHECK_OWNERSHIP.md',
     'PROOF_BARCODE_SCANNER_INPUT.md',
   ],

@@ -3,9 +3,9 @@
  * Restaurant FOH uses its own ticket UI; do not wire this outside POSPage.
  */
 import { forwardRef } from 'react';
-import { NumericSoftKeyboardInput } from '../keyboard/NumericSoftKeyboardInput';
 import { ServiceBadge } from './ServiceBadge';
 import PosUnitPriceInput from './PosUnitPriceInput';
+import PosQuantityStepper from './PosQuantityStepper';
 import { formatCurrency } from '../../utils/currency';
 import {
   getPosLineMinUnitPrice,
@@ -159,43 +159,16 @@ export const PosCartCompactLine = forwardRef<HTMLDivElement, PosCartCompactLineP
         </div>
       </div>
 
-      <div className="mt-1 flex items-center gap-1 min-w-0">
-        <div className="flex shrink-0 items-stretch overflow-hidden rounded border border-gray-200 h-7">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onQuantityChange(item.quantity - 1);
-            }}
-            className="flex h-7 w-7 items-center justify-center bg-gray-50 text-sm font-semibold text-gray-700 hover:bg-gray-100"
-            aria-label={`Decrease quantity for ${item.name}`}
-          >
-            −
-          </button>
-          <NumericSoftKeyboardInput
-            mode="integer"
-            showToggle={false}
-            min={1}
-            value={String(item.quantity)}
-            onChange={(raw) => onQuantityChange(parseInt(raw, 10) || 0)}
-            onFocus={onFocus}
-            className={`h-7 w-9 border-x border-gray-200 px-0.5 text-center text-xs focus:ring-1 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
-              lineQtyOverStock ? 'bg-red-50' : 'bg-white'
-            }`}
-            aria-label={`Quantity in ${stockUom.uomLabel} for ${item.name}`}
-          />
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onQuantityChange(item.quantity + 1);
-            }}
-            className="flex h-7 w-7 items-center justify-center bg-gray-50 text-sm font-semibold text-gray-700 hover:bg-gray-100"
-            aria-label={`Increase quantity for ${item.name}`}
-          >
-            +
-          </button>
-        </div>
+      <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-1 min-w-0">
+        <PosQuantityStepper
+          dense
+          value={item.quantity}
+          overStock={lineQtyOverStock}
+          uomLabel={stockUom.uomLabel}
+          productName={item.name}
+          onFocus={onFocus}
+          onChange={onQuantityChange}
+        />
 
         <PosUnitPriceInput
           dense

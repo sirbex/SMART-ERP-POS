@@ -59,6 +59,8 @@ export const POS_ADAPTIVE_CLASSES = {
   cartTableFixed: 'w-full table-auto lg:table-fixed',
   cartProductName: 'font-medium text-gray-900 truncate',
   cartProductCell: 'px-2 py-2 min-w-0 align-top',
+  /** − qty + stepper needs ~6.5rem; do not squeeze below this in table-fixed layout */
+  cartColQty: 'px-1 py-2 text-right align-top min-w-[6.75rem] w-[6.75rem]',
   cartColUnitPrice: 'px-2 py-2 text-right align-top whitespace-nowrap tabular-nums',
   cartColSubtotal: 'px-2 py-2 text-right align-top whitespace-nowrap tabular-nums font-semibold min-w-[5.5rem]',
   cartColActions: 'px-1 py-2 text-center align-top w-[3.25rem]',
@@ -78,21 +80,21 @@ export const POS_ADAPTIVE_CLASSES = {
 
 /** Colgroup widths when margin column is hidden (lg–1599px desktop). */
 export const POS_CART_COL_WIDTHS_COMPACT = [
-  '36%',
-  '10%',
-  '10%',
-  '16%',
+  '34%',
+  '9%',
+  '14%',
+  '15%',
   '20%',
   '8%',
 ] as const;
 
 /** Colgroup widths when margin column is shown (wide tier 1600px+). */
 export const POS_CART_COL_WIDTHS_FULL = [
-  '32%',
-  '9%',
-  '9%',
+  '30%',
+  '8%',
+  '13%',
   '14%',
   '16%',
   '8%',
-  '12%',
+  '11%',
 ] as const;

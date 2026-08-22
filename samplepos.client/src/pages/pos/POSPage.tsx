@@ -64,6 +64,7 @@ import {
   type AtCostLayerSegment,
 } from '../../utils/posCartAtCost';
 import PosUnitPriceInput from '../../components/pos/PosUnitPriceInput';
+import PosQuantityStepper from '../../components/pos/PosQuantityStepper';
 import { useCreatePOSSale } from '../../hooks/usePOSSales';
 import { useOfflineMode } from '../../hooks/useOfflineMode';
 import { useCreateInvoice } from '../../hooks/useApi';
@@ -4170,18 +4171,14 @@ export default function POSPage() {
                             <span className="text-gray-700 text-xs sm:text-sm">{item.uom}</span>
                           )}
                         </td>
-                        <td className="px-2 py-2 text-right align-top">
-                          <NumericSoftKeyboardInput
-                            mode="integer"
-                            showToggle={false}
-                            min={1}
-                            value={String(item.quantity)}
-                            onChange={(raw) =>
-                              handleQuantityChange(idx, parseInt(raw, 10) || 0)
-                            }
+                        <td className={POS_ADAPTIVE_CLASSES.cartColQty}>
+                          <PosQuantityStepper
+                            value={item.quantity}
+                            overStock={lineQtyOverStock}
+                            uomLabel={stockUom.uomLabel}
+                            productName={item.name}
                             onFocus={() => setFocusedCartIndex(idx)}
-                            className={`w-full max-w-[4.5rem] ml-auto border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${lineQtyOverStock ? 'border-red-500 bg-red-50' : ''}`}
-                            aria-label={`Quantity in ${stockUom.uomLabel} for ${item.name}`}
+                            onChange={(qty) => handleQuantityChange(idx, qty)}
                           />
                           {(lineQtyOverStock || stockUom.stockHint) && (
                             <div className="text-red-600 text-[10px] mt-0.5 whitespace-nowrap">

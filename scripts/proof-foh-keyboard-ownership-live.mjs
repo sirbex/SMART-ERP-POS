@@ -26,6 +26,8 @@ const needles = [
   'data-numeric-soft-keyboard',
   'data-search-soft-keyboard-input',
   'data-soft-keyboard-pad',
+  'data-pos-qty-stepper',
+  'data-pos-qty-inc',
   'SearchSoftKeyboardInput',
   'rbacRoleNames',
   'belongs to another waiter',

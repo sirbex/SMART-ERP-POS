@@ -1,7 +1,7 @@
 {
-  "started": "2026-08-22T12:46:51.605Z",
-  "commit": "c54dbbf513ef08ee6cfaddc214bea1b3914b548d",
-  "short": "c54dbbf513ef",
+  "started": "2026-08-22T13:29:03.371Z",
+  "commit": "fe4594a0cbcac69d4f6fa3230613e794dc7dcfc0",
+  "short": "fe4594a0cbca",
   "verdict": "PASS",
   "gates": [
     {
@@ -14,7 +14,7 @@
       "id": "PROOF_TOUCH_KEYBOARD_POS",
       "label": "Behavioral: touch POS keyboard integration (search + numeric + cart + layout)",
       "ok": true,
-      "detail": "2s"
+      "detail": "3s"
     },
     {
       "id": "PROOF_POS_ADAPTIVE_LAYOUT",
@@ -26,7 +26,13 @@
       "id": "PROOF_POS_CART_COMPACT",
       "label": "Behavioral: retail POS compact cart line alerts",
       "ok": true,
-      "detail": "4s"
+      "detail": "3s"
+    },
+    {
+      "id": "PROOF_POS_QUANTITY_STEPPER",
+      "label": "Behavioral: POS quantity stepper (− input +) SSOT",
+      "ok": true,
+      "detail": "3s"
     },
     {
       "id": "PROOF_POS_SEARCH_TYPING_PERF",
@@ -50,13 +56,13 @@
       "id": "CLIENT_VITE_BUILD",
       "label": "Client production bundle (vite build — matches Dockerfile.deploy)",
       "ok": true,
-      "detail": "27s"
+      "detail": "24s"
     },
     {
       "id": "SERVER_TSC",
       "label": "Server TypeScript compile",
       "ok": true,
-      "detail": "45s"
+      "detail": "36s"
     }
   ],
   "proofArtifacts": [
@@ -66,6 +72,7 @@
     "PROOF_TOUCH_KEYBOARD_POS.md",
     "PROOF_POS_SEARCH_TYPING_PERF.md",
     "PROOF_POS_ADAPTIVE_LAYOUT.md",
+    "PROOF_POS_QUANTITY_STEPPER.md",
     "PROOF_RESTAURANT_CHECK_OWNERSHIP.md",
     "PROOF_BARCODE_SCANNER_INPUT.md"
   ],
