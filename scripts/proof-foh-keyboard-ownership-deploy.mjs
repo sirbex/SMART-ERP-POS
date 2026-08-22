@@ -49,9 +49,36 @@ let allOk = true;
 allOk =
   runGate(
     'PROOF_SOFT_KEYBOARD',
-    'Behavioral: soft keyboard proofs (22 tests)',
+    'Behavioral: soft keyboard proofs (login + search + numeric)',
     'npm',
     ['run', 'proof:soft-keyboard'],
+    clientRoot,
+  ) && allOk;
+
+allOk =
+  runGate(
+    'PROOF_TOUCH_KEYBOARD_POS',
+    'Behavioral: touch POS keyboard integration (search + numeric + cart + layout)',
+    'npm',
+    ['run', 'proof:touch-keyboard-pos'],
+    clientRoot,
+  ) && allOk;
+
+allOk =
+  runGate(
+    'PROOF_POS_ADAPTIVE_LAYOUT',
+    'Behavioral: retail POS adaptive layout SSOT (1600px wide tier)',
+    'npm',
+    ['run', 'proof:pos-adaptive-layout'],
+    clientRoot,
+  ) && allOk;
+
+allOk =
+  runGate(
+    'PROOF_POS_CART_COMPACT',
+    'Behavioral: retail POS compact cart line alerts',
+    'npm',
+    ['run', 'proof:pos-cart-compact'],
     clientRoot,
   ) && allOk;
 
@@ -101,6 +128,8 @@ const report = {
     'PROOF_SEARCH_SOFT_KEYBOARD.md',
     'PROOF_NUMERIC_SOFT_KEYBOARD.md',
     'PROOF_LOGIN_SOFT_KEYBOARD.md',
+    'PROOF_TOUCH_KEYBOARD_POS.md',
+    'PROOF_POS_ADAPTIVE_LAYOUT.md',
     'PROOF_RESTAURANT_CHECK_OWNERSHIP.md',
     'PROOF_BARCODE_SCANNER_INPUT.md',
   ],

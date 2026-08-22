@@ -197,6 +197,20 @@ export function shouldOpenInAppSearchKeyboard(input: InAppKeyboardContext): bool
   return shouldOpenInAppKeyboard(input);
 }
 
+/**
+ * In-field keyboard/pad toggle visibility:
+ * - Touch-first POS: show toggle (manual pad + visual affordance).
+ * - Desktop + physical keyboard: hide — type normally; touch tap still opens pad.
+ */
+export function shouldShowInAppKeyboardToggle(
+  ctx: Pick<InAppKeyboardRuntimeContext, 'pointerCoarse' | 'hasHwKeyboard' | 'maxTouchPoints' | 'anyHover'>,
+  explicit?: boolean,
+): boolean {
+  if (explicit === false) return false;
+  if (explicit === true) return true;
+  return prefersAutoInAppKeyboard(ctx);
+}
+
 /** Keep pad open while tapping keys or the toggle (avoid blur flicker). */
 export function shouldCloseInAppKeyboardOnBlur(related: EventTarget | null | undefined): boolean {
   if (!related || typeof related !== 'object') return true;

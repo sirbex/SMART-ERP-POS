@@ -1,6 +1,6 @@
 # PROOF: Numeric soft keyboard (behavioral)
 
-- Date: 2026-08-22T09:04:13.740Z
+- Date: 2026-08-22T11:52:51.852Z
 - Runner: `npm run proof:soft-keyboard` (numeric section) or `npx vitest run src/__tests__/numeric-soft-keyboard.proof.test.ts`
 
 ## Policy
@@ -13,6 +13,8 @@ Behavioral tests only — grep/source-scan evidence is **not** accepted.
 - PASS parse
 - PASS context override
 - PASS blur guard
+- PASS toggle visibility policy
+- PASS toggle layout SSOT
 
 ## Verdict
-**PASS** — numeric pad logic + shared touch/PC policy; blur safe.
+**PASS** — numeric pad logic + shared touch/PC policy; toggle layout SSOT; blur safe.

@@ -18,6 +18,9 @@
     "proof:soft-keyboard": "vitest run src/__tests__/login-soft-keyboard.proof.test.ts src/__tests__/search-soft-keyboard.proof.test.ts src/__tests__/numeric-soft-keyboard.proof.test.ts",
     "proof:restaurant-check-ownership": "vitest run src/__tests__/restaurant-check-ownership.proof.test.ts",
     "proof:barcode-scanner-input": "vitest run src/__tests__/barcode-scanner-input.proof.test.ts",
+    "proof:pos-adaptive-layout": "vitest run src/__tests__/pos-adaptive-layout.proof.test.ts",
+    "proof:pos-cart-compact": "vitest run src/__tests__/pos-cart-compact.proof.test.ts",
+    "proof:touch-keyboard-pos": "vitest run src/__tests__/touch-keyboard-pos-integration.proof.test.ts",
     "proof:foh-keyboard-ownership-deploy": "node ../scripts/proof-foh-keyboard-ownership-deploy.mjs",
     "test:ui": "vitest --ui"
   },

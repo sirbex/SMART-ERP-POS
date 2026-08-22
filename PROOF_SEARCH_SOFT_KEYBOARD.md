@@ -1,6 +1,6 @@
 # PROOF: Search soft keyboard (behavioral)
 
-- Date: 2026-08-22T09:04:13.744Z
+- Date: 2026-08-22T11:52:51.811Z
 - Runner: `npm run proof:soft-keyboard` (search section) or `npx vitest run src/__tests__/search-soft-keyboard.proof.test.ts`
 
 ## Policy
@@ -14,6 +14,7 @@ Behavioral tests only — grep/source-scan evidence is **not** accepted.
 - PASS key application
 - PASS blur guard
 - PASS layout inventory
+- PASS search toggle visibility
 
 ## Verdict
-**PASS** — behavioral policy: desktop types normally; touch auto-opens; blur safe.
+**PASS** — behavioral policy: desktop types normally; touch auto-opens; toggle hidden on desktop; blur safe.

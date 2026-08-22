@@ -1,5 +1,47 @@
 /** Shared touch key styling for in-app search + numeric pads. */
 
+/** Strip any pr-* token and optionally apply SSOT right padding for toggle icon. */
+export function mergeInputPaddingRight(className: string, prToken: string): string {
+  const stripped = className.replace(/\bpr-\S+/g, '').replace(/\s{2,}/g, ' ').trim();
+  return prToken ? `${stripped} ${prToken}`.trim() : stripped;
+}
+
+/** Narrow qty/price fields — smaller toggle + tighter padding so digits stay visible. */
+export function isCompactInAppKeyboardField(className: string): boolean {
+  return /\bh-[78]\b|\bw-\[(?:3|4|4\.|5)|\bw-(?:9|12|16|20)\b|\bmax-w-\[(?:4|5|6)/.test(
+    className,
+  );
+}
+
+export type InAppKeyboardToggleLayout = {
+  showToggle: boolean;
+  inputClassName: string;
+  toggleButtonClass: string;
+  iconClass: string;
+};
+
+export function resolveInAppKeyboardToggleLayout(
+  className: string,
+  showToggle: boolean,
+): InAppKeyboardToggleLayout {
+  if (!showToggle) {
+    return {
+      showToggle: false,
+      inputClassName: mergeInputPaddingRight(className, ''),
+      toggleButtonClass: '',
+      iconClass: 'h-4 w-4',
+    };
+  }
+  const compact = isCompactInAppKeyboardField(className);
+  const pr = compact ? 'pr-7' : 'pr-10';
+  return {
+    showToggle: true,
+    inputClassName: mergeInputPaddingRight(className, pr),
+    toggleButtonClass: compact ? 'h-6 w-6' : 'h-8 w-8',
+    iconClass: compact ? 'h-3 w-3' : 'h-4 w-4',
+  };
+}
+
 export const PAD_KEY =
   'touch-manipulation select-none min-h-12 sm:min-h-[3.25rem] rounded-xl text-lg font-semibold ' +
   'shadow-[0_1px_0_0_rgba(0,0,0,0.08),0_2px_4px_rgba(0,0,0,0.06)] ' +

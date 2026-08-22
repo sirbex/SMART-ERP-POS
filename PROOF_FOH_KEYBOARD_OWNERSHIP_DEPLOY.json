@@ -1,44 +1,64 @@
 {
-  "started": "2026-08-22T09:05:57.534Z",
-  "commit": "63f4a756e87c2e9ec22a6bd96b5e9fa6cd90871d",
-  "short": "63f4a756e87c",
+  "started": "2026-08-22T11:54:11.629Z",
+  "commit": "c62772f3e08dc14c50fa20acbbde80ea0487af56",
+  "short": "c62772f3e08d",
   "verdict": "PASS",
   "gates": [
     {
       "id": "PROOF_SOFT_KEYBOARD",
-      "label": "Behavioral: soft keyboard proofs (22 tests)",
+      "label": "Behavioral: soft keyboard proofs (login + search + numeric)",
       "ok": true,
-      "detail": "5s"
+      "detail": "4s"
+    },
+    {
+      "id": "PROOF_TOUCH_KEYBOARD_POS",
+      "label": "Behavioral: touch POS keyboard integration (search + numeric + cart + layout)",
+      "ok": true,
+      "detail": "4s"
+    },
+    {
+      "id": "PROOF_POS_ADAPTIVE_LAYOUT",
+      "label": "Behavioral: retail POS adaptive layout SSOT (1600px wide tier)",
+      "ok": true,
+      "detail": "3s"
+    },
+    {
+      "id": "PROOF_POS_CART_COMPACT",
+      "label": "Behavioral: retail POS compact cart line alerts",
+      "ok": true,
+      "detail": "3s"
     },
     {
       "id": "PROOF_CHECK_OWNERSHIP",
       "label": "Behavioral: restaurant check ownership (5 tests)",
       "ok": true,
-      "detail": "4s"
+      "detail": "2s"
     },
     {
       "id": "PROOF_BARCODE_PHYSICAL_KEYBOARD",
       "label": "Behavioral: barcode scanner does not block physical typing (4 tests)",
       "ok": true,
-      "detail": "5s"
+      "detail": "2s"
     },
     {
       "id": "CLIENT_VITE_BUILD",
       "label": "Client production bundle (vite build — matches Dockerfile.deploy)",
       "ok": true,
-      "detail": "40s"
+      "detail": "25s"
     },
     {
       "id": "SERVER_TSC",
       "label": "Server TypeScript compile",
       "ok": true,
-      "detail": "54s"
+      "detail": "40s"
     }
   ],
   "proofArtifacts": [
     "PROOF_SEARCH_SOFT_KEYBOARD.md",
     "PROOF_NUMERIC_SOFT_KEYBOARD.md",
     "PROOF_LOGIN_SOFT_KEYBOARD.md",
+    "PROOF_TOUCH_KEYBOARD_POS.md",
+    "PROOF_POS_ADAPTIVE_LAYOUT.md",
     "PROOF_RESTAURANT_CHECK_OWNERSHIP.md",
     "PROOF_BARCODE_SCANNER_INPUT.md"
   ],

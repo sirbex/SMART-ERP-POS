@@ -8,6 +8,9 @@ import POSModal from '../../components/pos/POSModal';
 import { AdaptiveAppShell, AdaptiveScanner, useAdaptiveWorkspaceOptional } from '../../components/adaptive';
 import { useLayoutTier } from '../../hooks/useLayoutTier';
 import { shouldShowCoach } from '../../lib/adaptiveChrome';
+import { POS_ADAPTIVE_CLASSES, POS_CART_COL_WIDTHS_COMPACT, POS_CART_COL_WIDTHS_FULL } from '../../lib/posAdaptiveLayout';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { PosCartCompactLine } from '../../components/pos/PosCartCompactLine';
 import PrintReceiptDialog from '../../components/pos/PrintReceiptDialog';
 import CustomerSelector from '../../components/pos/CustomerSelector';
 import { SearchSoftKeyboardInput } from '../../components/keyboard/SearchSoftKeyboardInput';
@@ -441,6 +444,8 @@ export default function POSPage() {
   const { user, logout, permissions } = useAuth();
   const { data: restaurantEnabled = false } = useRestaurantEnabled();
   const { tier, chrome } = useLayoutTier();
+  const isWideViewport = useMediaQuery('(min-width: 1600px)');
+  const cartColWidths = isWideViewport ? POS_CART_COL_WIDTHS_FULL : POS_CART_COL_WIDTHS_COMPACT;
   const discountLimitPercent = useDiscountLimitPercent();
   const canAccessImport = useHasPermission('admin.create');
   const canAccessSettings = useHasPermission('system.read');
@@ -3942,25 +3947,24 @@ export default function POSPage() {
       )}
       {/* Order Mode Banner */}
       {isOrderMode && (
-        <div className="bg-orange-50 border-b border-orange-200 px-4 py-2 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-orange-800 text-sm font-medium">
-            <span>📋</span>
+        <div className="flex items-center justify-end gap-2 border-b border-orange-200 bg-orange-50 px-3 py-1.5 sm:px-4">
+          <div className={`${POS_ADAPTIVE_CLASSES.orderModeText} min-w-0 flex-1 items-center gap-2 text-sm font-medium text-orange-800`}>
+            <span aria-hidden>📋</span>
             <span>Order Mode — Items will be saved as an order for cashier payment</span>
           </div>
-          <Link to="/orders-queue" className="text-orange-600 hover:text-orange-800 text-sm font-semibold underline">
+          <Link
+            to="/orders-queue"
+            className="inline-flex shrink-0 items-center rounded-md border border-orange-300 bg-white px-3 py-1.5 text-sm font-semibold text-orange-700 shadow-sm hover:bg-orange-100"
+          >
             View Queue →
           </Link>
         </div>
       )}
-      {/* Main layout: Responsive - stacked on mobile, 3-column on desktop */}
       <main
-        className="flex-1 flex flex-col lg:flex-row overflow-hidden"
-        // Prevent background from being focusable/interactive when a modal is open
-        // Using inert avoids the aria-hidden + focused descendant warning
+        className={POS_ADAPTIVE_CLASSES.mainLayout}
         inert={showPaymentModal || showReceiptModal ? true : undefined}
       >
-        {/* Left: Product search - Full width on mobile, 1/4 on desktop */}
-        <section className="w-full lg:w-1/4 lg:min-w-[280px] bg-white border-b lg:border-b-0 lg:border-r p-3 sm:p-4 flex flex-col relative z-20 shrink-0 lg:max-h-none lg:overflow-y-visible">
+        <section className={POS_ADAPTIVE_CLASSES.searchPanel} data-pos-search-panel="true">
           <div className="mb-2" data-pos-adaptive-scanner="true">
             <AdaptiveScanner
               onScan={handleBarcodeScanned}
@@ -3977,8 +3981,9 @@ export default function POSPage() {
           />
         </section>
 
+        <div className={POS_ADAPTIVE_CLASSES.workArea}>
         {/* Center: Line items - Scrollable cart */}
-        <section className="flex-1 p-2 sm:p-4 overflow-y-auto">
+        <section className="flex-1 min-w-0 p-2 sm:p-4 overflow-y-auto">
           {exchangeCredit && (
             <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -4031,14 +4036,14 @@ export default function POSPage() {
               </div>
             </div>
           )}
-          {/* Mobile card layout */}
-          <div className="md:hidden">
+          {/* Card cart — mobile + compact (< lg / 1024px) */}
+          <div className={POS_ADAPTIVE_CLASSES.cartCards}>
             {items.length === 0 ? (
               <div className="text-center py-8 text-gray-400 bg-white rounded shadow">
                 No items in cart
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className={POS_ADAPTIVE_CLASSES.cartCardList}>
                 {items.map((item, idx) => {
                   const stockUom = getPosLineStockAvailability(
                     item.stockOnHand,
@@ -4053,181 +4058,57 @@ export default function POSPage() {
                     item.selectedUomId,
                   );
                   return (
-                  <div
-                    key={`mobile-${item.id}-${item.selectedUomId}-${idx}`}
-                    ref={(el) => { cartRowRefs.current[idx] = el; }}
-                    className={`bg-white rounded-lg shadow-sm border p-3 ${idx === focusedCartIndex ? 'ring-2 ring-blue-400' : ''}`}
-                    onClick={() => setFocusedCartIndex(idx)}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="font-medium text-sm text-gray-900 truncate">
-                          {item.name}
-                          {item.productType === 'service' && <ServiceBadge />}
-                        </div>
-                        <div className="text-xs text-gray-500">SKU: {item.sku}</div>
-                        <AtCostFifoHint item={item} />
-                      </div>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setItems((prev) => prev.filter((_, i) => i !== idx)); }}
-                        className="text-red-500 hover:text-red-700 text-lg leading-none shrink-0 p-1"
-                        aria-label={`Remove ${item.name}`}
-                      >
-                        ×
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-2 mt-2">
-                      {item.availableUoms && item.availableUoms.length > 1 ? (
-                        <select
-                          value={item.selectedUomId || ''}
-                          onChange={(e) => handleUomChange(idx, e.target.value)}
-                          className="border rounded px-2 py-1 text-xs focus:ring-2 focus:ring-blue-500 max-w-[80px]"
-                          aria-label={`Unit of measure for ${item.name}`}
-                        >
-                          {item.availableUoms.map((u) => (
-                            <option key={u.uomId} value={u.uomId}>{u.symbol || u.name}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className="text-xs text-gray-500">{item.uom}</span>
-                      )}
-                      <div className="flex items-center border rounded overflow-hidden">
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleQuantityChange(idx, item.quantity - 1); }}
-                          className="w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-lg select-none transition-colors"
-                          aria-label={`Decrease quantity for ${item.name}`}
-                        >
-                          −
-                        </button>
-                        <NumericSoftKeyboardInput
-                          mode="integer"
-                          showToggle={false}
-                          min={1}
-                          value={String(item.quantity)}
-                          onChange={(raw) =>
-                            handleQuantityChange(idx, parseInt(raw, 10) || 0)
-                          }
-                          onFocus={() => setFocusedCartIndex(idx)}
-                          className={`w-12 h-8 border-x px-1 text-center text-sm focus:ring-2 focus:ring-blue-500 focus:z-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${lineQtyOverStock ? 'bg-red-50' : ''}`}
-                          aria-label={`Quantity in ${stockUom.uomLabel} for ${item.name}`}
-                        />
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleQuantityChange(idx, item.quantity + 1); }}
-                          className="w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-lg select-none transition-colors"
-                          aria-label={`Increase quantity for ${item.name}`}
-                        >
-                          +
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-1 text-xs text-gray-500">
-                        <span>×</span>
-                        <PosUnitPriceInput
-                          compact
-                          value={item.unitPrice}
-                          minUnitPrice={getPosLineMinUnitPrice(item, selectedCustomer?.pricingMode)}
-                          atCostLine={
-                            selectedCustomer?.pricingMode === 'AT_COST' ||
-                            item.pricingRule?.scope === 'at_cost'
-                          }
-                          uomLabel={stockUom.uomLabel}
-                          productName={item.name}
-                          onFocus={() => setFocusedCartIndex(idx)}
-                          onChange={(price) => handleUnitPriceChange(idx, price, { silent: true })}
-                          onCommit={(price) => handleUnitPriceChange(idx, price)}
-                          manualOverride={!!item.unitPriceManuallySet}
-                        />
-                      </div>
-                      <span className="ml-auto font-semibold text-sm">
-                        {formatCurrency(item.subtotal)}
-                      </span>
-                    </div>
-                    {(lineQtyOverStock || stockUom.stockHint) && (
-                      <div className="text-red-600 text-[10px] mt-0.5">
-                        {stockUom.stockHint ??
-                          `Only ${stockUom.stockInSellingUom} ${stockUom.uomLabel} in stock`}
-                      </div>
-                    )}
-                    {item.pricingRule && (
-                      item.pricingRule.scope === 'at_cost' ? (
-                        <div className="flex items-center gap-1 mt-0.5 text-xs text-orange-700 font-semibold">
-                          <span className="inline-block w-2 h-2 bg-orange-500 rounded-full" />
-                          <span>AT COST</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1 mt-0.5 text-xs text-blue-600">
-                          <span className="inline-block w-2 h-2 bg-blue-500 rounded-full" />
-                          <span>
-                            {item.pricingRule.scope === 'group_discount'
-                              ? 'Group discount'
-                              : item.pricingRule.ruleName || item.pricingRule.scope}
-                            {item.pricingRule.discount > 0 && (
-                              <span className="ml-1 text-blue-500">
-                                (-{formatCurrency(item.pricingRule.discount)})
-                              </span>
-                            )}
-                          </span>
-                        </div>
-                      )
-                    )}
-                    {item.discount && (
-                      <div className="flex items-center justify-between mt-1 text-xs">
-                        <span className="text-red-500">Discount: -{formatCurrency(item.discount.amount)}</span>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleRemoveDiscount('item', idx); }}
-                          className="text-red-500 hover:text-red-700 text-xs underline"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between mt-1">
-                      {isPosLineBlockedByCatalogCost(item, selectedCustomer?.pricingMode) ? (
-                        <span className="text-xs text-red-700 font-bold" title={`Price ${formatCurrency(item.unitPrice)} / line total ${formatCurrency(item.subtotal)} vs min ${formatCurrency(getPosLineMinUnitPrice(item, selectedCustomer?.pricingMode))} per ${stockUom.uomLabel}`}>
-                          ⚠ BELOW COST — sale blocked
-                        </span>
-                      ) : (
-                        <span className={`text-xs ${item.marginPct < 10 ? 'text-red-600' : item.marginPct < 20 ? 'text-yellow-600' : 'text-green-600'}`}>
-                          Margin: {item.marginPct.toFixed(1)}%
-                        </span>
-                      )}
-                      {!item.discount && item.pricingRule?.scope !== 'at_cost' && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleOpenDiscountDialog('item', idx); }}
-                          className="text-amber-600 hover:text-amber-800 text-xs px-1.5 py-0.5 rounded border border-amber-200"
-                          aria-label={`Add discount to ${item.name}`}
-                        >
-                          % Discount
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                    <PosCartCompactLine
+                      key={`mobile-${item.id}-${item.selectedUomId}-${idx}`}
+                      item={item}
+                      index={idx}
+                      focused={idx === focusedCartIndex}
+                      stockUom={stockUom}
+                      lineQtyOverStock={lineQtyOverStock}
+                      pricingMode={selectedCustomer?.pricingMode}
+                      atCostHint={item.atCostLayerLabel ?? null}
+                      onFocus={() => setFocusedCartIndex(idx)}
+                      onRemove={() => setItems((prev) => prev.filter((_, i) => i !== idx))}
+                      onQuantityChange={(qty) => handleQuantityChange(idx, qty)}
+                      onUnitPriceChange={(price, opts) => handleUnitPriceChange(idx, price, opts)}
+                      onUnitPriceCommit={(price) => handleUnitPriceChange(idx, price)}
+                      onUomChange={(uomId) => handleUomChange(idx, uomId)}
+                      onOpenDiscount={() => handleOpenDiscountDialog('item', idx)}
+                      onRemoveDiscount={() => handleRemoveDiscount('item', idx)}
+                      ref={(el) => {
+                        cartRowRefs.current[idx] = el;
+                      }}
+                    />
                   );
                 })}
               </div>
             )}
           </div>
 
-          {/* Desktop table layout */}
-          <div className="hidden md:block">
+          {/* Table cart — desktop + wide (lg+) */}
+          <div className={POS_ADAPTIVE_CLASSES.cartTable}>
             <ResponsiveTableWrapper>
-              <table className="w-full text-xs sm:text-sm border rounded shadow bg-white">
+              <table className={`${POS_ADAPTIVE_CLASSES.cartTableFixed} text-xs sm:text-sm border rounded shadow bg-white`}>
+                <colgroup>
+                  {cartColWidths.map((width, i) => (
+                    <col key={`${width}-${i}`} style={{ width }} />
+                  ))}
+                </colgroup>
                 <thead className="bg-gray-100">
                   <tr>
                     <th className="px-2 py-2 text-left">Product</th>
                     <th className="px-2 py-2 text-left">UoM</th>
-                    <th className="px-2 py-2 text-right">Qty</th>
-                    <th className="px-2 py-2 text-right">Unit Price</th>
-                    <th className="px-2 py-2 text-right">Subtotal</th>
-                    <th className="px-2 py-2 text-right hidden sm:table-cell">Margin</th>
-                    <th className="px-2 py-2 text-center">Actions</th>
+                    <th className="px-2 py-2 text-right whitespace-nowrap">Qty</th>
+                    <th className="px-2 py-2 text-right whitespace-nowrap">Unit Price</th>
+                    <th className="px-2 py-2 text-right whitespace-nowrap">Subtotal</th>
+                    <th className={`px-2 py-2 text-right whitespace-nowrap ${POS_ADAPTIVE_CLASSES.cartMarginCol}`}>Margin</th>
+                    <th className="px-2 py-2 text-center whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {items.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="text-center py-8 text-gray-400">
+                      <td colSpan={isWideViewport ? 7 : 6} className="text-center py-8 text-gray-400">
                         No items in cart
                       </td>
                     </tr>
@@ -4255,13 +4136,15 @@ export default function POSPage() {
                           }`}
                         onClick={() => setFocusedCartIndex(idx)}
                       >
-                        <td className="px-2 py-2">
-                          <div className="flex items-center gap-2">
-                            <div>
-                              <div className="font-medium text-gray-900">{item.name}</div>
-                              <div className="text-xs text-gray-500">SKU: {item.sku}</div>
+                        <td className={POS_ADAPTIVE_CLASSES.cartProductCell}>
+                          <div className="flex items-start gap-2 min-w-0">
+                            <div className="min-w-0 flex-1">
+                              <div className={POS_ADAPTIVE_CLASSES.cartProductName}>{item.name}</div>
+                              <div className={`text-xs text-gray-500 truncate ${POS_ADAPTIVE_CLASSES.cartSku}`}>
+                                SKU: {item.sku}
+                              </div>
                               <AtCostFifoHint item={item} />
-                              <div className="text-xs text-gray-500 sm:hidden">
+                              <div className={`text-xs text-gray-500 ${POS_ADAPTIVE_CLASSES.cartMarginInline}`}>
                                 Margin: {item.marginPct.toFixed(1)}%
                               </div>
                             </div>
@@ -4287,7 +4170,7 @@ export default function POSPage() {
                             <span className="text-gray-700 text-xs sm:text-sm">{item.uom}</span>
                           )}
                         </td>
-                        <td className="px-2 py-2 text-right">
+                        <td className="px-2 py-2 text-right align-top">
                           <NumericSoftKeyboardInput
                             mode="integer"
                             showToggle={false}
@@ -4297,7 +4180,7 @@ export default function POSPage() {
                               handleQuantityChange(idx, parseInt(raw, 10) || 0)
                             }
                             onFocus={() => setFocusedCartIndex(idx)}
-                            className={`w-14 sm:w-20 border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${lineQtyOverStock ? 'border-red-500 bg-red-50' : ''}`}
+                            className={`w-full max-w-[4.5rem] ml-auto border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${lineQtyOverStock ? 'border-red-500 bg-red-50' : ''}`}
                             aria-label={`Quantity in ${stockUom.uomLabel} for ${item.name}`}
                           />
                           {(lineQtyOverStock || stockUom.stockHint) && (
@@ -4307,7 +4190,8 @@ export default function POSPage() {
                             </div>
                           )}
                         </td>
-                        <td className="px-2 py-2 text-right text-xs sm:text-sm">
+                        <td className={POS_ADAPTIVE_CLASSES.cartColUnitPrice}>
+                          <div className="ml-auto max-w-[6.5rem]">
                           <PosUnitPriceInput
                             value={item.unitPrice}
                             minUnitPrice={getPosLineMinUnitPrice(item, selectedCustomer?.pricingMode)}
@@ -4324,8 +4208,9 @@ export default function POSPage() {
                             onCommit={(price) => handleUnitPriceChange(idx, price)}
                             manualOverride={!!item.unitPriceManuallySet}
                           />
+                          </div>
                         </td>
-                        <td className="px-2 py-2 text-right font-semibold text-xs sm:text-sm">
+                        <td className={POS_ADAPTIVE_CLASSES.cartColSubtotal}>
                           {item.discount ? (
                             <div>
                               <span className="line-through text-gray-400 text-[10px]">
@@ -4343,7 +4228,7 @@ export default function POSPage() {
                         </td>
                         <td
                           className={
-                            'px-2 py-2 text-right hidden sm:table-cell text-xs sm:text-sm ' +
+                            `px-2 py-2 text-right align-top whitespace-nowrap tabular-nums text-xs sm:text-sm ${POS_ADAPTIVE_CLASSES.cartMarginCol} ` +
                             (isPosLineBlockedByCatalogCost(item, selectedCustomer?.pricingMode)
                               ? 'text-red-700 font-bold'
                               : item.marginPct < 10
@@ -4361,8 +4246,8 @@ export default function POSPage() {
                             `${item.marginPct.toFixed(1)}%`
                           )}
                         </td>
-                        <td className="px-2 py-2 text-center">
-                          <div className="flex items-center justify-center gap-1">
+                        <td className={POS_ADAPTIVE_CLASSES.cartColActions}>
+                          <div className="flex flex-col items-center justify-center gap-0.5">
                             {item.discount ? (
                               <button
                                 onClick={() => handleRemoveDiscount('item', idx)}
@@ -4387,7 +4272,7 @@ export default function POSPage() {
                             <button
                               onClick={() => setItems((prev) => prev.filter((_, i) => i !== idx))}
                               onFocus={() => setFocusedCartIndex(idx)}
-                              className="text-red-600 hover:text-red-800 font-bold text-xl px-2"
+                              className="text-red-600 hover:text-red-800 font-bold text-lg leading-none px-1.5 py-0.5 shrink-0"
                               aria-label={`Remove ${item.name}`}
                               title="Remove item"
                             >
@@ -4406,11 +4291,12 @@ export default function POSPage() {
         </section>
 
         {/* Right: Totals + Payment - Full width on mobile, 1/4 on desktop */}
-        <section className="w-full lg:w-1/4 lg:min-w-[280px] bg-white border-t lg:border-t-0 lg:border-l p-3 sm:p-4 flex flex-col">
+        <section className="w-full lg:w-[min(100%,22rem)] xl:min-w-[260px] shrink-0 bg-white border-t lg:border-t-0 lg:border-l p-3 sm:p-4 flex flex-col overflow-y-auto">
           <CustomerSelector
             selectedCustomer={selectedCustomer}
             onSelectCustomer={setSelectedCustomer}
             saleTotal={grandTotal}
+            retailAdaptive
           />
           <div className="mb-4">
             <div className="font-semibold text-base sm:text-lg text-gray-900">Totals</div>
@@ -4587,6 +4473,7 @@ export default function POSPage() {
             🗑️ Clear All
           </button>
         </section>
+        </div>
       </main>
       {/* Receipt Modal */}
       {showReceiptModal && lastSale && (
@@ -4971,7 +4858,7 @@ export default function POSPage() {
                   onChange={setPaymentAmount}
                   onKeyDown={handlePaymentAmountKeyDown}
                   autoFocus
-                  className="flex-1 px-3 sm:px-4 py-3 sm:py-4 border-2 border-gray-300 rounded-lg focus:ring-2 sm:focus:ring-4 focus:ring-blue-300 focus:border-blue-500 text-lg sm:text-xl font-bold text-gray-900 pr-12"
+                  className="flex-1 px-3 sm:px-4 py-3 sm:py-4 border-2 border-gray-300 rounded-lg focus:ring-2 sm:focus:ring-4 focus:ring-blue-300 focus:border-blue-500 text-lg sm:text-xl font-bold text-gray-900"
                   placeholder="0.00"
                   aria-label="Payment amount"
                 />
@@ -5798,8 +5685,8 @@ export default function POSPage() {
         </POSModal>
       )}
 
-      {/* Keyboard shortcuts help bar — hidden on mobile */}
-      <footer className="hidden sm:flex px-6 py-2 bg-gray-100 border-t text-xs text-gray-500 gap-4 items-center">
+      {/* Keyboard shortcuts — wide screens only (1600px+) */}
+      <footer className={`${POS_ADAPTIVE_CLASSES.keyboardFooter} flex-wrap px-4 xl:px-6 py-2 bg-gray-100 border-t text-xs text-gray-500 gap-x-4 gap-y-1 items-center`}>
         <span>/: Focus Search</span>
         <span>↑↓: Navigate</span>
         <span>→/Enter: Select/Add</span>

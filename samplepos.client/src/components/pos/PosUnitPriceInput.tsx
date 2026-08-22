@@ -13,6 +13,8 @@ interface PosUnitPriceInputProps {
   onCommit?: (unitPrice: number) => void;
   onFocus?: () => void;
   compact?: boolean;
+  /** Ultra-compact retail cart row (mobile / compact tier). */
+  dense?: boolean;
   manualOverride?: boolean;
 }
 
@@ -26,6 +28,7 @@ export default function PosUnitPriceInput({
   onCommit,
   onFocus,
   compact = false,
+  dense = false,
   manualOverride = false,
 }: PosUnitPriceInputProps) {
   const belowCost = isPosUnitPriceBelowCatalogCost(value, minUnitPrice);
@@ -38,7 +41,7 @@ export default function PosUnitPriceInput({
   };
 
   return (
-    <div className={compact ? 'inline-flex flex-col items-end' : 'flex flex-col items-end'}>
+    <div className={dense || compact ? 'inline-flex flex-col items-end shrink-0' : 'flex flex-col items-end'}>
       <NumericSoftKeyboardInput
         mode="decimal"
         value={display}
@@ -59,13 +62,13 @@ export default function PosUnitPriceInput({
             .join(' ') || undefined
         }
         className={
-          (compact ? 'w-20' : 'w-24 sm:w-28') +
+          (dense ? 'h-7 w-[4.25rem]' : compact ? 'w-20' : 'w-24 sm:w-28') +
           ' border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 ' +
           (belowCost ? 'border-red-500 bg-red-50 text-red-900' : 'border-gray-300')
         }
-        toggleClassName="h-7 w-7"
+        showToggle={false}
       />
-      {!compact && (
+      {!compact && !dense && (
         <div className="text-[10px] text-gray-500 mt-0.5">per {uomLabel}</div>
       )}
       {belowCost && minUnitPrice > 0 && (

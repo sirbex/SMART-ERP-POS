@@ -12,8 +12,9 @@ import {
   type RefObject,
 } from 'react';
 import { Calculator } from 'lucide-react';
-import { readInAppKeyboardContext, requestSoftKeyboard } from '../../lib/softKeyboard';
+import { readInAppKeyboardContext, requestSoftKeyboard, shouldShowInAppKeyboardToggle } from '../../lib/softKeyboard';
 import { useNumericSoftKeyboard } from '../../hooks/useNumericSoftKeyboard';
+import { resolveInAppKeyboardToggleLayout } from './keyboardPadStyles';
 import { NumericSoftKeyboardPad } from './NumericSoftKeyboardPad';
 
 export type NumericSoftKeyboardInputProps = Omit<
@@ -48,7 +49,7 @@ export function NumericSoftKeyboardInput({
   selectOnFocus = false,
   autoFocus,
   mode = 'decimal',
-  showToggle = true,
+  showToggle: showToggleProp,
   className = '',
   disabled,
   onFocus,
@@ -61,7 +62,10 @@ export function NumericSoftKeyboardInput({
   const refToUse = inputRef ?? internalRef;
   const allowDecimal = mode === 'decimal';
   const kb = useNumericSoftKeyboard(onChange, value, { allowDecimal });
-  const hasHwKeyboard = readInAppKeyboardContext().hasHwKeyboard;
+  const kbCtx = readInAppKeyboardContext();
+  const hasHwKeyboard = kbCtx.hasHwKeyboard;
+  const showToggle = shouldShowInAppKeyboardToggle(kbCtx, showToggleProp);
+  const toggleLayout = resolveInAppKeyboardToggleLayout(className, showToggle);
   const kbBind = kb.bindInput({
     onFocus: (e: FocusEvent<HTMLInputElement>) => {
       if (selectOnFocus) {
@@ -85,11 +89,6 @@ export function NumericSoftKeyboardInput({
     kb.openPadIfAuto();
   }, [autoFocus, refToUse, kb.openPadIfAuto]);
 
-  const padRight = showToggle ? 'pr-11' : '';
-  const paddedClass = /\bpr-/.test(className)
-    ? className
-    : `${padRight} ${className}`.trim();
-
   const inputMode =
     kb.open && !hasHwKeyboard ? 'none' : allowDecimal ? 'decimal' : 'numeric';
 
@@ -107,7 +106,7 @@ export function NumericSoftKeyboardInput({
         spellCheck={false}
         value={value}
         disabled={disabled}
-        className={paddedClass}
+        className={toggleLayout.inputClassName}
         data-numeric-soft-keyboard-input="true"
         data-numeric-mode={mode}
         onChange={(e) => {
@@ -131,14 +130,14 @@ export function NumericSoftKeyboardInput({
           if (e.key === 'Escape') kb.close();
         }}
       />
-      {showToggle ? (
+      {toggleLayout.showToggle ? (
         <button
           type="button"
           disabled={disabled}
           aria-label={kb.open ? 'Hide number pad' : 'Show number pad'}
           aria-pressed={kb.open}
           data-numeric-soft-keyboard-toggle="true"
-          className={`absolute right-1 top-1/2 z-[1] inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-stone-500 hover:bg-stone-100 disabled:opacity-60 ${toggleClassName}`.trim()}
+          className={`absolute right-0.5 top-1/2 z-[1] inline-flex -translate-y-1/2 items-center justify-center rounded-md text-stone-500 hover:bg-stone-100 disabled:opacity-60 ${toggleLayout.toggleButtonClass} ${toggleClassName}`.trim()}
           onPointerDown={(e) => e.preventDefault()}
           onClick={() => {
             if (kb.open) {
@@ -149,7 +148,7 @@ export function NumericSoftKeyboardInput({
             requestSoftKeyboard(refToUse.current);
           }}
         >
-          <Calculator className="h-4 w-4" aria-hidden />
+          <Calculator className={toggleLayout.iconClass} aria-hidden />
         </button>
       ) : null}
       {kb.open ? (

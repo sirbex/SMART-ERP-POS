@@ -13,8 +13,14 @@ import {
   setInAppKeyboardContextOverrideForTests,
   shouldCloseInAppKeyboardOnBlur,
   shouldOpenInAppKeyboard,
+  shouldShowInAppKeyboardToggle,
   readInAppKeyboardContext,
 } from '../lib/softKeyboard';
+import {
+  isCompactInAppKeyboardField,
+  mergeInputPaddingRight,
+  resolveInAppKeyboardToggleLayout,
+} from '../components/keyboard/keyboardPadStyles';
 
 const results: string[] = [];
 
@@ -107,6 +113,29 @@ describe('PROOF: numeric soft keyboard (behavioral)', () => {
     expect(shouldCloseInAppKeyboardOnBlur(elsewhere as unknown as EventTarget)).toBe(true);
     pass('blur guard');
   });
+
+  it('shouldShowInAppKeyboardToggle: desktop hides; touch shows; explicit overrides', () => {
+    expect(shouldShowInAppKeyboardToggle(DESKTOP)).toBe(false);
+    expect(shouldShowInAppKeyboardToggle(TOUCH_POS)).toBe(true);
+    expect(shouldShowInAppKeyboardToggle(DESKTOP, false)).toBe(false);
+    expect(shouldShowInAppKeyboardToggle(DESKTOP, true)).toBe(true);
+    pass('toggle visibility policy');
+  });
+
+  it('resolveInAppKeyboardToggleLayout: no toggle strips pr; compact uses tighter pad', () => {
+    expect(
+      resolveInAppKeyboardToggleLayout('w-20 px-1 pr-11 border', false).inputClassName,
+    ).not.toContain('pr-');
+    expect(isCompactInAppKeyboardField('h-7 w-[4.25rem]')).toBe(true);
+    const compact = resolveInAppKeyboardToggleLayout('h-7 w-9 text-xs', true);
+    expect(compact.inputClassName).toContain('pr-7');
+    expect(compact.toggleButtonClass).toContain('h-6');
+    const wide = resolveInAppKeyboardToggleLayout('w-full px-3 py-2', true);
+    expect(wide.inputClassName).toContain('pr-10');
+    expect(mergeInputPaddingRight('px-3 pr-11', 'pr-10')).toContain('pr-10');
+    expect(mergeInputPaddingRight('px-3 pr-11', 'pr-10')).not.toContain('pr-11');
+    pass('toggle layout SSOT');
+  });
 });
 
 afterAll(() => {
@@ -124,8 +153,8 @@ afterAll(() => {
     ...results,
     '',
     '## Verdict',
-    results.length >= 6
-      ? '**PASS** — numeric pad logic + shared touch/PC policy; blur safe.'
+    results.length >= 8
+      ? '**PASS** — numeric pad logic + shared touch/PC policy; toggle layout SSOT; blur safe.'
       : '**FAIL** — incomplete result set.',
     '',
   ].join('\n');

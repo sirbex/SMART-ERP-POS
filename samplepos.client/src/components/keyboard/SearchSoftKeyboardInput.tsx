@@ -16,9 +16,11 @@ import { Keyboard } from 'lucide-react';
 import {
   readInAppKeyboardContext,
   requestSoftKeyboard,
+  shouldShowInAppKeyboardToggle,
   softKeyboardAttrs,
 } from '../../lib/softKeyboard';
 import { useSearchSoftKeyboard } from '../../hooks/useSearchSoftKeyboard';
+import { resolveInAppKeyboardToggleLayout } from './keyboardPadStyles';
 import { SoftKeyboardPad } from './SoftKeyboardPad';
 
 export type SearchSoftKeyboardInputProps = Omit<
@@ -34,6 +36,8 @@ export type SearchSoftKeyboardInputProps = Omit<
   enterLabel?: string;
   selectOnFocus?: boolean;
   autoFocus?: boolean;
+  /** Hide keyboard icon (narrow inline fields). Pad still auto-opens on touch. */
+  showToggle?: boolean;
 };
 
 export function SearchSoftKeyboardInput({
@@ -46,6 +50,7 @@ export function SearchSoftKeyboardInput({
   enterLabel,
   selectOnFocus = false,
   autoFocus,
+  showToggle: showToggleProp,
   className = '',
   disabled,
   onFocus,
@@ -56,7 +61,10 @@ export function SearchSoftKeyboardInput({
   const internalRef = useRef<HTMLInputElement>(null);
   const refToUse = inputRef ?? internalRef;
   const kb = useSearchSoftKeyboard(onChange, value);
-  const hasHwKeyboard = readInAppKeyboardContext().hasHwKeyboard;
+  const kbCtx = readInAppKeyboardContext();
+  const hasHwKeyboard = kbCtx.hasHwKeyboard;
+  const showToggle = shouldShowInAppKeyboardToggle(kbCtx, showToggleProp);
+  const toggleLayout = resolveInAppKeyboardToggleLayout(className, showToggle);
   const kbBind = kb.bindInput({
     onFocus: (e: FocusEvent<HTMLInputElement>) => {
       if (selectOnFocus) {
@@ -76,8 +84,6 @@ export function SearchSoftKeyboardInput({
     kb.openPadIfAuto();
   }, [autoFocus, refToUse, kb.openPadIfAuto]);
 
-  const paddedClass = /\bpr-/.test(className) ? className : `pr-11 ${className}`.trim();
-
   return (
     <div className={`relative min-w-0 w-full ${wrapClassName}`.trim()}>
       <input
@@ -87,7 +93,7 @@ export function SearchSoftKeyboardInput({
         value={value}
         disabled={disabled}
         autoComplete={rest.autoComplete ?? 'off'}
-        className={paddedClass}
+        className={toggleLayout.inputClassName}
         {...softKeyboardAttrs('search', 'search')}
         inputMode={kb.open && !hasHwKeyboard ? 'none' : 'search'}
         data-search-soft-keyboard-input="true"
@@ -104,25 +110,27 @@ export function SearchSoftKeyboardInput({
           if (e.key === 'Escape') kb.close();
         }}
       />
-      <button
-        type="button"
-        disabled={disabled}
-        aria-label={kb.open ? 'Hide keyboard' : 'Show keyboard'}
-        aria-pressed={kb.open}
-        data-search-soft-keyboard-toggle="true"
-        className={`absolute right-1 top-1/2 z-[1] inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-stone-500 hover:bg-stone-100 disabled:opacity-60 ${toggleClassName}`.trim()}
-        onPointerDown={(e) => e.preventDefault()}
-        onClick={() => {
-          if (kb.open) {
-            kb.close();
-            return;
-          }
-          kb.openPad();
-          requestSoftKeyboard(refToUse.current);
-        }}
-      >
-        <Keyboard className="h-4 w-4" aria-hidden />
-      </button>
+      {toggleLayout.showToggle ? (
+        <button
+          type="button"
+          disabled={disabled}
+          aria-label={kb.open ? 'Hide keyboard' : 'Show keyboard'}
+          aria-pressed={kb.open}
+          data-search-soft-keyboard-toggle="true"
+          className={`absolute right-0.5 top-1/2 z-[1] inline-flex -translate-y-1/2 items-center justify-center rounded-md text-stone-500 hover:bg-stone-100 disabled:opacity-60 ${toggleLayout.toggleButtonClass} ${toggleClassName}`.trim()}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => {
+            if (kb.open) {
+              kb.close();
+              return;
+            }
+            kb.openPad();
+            requestSoftKeyboard(refToUse.current);
+          }}
+        >
+          <Keyboard className={toggleLayout.iconClass} aria-hidden />
+        </button>
+      ) : null}
       {kb.open ? (
         <SoftKeyboardPad onKey={kb.applyKey} onEnter={onEnter} onClose={kb.close} enterLabel={enterLabel} />
       ) : null}

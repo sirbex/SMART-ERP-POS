@@ -13,6 +13,7 @@ import {
   setInAppKeyboardContextOverrideForTests,
   shouldCloseSearchKeyboardOnBlur,
   shouldOpenInAppSearchKeyboard,
+  shouldShowInAppKeyboardToggle,
   SOFT_KEYBOARD_ALPHA_ROWS,
   SOFT_KEYBOARD_DIGIT_ROW,
 } from '../lib/softKeyboard';
@@ -127,6 +128,12 @@ describe('PROOF: search keyboard policy (behavioral)', () => {
     expect(SOFT_KEYBOARD_ALPHA_ROWS.reduce((n, r) => n + r.length, 0)).toBe(26);
     pass('layout inventory');
   });
+
+  it('shouldShowInAppKeyboardToggle hides icon on desktop, shows on touch POS', () => {
+    expect(shouldShowInAppKeyboardToggle(DESKTOP)).toBe(false);
+    expect(shouldShowInAppKeyboardToggle(TOUCH_POS)).toBe(true);
+    pass('search toggle visibility');
+  });
 });
 
 afterAll(() => {
@@ -145,8 +152,8 @@ afterAll(() => {
     ...results,
     '',
     '## Verdict',
-    results.length >= 7
-      ? '**PASS** — behavioral policy: desktop types normally; touch auto-opens; blur safe.'
+    results.length >= 8
+      ? '**PASS** — behavioral policy: desktop types normally; touch auto-opens; toggle hidden on desktop; blur safe.'
       : '**FAIL** — incomplete result set.',
     '',
   ].join('\n');
