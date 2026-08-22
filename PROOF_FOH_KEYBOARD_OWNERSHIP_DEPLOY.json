@@ -1,7 +1,7 @@
 {
-  "started": "2026-08-22T12:11:10.126Z",
-  "commit": "91aacf6b63becb5cad4a4de8731e0853f94bd328",
-  "short": "91aacf6b63be",
+  "started": "2026-08-22T12:46:51.605Z",
+  "commit": "c54dbbf513ef08ee6cfaddc214bea1b3914b548d",
+  "short": "c54dbbf513ef",
   "verdict": "PASS",
   "gates": [
     {
@@ -14,7 +14,7 @@
       "id": "PROOF_TOUCH_KEYBOARD_POS",
       "label": "Behavioral: touch POS keyboard integration (search + numeric + cart + layout)",
       "ok": true,
-      "detail": "3s"
+      "detail": "2s"
     },
     {
       "id": "PROOF_POS_ADAPTIVE_LAYOUT",
@@ -26,13 +26,19 @@
       "id": "PROOF_POS_CART_COMPACT",
       "label": "Behavioral: retail POS compact cart line alerts",
       "ok": true,
+      "detail": "4s"
+    },
+    {
+      "id": "PROOF_POS_SEARCH_TYPING_PERF",
+      "label": "Behavioral: POS search debounced filter (soft keyboard responsiveness)",
+      "ok": true,
       "detail": "3s"
     },
     {
       "id": "PROOF_CHECK_OWNERSHIP",
       "label": "Behavioral: restaurant check ownership (5 tests)",
       "ok": true,
-      "detail": "2s"
+      "detail": "3s"
     },
     {
       "id": "PROOF_BARCODE_PHYSICAL_KEYBOARD",
@@ -44,13 +50,13 @@
       "id": "CLIENT_VITE_BUILD",
       "label": "Client production bundle (vite build — matches Dockerfile.deploy)",
       "ok": true,
-      "detail": "22s"
+      "detail": "27s"
     },
     {
       "id": "SERVER_TSC",
       "label": "Server TypeScript compile",
       "ok": true,
-      "detail": "35s"
+      "detail": "45s"
     }
   ],
   "proofArtifacts": [
@@ -58,6 +64,7 @@
     "PROOF_NUMERIC_SOFT_KEYBOARD.md",
     "PROOF_LOGIN_SOFT_KEYBOARD.md",
     "PROOF_TOUCH_KEYBOARD_POS.md",
+    "PROOF_POS_SEARCH_TYPING_PERF.md",
     "PROOF_POS_ADAPTIVE_LAYOUT.md",
     "PROOF_RESTAURANT_CHECK_OWNERSHIP.md",
     "PROOF_BARCODE_SCANNER_INPUT.md"

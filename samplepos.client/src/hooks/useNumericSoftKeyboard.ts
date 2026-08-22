@@ -2,7 +2,6 @@ import { useCallback, useRef, useState, type FocusEvent, type PointerEvent } fro
 import { applyInAppNumericKey, type InAppNumericKey } from '../lib/numericPadLogic';
 import {
   readInAppKeyboardContext,
-  requestSoftKeyboard,
   shouldCloseInAppKeyboardOnBlur,
   shouldOpenInAppKeyboard,
 } from '../lib/softKeyboard';
@@ -29,6 +28,12 @@ export function useNumericSoftKeyboard(
   const replaceAllRef = useRef(false);
   const optsRef = useRef<BindOpts | undefined>(undefined);
   const allowDecimal = opts?.allowDecimal !== false;
+  const valueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  const allowDecimalRef = useRef(allowDecimal);
+  valueRef.current = value;
+  onChangeRef.current = onChange;
+  allowDecimalRef.current = allowDecimal;
 
   const close = useCallback(() => setOpen(false), []);
   const openPad = useCallback(() => setOpen(true), []);
@@ -44,24 +49,20 @@ export function useNumericSoftKeyboard(
     replaceAllRef.current = true;
   }, []);
 
-  const applyKey = useCallback(
-    (key: InAppNumericKey) => {
-      const r = applyInAppNumericKey(value, key, {
-        allowDecimal,
-        replaceAll: replaceAllRef.current,
-      });
-      replaceAllRef.current = r.replaceAll;
-      onChange(r.next);
-    },
-    [allowDecimal, onChange, value],
-  );
+  const applyKey = useCallback((key: InAppNumericKey) => {
+    const r = applyInAppNumericKey(valueRef.current, key, {
+      allowDecimal: allowDecimalRef.current,
+      replaceAll: replaceAllRef.current,
+    });
+    replaceAllRef.current = r.replaceAll;
+    onChangeRef.current(r.next);
+  }, []);
 
   const bindInput = useCallback((bindOpts?: BindOpts) => {
     optsRef.current = bindOpts;
     return {
       onPointerDown: (e: PointerEvent<HTMLInputElement>) => {
         optsRef.current?.onPointerDown?.(e);
-        requestSoftKeyboard(e.currentTarget);
         const ctx = readInAppKeyboardContext();
         if (
           shouldOpenInAppKeyboard({
@@ -74,7 +75,6 @@ export function useNumericSoftKeyboard(
         }
       },
       onFocus: (e: FocusEvent<HTMLInputElement>) => {
-        requestSoftKeyboard(e.currentTarget);
         const ctx = readInAppKeyboardContext();
         if (shouldOpenInAppKeyboard({ source: 'focus', ...ctx })) {
           setOpen(true);

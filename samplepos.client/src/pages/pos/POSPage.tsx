@@ -3983,7 +3983,7 @@ export default function POSPage() {
 
         <div className={POS_ADAPTIVE_CLASSES.workArea}>
         {/* Center: Line items - Scrollable cart */}
-        <section className="flex-1 min-w-0 p-2 sm:p-4 overflow-y-auto">
+        <section className="flex-1 min-w-0 p-2 sm:p-4 overflow-y-auto overscroll-contain touch-pan-y">
           {exchangeCredit && (
             <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -4291,7 +4291,7 @@ export default function POSPage() {
         </section>
 
         {/* Right: Totals + Payment - Full width on mobile, 1/4 on desktop */}
-        <section className="w-full lg:w-[min(100%,22rem)] xl:min-w-[260px] shrink-0 bg-white border-t lg:border-t-0 lg:border-l p-3 sm:p-4 flex flex-col overflow-y-auto">
+        <section className="w-full lg:w-[min(100%,22rem)] xl:min-w-[260px] shrink-0 bg-white border-t lg:border-t-0 lg:border-l p-3 sm:p-4 flex flex-col overflow-y-auto overscroll-contain touch-pan-y">
           <CustomerSelector
             selectedCustomer={selectedCustomer}
             onSelectCustomer={setSelectedCustomer}

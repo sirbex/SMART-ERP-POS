@@ -5,6 +5,7 @@ import POSButton from '../../components/pos/POSButton';
 import POSModal from '../../components/pos/POSModal';
 import { formatCurrency } from '../../utils/currency';
 import { getStockInSellingUom } from '../../utils/posCartUom';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import {
   searchCachedProducts,
   syncProductCatalog,
@@ -16,17 +17,11 @@ import {
 } from '../../services/offlineCatalogService';
 import type { CachedProduct } from '../../services/offlineCatalogService';
 
-// TIMEZONE STRATEGY: Display dates without conversion
-// Backend returns DATE as YYYY-MM-DD string (no timezone)
-// Frontend displays as-is without parsing to Date object
 const formatDisplayDate = (dateString: string | null | undefined): string => {
   if (!dateString) return 'N/A';
-
-  // If it's an ISO string, extract the date part
   if (dateString.includes('T')) {
     return dateString.split('T')[0];
   }
-
   return dateString;
 };
 
@@ -84,10 +79,10 @@ function transformCachedToSearchResult(cached: CachedProduct): ProductSearchResu
   const marginPct =
     cached.sellingPrice > 0
       ? new Decimal(cached.sellingPrice)
-        .minus(cached.costPrice)
-        .dividedBy(cached.sellingPrice)
-        .times(100)
-        .toNumber()
+          .minus(cached.costPrice)
+          .dividedBy(cached.sellingPrice)
+          .times(100)
+          .toNumber()
       : 0;
   return {
     id: cached.id,
@@ -107,9 +102,13 @@ function transformCachedToSearchResult(cached: CachedProduct): ProductSearchResu
   };
 }
 
+/** Input updates instantly; catalog scan debounced so soft keyboard stays responsive. */
+const POS_SEARCH_FILTER_DEBOUNCE_MS = 120;
+
 const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProps>(
   ({ onSelect, isOnline = true }, ref) => {
     const [search, setSearch] = useState('');
+    const filterQuery = useDebouncedValue(search, POS_SEARCH_FILTER_DEBOUNCE_MS);
     const [selected, setSelected] = useState<ProductSearchResult | null>(null);
     const [selectedIndex, setSelectedIndex] = useState<number>(0);
     const [highlightedUomIndex, setHighlightedUomIndex] = useState<number>(0);
@@ -120,7 +119,6 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
     const productListRef = useRef<HTMLDivElement>(null);
     const uomButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-    // Expose focus and clear methods to parent via ref
     useImperativeHandle(ref, () => ({
       focusSearch: () => {
         searchInputRef.current?.focus();
@@ -133,7 +131,6 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
       },
     }));
 
-    // ── SAP/Odoo POS: local catalog is SSOT — search never hits the network per keystroke ──
     const refreshCatalogIfNeeded = useCallback(async () => {
       if (!isOnline || catalogSyncingRef.current) return;
       if (isCatalogAvailable() && !isCatalogStale()) return;
@@ -152,7 +149,6 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
       void refreshCatalogIfNeeded();
     }, [refreshCatalogIfNeeded]);
 
-    // Background refresh on stale interval (not tied to search input)
     useEffect(() => {
       if (!isOnline) return;
       const timer = window.setInterval(() => {
@@ -168,119 +164,56 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
     }, []);
 
     const data = useMemo<ProductSearchResult[]>(
-      () => (search ? searchCachedProducts(search).map(transformCachedToSearchResult) : []),
-      [search, catalogRev],
+      () =>
+        filterQuery
+          ? searchCachedProducts(filterQuery).map(transformCachedToSearchResult)
+          : [],
+      [filterQuery, catalogRev],
     );
 
     const isLoading = catalogSyncing && !isCatalogAvailable();
 
-    // Auto-focus search bar on mount
     useEffect(() => {
-      if (searchInputRef.current) {
-        searchInputRef.current.focus();
-      }
+      searchInputRef.current?.focus();
     }, []);
 
-    // Reset selected index when search results change
     useEffect(() => {
       setSelectedIndex(0);
     }, [data]);
 
-    // Scroll a product list item into view within the container
     const scrollItemIntoView = useCallback((index: number, direction: 'up' | 'down') => {
-      setTimeout(() => {
+      requestAnimationFrame(() => {
         const container = productListRef.current;
-        const item = container?.children[index] as HTMLElement;
-        if (item && container) {
-          const containerRect = container.getBoundingClientRect();
-          const itemRect = item.getBoundingClientRect();
-          if (direction === 'down' && itemRect.bottom > containerRect.bottom) {
-            item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-          } else if (direction === 'up' && itemRect.top < containerRect.top) {
-            item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-          }
+        const item = container?.children[index] as HTMLElement | undefined;
+        if (!item || !container) return;
+        const containerRect = container.getBoundingClientRect();
+        const itemRect = item.getBoundingClientRect();
+        if (direction === 'down' && itemRect.bottom > containerRect.bottom) {
+          item.scrollIntoView({ block: 'nearest' });
+        } else if (direction === 'up' && itemRect.top < containerRect.top) {
+          item.scrollIntoView({ block: 'nearest' });
         }
-      }, 0);
+      });
     }, []);
 
-    // Select the highlighted product and add to cart
     const selectHighlightedProduct = useCallback(() => {
       if (!data || data.length === 0 || selectedIndex < 0 || selectedIndex >= data.length) return;
       const product = data[selectedIndex];
-
-      // Clear search immediately after selection
       setSearch('');
       setSelectedIndex(0);
 
       if (!product.uoms || product.uoms.length <= 1) {
         onSelect(product);
-        setTimeout(() => searchInputRef.current?.focus(), 0);
+        requestAnimationFrame(() => searchInputRef.current?.focus());
       } else {
         setSelected(product);
       }
     }, [data, selectedIndex, onSelect]);
 
-    // Direct keyboard handler on search input - fires first, most reliable
-    const handleSearchInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-      // Don't handle if UoM modal is open
-      if (selected) return;
-
-      // Escape: Clear search
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setSearch('');
-        setSelectedIndex(0);
-        searchInputRef.current?.focus();
-        return;
-      }
-
-      // Only handle navigation keys when search has results
-      if (!data || data.length === 0) return;
-
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedIndex((prev) => {
-          const newIndex = Math.min(prev + 1, data.length - 1);
-          scrollItemIntoView(newIndex, 'down');
-          return newIndex;
-        });
-        return;
-      }
-
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedIndex((prev) => {
-          const newIndex = Math.max(prev - 1, 0);
-          scrollItemIntoView(newIndex, 'up');
-          return newIndex;
-        });
-        return;
-      }
-
-      if (e.key === 'ArrowRight' || e.key === 'Enter') {
-        e.preventDefault();
-        selectHighlightedProduct();
-        return;
-      }
-    }, [data, selected, scrollItemIntoView, selectHighlightedProduct]);
-
-    // Global keyboard handler - for "/" focus shortcut and fallback navigation
-    useEffect(() => {
-      const handleKeyDown = (e: KeyboardEvent) => {
+    const handleSearchInputKeyDown = useCallback(
+      (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (selected) return;
 
-        // Skip if any Radix dialog is open
-        const overlays = document.querySelectorAll('[data-radix-dialog-overlay]');
-        if (overlays.length > 0) return;
-
-        // "/" key refocuses search bar
-        if (e.key === '/' && document.activeElement !== searchInputRef.current) {
-          e.preventDefault();
-          searchInputRef.current?.focus();
-          return;
-        }
-
-        // Escape: Clear search (global, works even if input not focused)
         if (e.key === 'Escape') {
           e.preventDefault();
           setSearch('');
@@ -288,10 +221,6 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
           searchInputRef.current?.focus();
           return;
         }
-
-        // Fallback: handle navigation when focus is NOT on the search input
-        // (e.g., user clicked away but still wants to navigate results)
-        if (document.activeElement === searchInputRef.current) return;
 
         if (!data || data.length === 0) return;
 
@@ -318,7 +247,56 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
         if (e.key === 'ArrowRight' || e.key === 'Enter') {
           e.preventDefault();
           selectHighlightedProduct();
+        }
+      },
+      [data, selected, scrollItemIntoView, selectHighlightedProduct],
+    );
+
+    useEffect(() => {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (selected) return;
+        if (document.querySelectorAll('[data-radix-dialog-overlay]').length > 0) return;
+
+        if (e.key === '/' && document.activeElement !== searchInputRef.current) {
+          e.preventDefault();
+          searchInputRef.current?.focus();
           return;
+        }
+
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setSearch('');
+          setSelectedIndex(0);
+          searchInputRef.current?.focus();
+          return;
+        }
+
+        if (document.activeElement === searchInputRef.current) return;
+        if (!data || data.length === 0) return;
+
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSelectedIndex((prev) => {
+            const newIndex = Math.min(prev + 1, data.length - 1);
+            scrollItemIntoView(newIndex, 'down');
+            return newIndex;
+          });
+          return;
+        }
+
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedIndex((prev) => {
+            const newIndex = Math.max(prev - 1, 0);
+            scrollItemIntoView(newIndex, 'up');
+            return newIndex;
+          });
+          return;
+        }
+
+        if (e.key === 'ArrowRight' || e.key === 'Enter') {
+          e.preventDefault();
+          selectHighlightedProduct();
         }
       };
 
@@ -326,62 +304,61 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
       return () => window.removeEventListener('keydown', handleKeyDown);
     }, [data, selected, scrollItemIntoView, selectHighlightedProduct]);
 
-    // Keyboard navigation for UoM selection modal
     useEffect(() => {
       if (!selected || !selected.uoms || selected.uoms.length === 0) return;
-
-      // Reset highlighted index when modal opens
       setHighlightedUomIndex(0);
 
       const handleUomKeyDown = (e: KeyboardEvent) => {
-        // Only handle keys when OUR UoM modal is open
         if (!selected) return;
-
-        // Escape: Close modal without selection
         if (e.key === 'Escape') {
           e.preventDefault();
           setSelected(null);
-          // Restore focus to search input
-          setTimeout(() => searchInputRef.current?.focus(), 100);
-          return;
+          window.setTimeout(() => searchInputRef.current?.focus(), 100);
         }
       };
 
       window.addEventListener('keydown', handleUomKeyDown);
       return () => window.removeEventListener('keydown', handleUomKeyDown);
-    }, [selected, onSelect]);
+    }, [selected]);
 
     return (
       <div className="relative">
-        <POSSearchBar value={search} onChange={setSearch} onKeyDown={handleSearchInputKeyDown} autoFocus inputRef={searchInputRef} />
+        <POSSearchBar
+          value={search}
+          onChange={setSearch}
+          onKeyDown={handleSearchInputKeyDown}
+          autoFocus
+          inputRef={searchInputRef}
+        />
         {isLoading && <div className="mt-2 text-xs text-gray-500">Searching...</div>}
         {!isOnline && search && (
           <div className="mt-1 text-xs text-amber-600 flex items-center gap-1">
             <span>⚡</span> Offline — searching local catalog
           </div>
         )}
-        {search && Array.isArray(data) && (
+        {search && (
           <div
             ref={productListRef}
-            className="mt-2 divide-y divide-gray-200 border border-gray-200 rounded-lg bg-white shadow-lg max-h-[55vh] sm:max-h-[60vh] overflow-y-auto absolute left-0 right-0 z-30 lg:relative"
+            className="mt-2 divide-y divide-gray-200 border border-gray-200 rounded-lg bg-white shadow-lg max-h-[55vh] sm:max-h-[60vh] overflow-y-auto overscroll-contain touch-pan-y absolute left-0 right-0 z-30 lg:relative"
           >
             {data.length === 0 ? (
-              <div className="p-4 text-sm text-gray-500 text-center">No products found</div>
+              <div className="p-4 text-sm text-gray-500 text-center">
+                {filterQuery === search ? 'No products found' : 'Searching…'}
+              </div>
             ) : (
-              data.map((p: ProductSearchResult, index: number) => (
+              data.map((p, index) => (
                 <button
                   key={p.id}
                   type="button"
-                  className={`w-full text-left px-3 py-3 sm:px-4 sm:py-3.5 hover:bg-blue-50 focus:bg-blue-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors ${index === selectedIndex ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : ''
-                    }`}
+                  className={`w-full text-left px-3 py-3 sm:px-4 sm:py-3.5 hover:bg-blue-50 focus:bg-blue-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                    index === selectedIndex ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : ''
+                  }`}
                   onClick={() => {
-                    // Clear search immediately so the user can type the next item
                     setSearch('');
                     setSelectedIndex(0);
-
                     if (!p.uoms || p.uoms.length <= 1) {
                       onSelect(p);
-                      setTimeout(() => searchInputRef.current?.focus(), 0);
+                      requestAnimationFrame(() => searchInputRef.current?.focus());
                     } else {
                       setSelected(p);
                     }
@@ -407,7 +384,9 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
                   <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:text-sm text-gray-600">
                     <span>
                       Qty:{' '}
-                      <span className={`tabular-nums ${p.stockOnHand <= 5 ? 'text-red-600 font-semibold' : 'text-gray-900 font-medium'}`}>
+                      <span
+                        className={`tabular-nums ${p.stockOnHand <= 5 ? 'text-red-600 font-semibold' : 'text-gray-900 font-medium'}`}
+                      >
                         {p.stockOnHand}
                       </span>
                     </span>
@@ -421,7 +400,7 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
                       <span
                         className={
                           new Date(p.expiryDate + 'T00:00:00') <
-                            new Date(Date.now() + 7 * 24 * 3600 * 1000)
+                          new Date(Date.now() + 7 * 24 * 3600 * 1000)
                             ? 'rounded bg-amber-100 px-2 py-0.5 font-medium text-amber-900'
                             : 'text-gray-500'
                         }
@@ -435,15 +414,13 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
             )}
           </div>
         )}
-        {/* UoM options modal (shown after select) */}
         {selected && (
           <POSModal
             open={!!selected}
             onOpenChange={(open) => {
               setSelected(null);
-              // Restore focus to search input when modal closes
               if (!open) {
-                setTimeout(() => searchInputRef.current?.focus(), 100);
+                window.setTimeout(() => searchInputRef.current?.focus(), 100);
               }
             }}
             title="Select Unit of Measure"
@@ -457,7 +434,9 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
                   {selected.category}
                 </span>
               )}
-              <span className="font-bold text-blue-700 tabular-nums">{formatCurrency(selected.sellingPrice)}</span>
+              <span className="font-bold text-blue-700 tabular-nums">
+                {formatCurrency(selected.sellingPrice)}
+              </span>
             </div>
             <div className="mb-2 text-sm text-gray-600">
               Total stock (base units):{' '}
@@ -474,17 +453,6 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
                 {selected.marginPct.toFixed(1)}%
               </span>
             </div>
-
-            {/* Keyboard navigation hint */}
-            <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
-              <div className="font-medium mb-1">⌨️ Keyboard Shortcuts:</div>
-              <div className="space-y-0.5 text-blue-700">
-                <div>Tab - Navigate between options</div>
-                <div>Enter - Select focused option</div>
-                <div>Esc - Cancel</div>
-              </div>
-            </div>
-
             <div className="mb-4">
               <div className="font-medium text-gray-700 mb-1">Select Unit of Measure</div>
               <div className="flex flex-col gap-2">
@@ -496,11 +464,9 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
                     }}
                     variant={index === highlightedUomIndex ? 'primary' : 'secondary'}
                     onClick={() => {
-                      // Pass product with selected UoM
                       onSelect({ ...selected, selectedUom: uom });
                       setSelected(null);
-                      // Restore focus to search input after adding to cart
-                      setTimeout(() => searchInputRef.current?.focus(), 100);
+                      window.setTimeout(() => searchInputRef.current?.focus(), 100);
                     }}
                     onFocus={() => setHighlightedUomIndex(index)}
                     onKeyDown={(e) => {
@@ -508,7 +474,7 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
                         e.preventDefault();
                         onSelect({ ...selected, selectedUom: uom });
                         setSelected(null);
-                        setTimeout(() => searchInputRef.current?.focus(), 100);
+                        window.setTimeout(() => searchInputRef.current?.focus(), 100);
                       }
                     }}
                     className={
@@ -530,7 +496,7 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
         )}
       </div>
     );
-  }
+  },
 );
 
 POSProductSearch.displayName = 'POSProductSearch';

@@ -19,6 +19,10 @@ export function useSearchSoftKeyboard(onChange: (next: string) => void, value: s
   const [open, setOpen] = useState(false);
   const replaceAllRef = useRef(false);
   const optsRef = useRef<BindOpts | undefined>(undefined);
+  const valueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  valueRef.current = value;
+  onChangeRef.current = onChange;
 
   const close = useCallback(() => setOpen(false), []);
   const openPad = useCallback(() => setOpen(true), []);
@@ -34,21 +38,18 @@ export function useSearchSoftKeyboard(onChange: (next: string) => void, value: s
     replaceAllRef.current = true;
   }, []);
 
-  const applyKey = useCallback(
-    (key: InAppSoftKey) => {
-      const r = applyInAppSoftKey(value, key, { replaceAll: replaceAllRef.current });
-      replaceAllRef.current = r.replaceAll;
-      onChange(r.next);
-    },
-    [onChange, value],
-  );
+  /** Stable ref — soft pad must not re-render on every character. */
+  const applyKey = useCallback((key: InAppSoftKey) => {
+    const r = applyInAppSoftKey(valueRef.current, key, { replaceAll: replaceAllRef.current });
+    replaceAllRef.current = r.replaceAll;
+    onChangeRef.current(r.next);
+  }, []);
 
   const bindInput = useCallback((opts?: BindOpts) => {
     optsRef.current = opts;
     return {
       onPointerDown: (e: PointerEvent<HTMLInputElement>) => {
         optsRef.current?.onPointerDown?.(e);
-        requestSoftKeyboard(e.currentTarget);
         const ctx = readInAppKeyboardContext();
         if (
           shouldOpenInAppKeyboard({
@@ -61,7 +62,6 @@ export function useSearchSoftKeyboard(onChange: (next: string) => void, value: s
         }
       },
       onFocus: (e: FocusEvent<HTMLInputElement>) => {
-        requestSoftKeyboard(e.currentTarget);
         const ctx = readInAppKeyboardContext();
         if (shouldOpenInAppKeyboard({ source: 'focus', ...ctx })) {
           setOpen(true);

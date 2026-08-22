@@ -84,6 +84,15 @@ allOk =
 
 allOk =
   runGate(
+    'PROOF_POS_SEARCH_TYPING_PERF',
+    'Behavioral: POS search debounced filter (soft keyboard responsiveness)',
+    'npm',
+    ['run', 'proof:pos-search-typing-perf'],
+    clientRoot,
+  ) && allOk;
+
+allOk =
+  runGate(
     'PROOF_CHECK_OWNERSHIP',
     'Behavioral: restaurant check ownership (5 tests)',
     'npm',
@@ -129,6 +138,7 @@ const report = {
     'PROOF_NUMERIC_SOFT_KEYBOARD.md',
     'PROOF_LOGIN_SOFT_KEYBOARD.md',
     'PROOF_TOUCH_KEYBOARD_POS.md',
+    'PROOF_POS_SEARCH_TYPING_PERF.md',
     'PROOF_POS_ADAPTIVE_LAYOUT.md',
     'PROOF_RESTAURANT_CHECK_OWNERSHIP.md',
     'PROOF_BARCODE_SCANNER_INPUT.md',

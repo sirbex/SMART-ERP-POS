@@ -63,7 +63,7 @@ export const POS_ADAPTIVE_CLASSES = {
   cartColSubtotal: 'px-2 py-2 text-right align-top whitespace-nowrap tabular-nums font-semibold min-w-[5.5rem]',
   cartColActions: 'px-1 py-2 text-center align-top w-[3.25rem]',
   /** Compressed retail cart — mobile / compact only */
-  cartCardList: 'space-y-1 max-h-[min(48vh,480px)] overflow-y-auto overscroll-contain',
+  cartCardList: 'space-y-1 max-h-[min(48vh,480px)] overflow-y-auto overscroll-contain touch-pan-y',
   cartCardShell: 'rounded-md border border-gray-200 bg-white px-2 py-1.5 shadow-sm',
   customerExpanded: 'hidden lg:block',
   customerSheetTrigger: 'lg:hidden',

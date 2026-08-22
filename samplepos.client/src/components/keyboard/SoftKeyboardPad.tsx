@@ -3,7 +3,7 @@
  * Large touch targets + clear press feedback; preventDefault keeps the input focused.
  */
 
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { MouseEvent, PointerEvent } from 'react';
 import {
@@ -31,7 +31,7 @@ type SoftKeyboardPadProps = {
   enterLabel?: string;
 };
 
-export function SoftKeyboardPad({
+export const SoftKeyboardPad = memo(function SoftKeyboardPad({
   onKey,
   onEnter,
   onClose,
@@ -165,6 +165,6 @@ export function SoftKeyboardPad({
   );
 
   return createPortal(pad, document.body);
-}
+});
 
 export default SoftKeyboardPad;

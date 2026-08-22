@@ -385,35 +385,41 @@ async function syncProductCatalogOnce(): Promise<CachedProduct[]> {
  * Search the locally cached product catalog by name, SKU, or barcode.
  * Returns results filtered by local stock availability.
  */
-export function searchCachedProducts(query: string): CachedProduct[] {
+export function searchCachedProducts(query: string, limit = 60): CachedProduct[] {
     if (!query || query.trim().length === 0) return [];
 
     const products = getCachedCatalog();
     const localStock = getLocalStock();
     const term = query.toLowerCase();
+    const today = new Date().toISOString().slice(0, 10);
+    const out: CachedProduct[] = [];
 
-    return products
-        .filter((p) => {
-            const stock = localStock[p.id] ?? p.stockOnHand;
-            const hasStock = p.productType === 'service' || stock > 0;
-            if (!hasStock) return false;
+    for (const p of products) {
+        if (out.length >= limit) break;
 
-            if (p.nearestExpiry && p.productType !== 'service') {
-                const today = new Date().toISOString().slice(0, 10);
-                if (p.nearestExpiry <= today) return false;
-            }
+        const stock = localStock[p.id] ?? p.stockOnHand;
+        const hasStock = p.productType === 'service' || stock > 0;
+        if (!hasStock) continue;
 
-            return (
-                p.name.toLowerCase().includes(term) ||
-                p.sku.toLowerCase().includes(term) ||
-                p.barcode.toLowerCase().includes(term) ||
-                (p.genericName?.toLowerCase().includes(term) ?? false) ||
-                (p.category?.toLowerCase().includes(term) ?? false)
-            );
-        })
-        .map((p) => ({
+        if (p.nearestExpiry && p.productType !== 'service' && p.nearestExpiry <= today) {
+            continue;
+        }
+
+        if (
+            !p.name.toLowerCase().includes(term) &&
+            !p.sku.toLowerCase().includes(term) &&
+            !p.barcode.toLowerCase().includes(term) &&
+            !(p.genericName?.toLowerCase().includes(term) ?? false) &&
+            !(p.category?.toLowerCase().includes(term) ?? false)
+        ) {
+            continue;
+        }
+
+        out.push({
             ...p,
-            // Reflect local stock (may have been decremented by offline sales)
             stockOnHand: localStock[p.id] ?? p.stockOnHand,
-        }));
+        });
+    }
+
+    return out;
 }

@@ -2,6 +2,7 @@
  * In-app numeric pad — amounts, qty, prices. Same policy as search keyboard.
  */
 
+import { memo } from 'react';
 import { createPortal } from 'react-dom';
 import type { MouseEvent, PointerEvent } from 'react';
 import type { InAppNumericKey } from '../../lib/numericPadLogic';
@@ -21,7 +22,7 @@ type NumericSoftKeyboardPadProps = {
   allowDecimal?: boolean;
 };
 
-export function NumericSoftKeyboardPad({
+export const NumericSoftKeyboardPad = memo(function NumericSoftKeyboardPad({
   onKey,
   onEnter,
   onClose,
@@ -119,6 +120,6 @@ export function NumericSoftKeyboardPad({
   );
 
   return createPortal(pad, document.body);
-}
+});
 
 export default NumericSoftKeyboardPad;
