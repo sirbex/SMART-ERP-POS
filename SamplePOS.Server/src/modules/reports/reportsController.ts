@@ -22,6 +22,11 @@ import {
 import { cnDnReportsController } from './cnDnReportController.js';
 import { buildReorderDashboardCsv, buildReorderExportRows } from './reorderDashboardExport.js';
 import { resolvePdfColumnIds } from '../../../../shared/reports/ordersReportColumnsSsot.js';
+import {
+  expiringPdfFilterSubtitle,
+  expiryUrgencyLabel,
+  type ExpiryBandFilter,
+} from '../../../../shared/reports/expiringItemsSsot.js';
 
 /** Map SSOT column ids → PDF defs; never returns empty (fail-closed to defaults / order #). */
 function buildOrdersPdfColumns(
@@ -654,10 +659,12 @@ export const reportsController = {
   async getExpiringItems(req: Request, res: Response, pool: Pool) {
     const params = ExpiringItemsParamsSchema.parse(req.query);
     const userId = req.user?.id;
+    const urgencyBand: ExpiryBandFilter = params.urgency_band || 'all';
 
     const report = await reportsService.generateExpiringItems(pool, {
       daysAhead: params.days_threshold,
       categoryId: params.category_id,
+      urgencyBand,
       format: params.format,
       userId,
     });
@@ -669,8 +676,9 @@ export const reportsController = {
       const doc = pdfGen.getDocument();
 
       const date = getBusinessDate();
+      const fileSuffix = urgencyBand === 'all' ? date : `${urgencyBand}-${date}`;
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="expiring-items-${date}.pdf"`);
+      res.setHeader('Content-Disposition', `attachment; filename="expiring-items-${fileSuffix}.pdf"`);
       doc.pipe(res);
 
       const days = params.days_threshold || 30;
@@ -678,26 +686,30 @@ export const reportsController = {
       pdfGen.addHeader({
         companyName,
         title: 'Expiring Items Report',
-        subtitle: `Shelf-life register — expired + expiring within ${days} days (business date)`,
+        subtitle: expiringPdfFilterSubtitle(urgencyBand, days),
         generatedAt: formatDateTime(),
       });
 
       pdfGen.addSummaryCards([
         {
-          label: 'Batches at risk',
+          label: urgencyBand === 'all' ? 'Batches at risk' : `${expiryUrgencyLabel(urgencyBand)} batches`,
           value: String(report.summary.totalItems),
           color: PDFColors.warning,
         },
-        {
-          label: 'Expired',
-          value: String(report.summary.expiredCount ?? 0),
-          color: PDFColors.danger,
-        },
-        {
-          label: 'Critical ≤7d',
-          value: String(report.summary.criticalCount ?? 0),
-          color: PDFColors.danger,
-        },
+        ...(urgencyBand === 'all'
+          ? [
+              {
+                label: 'Expired',
+                value: String(report.summary.expiredCount ?? 0),
+                color: PDFColors.danger,
+              },
+              {
+                label: 'Critical ≤7d',
+                value: String(report.summary.criticalCount ?? 0),
+                color: PDFColors.danger,
+              },
+            ]
+          : []),
         {
           label: 'Qty at risk',
           value: formatQuantityPDF(report.summary.totalQuantityAtRisk || 0),
@@ -710,7 +722,9 @@ export const reportsController = {
         },
       ]);
 
-      pdfGen.addSectionHeading('Expiry register');
+      pdfGen.addSectionHeading(
+        urgencyBand === 'all' ? 'Expiry register' : `Expiry register — ${expiryUrgencyLabel(urgencyBand)} only`,
+      );
 
       const columns: PDFTableColumn[] = [
         { header: 'Urgency', key: 'urgency', width: 0.1 },

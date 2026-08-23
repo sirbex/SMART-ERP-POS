@@ -1,7 +1,7 @@
 {
   "feature": "EXPIRING_ITEMS_SSOT",
-  "provenAt": "2026-08-23T13:11:14.925Z",
-  "contract": "shelf-life register; KPI card click filters list; card count/value === filtered rows (days-authoritative classify); ACTIVE; include expired; PDF keys match",
+  "provenAt": "2026-08-23T13:40:55.140Z",
+  "contract": "shelf-life register; KPI card click filters list; PDF/CSV export same band filter; card count/value === filtered rows (days-authoritative classify); ACTIVE; include expired; PDF keys match",
   "gates": [
     {
       "id": "EXPIRED",
@@ -89,6 +89,21 @@
       "detail": "filter follows days, not stale urgency labels"
     },
     {
+      "id": "PDF_FILTER_EXPIRED_ROWS",
+      "ok": true,
+      "detail": "PDF expired band → 8 rows, summary.totalItems=8"
+    },
+    {
+      "id": "PDF_FILTER_EXPIRED_VALUE",
+      "ok": true,
+      "detail": "PDF expired band value matches KPI card"
+    },
+    {
+      "id": "PDF_SUBTITLE",
+      "ok": true,
+      "detail": "PDF subtitle names active band filter"
+    },
+    {
       "id": "NO_BETWEEN_ONLY_FUTURE",
       "ok": true,
       "detail": "does not exclude already-expired"
@@ -144,6 +159,31 @@
       "detail": "regenerate resets band filter to all"
     },
     {
+      "id": "PDF_PASSES_BAND",
+      "ok": true,
+      "detail": "PDF export passes active KPI band filter"
+    },
+    {
+      "id": "CSV_RESPECTS_FILTER",
+      "ok": true,
+      "detail": "CSV export uses same filtered rows as on-screen register"
+    },
+    {
+      "id": "SVC_FILTER_BAND",
+      "ok": true,
+      "detail": "service filters before summarize for PDF/JSON"
+    },
+    {
+      "id": "CTRL_PDF_FILTER",
+      "ok": true,
+      "detail": "PDF controller subtitle + filename reflect band filter"
+    },
+    {
+      "id": "ZOD_URGENCY_BAND",
+      "ok": true,
+      "detail": "API schema accepts urgency_band query param"
+    },
+    {
       "id": "SSOT_ASSERT_HELPER",
       "ok": true,
       "detail": "shared assertExpiringKpiFilterConsistency exists"
@@ -175,8 +215,8 @@
     }
   ],
   "summary": {
-    "total": 34,
-    "passed": 34,
+    "total": 42,
+    "passed": 42,
     "failed": 0,
     "verdict": "PASS"
   }

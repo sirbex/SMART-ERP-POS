@@ -36,6 +36,19 @@ export function expiryUrgencyLabel(band: ExpiryUrgency): string {
   }
 }
 
+/** UI/PDF label for the active band filter chip. */
+export function expiringBandFilterLabel(filter: ExpiryBandFilter): string {
+  return filter === 'all' ? 'All at risk' : expiryUrgencyLabel(filter);
+}
+
+/** PDF subtitle suffix when a KPI band filter is active. */
+export function expiringPdfFilterSubtitle(filter: ExpiryBandFilter, daysAhead: number): string {
+  if (filter === 'all') {
+    return `Shelf-life register — expired + expiring within ${daysAhead} days (business date)`;
+  }
+  return `Shelf-life register — ${expiryUrgencyLabel(filter)} only · horizon ${daysAhead} days`;
+}
+
 /**
  * Band for a register row. Days until expiry are authoritative
  * (same path as summarize + repository). Urgency string is fallback only.

@@ -8,6 +8,7 @@ import path from 'node:path';
 import {
   assertExpiringKpiFilterConsistency,
   classifyExpiryUrgency,
+  expiringPdfFilterSubtitle,
   filterExpiringRowsByBand,
   resolveExpiryRowBand,
   summarizeExpiringItems,
@@ -139,6 +140,25 @@ describe('EVIDENCE — Expiring items shelf-life SSOT', () => {
         filterExpiringRowsByBand(mixed, 'critical').length === 1,
       'filter follows days, not stale urgency labels',
     );
+
+    // PDF export path: service filters before summarize (same as UI)
+    const expiredOnly = filterExpiringRowsByBand(fixture, 'expired');
+    const expiredSummary = summarizeExpiringItems(expiredOnly);
+    gate(
+      'PDF_FILTER_EXPIRED_ROWS',
+      expiredOnly.length === 8 && expiredSummary.totalItems === 8,
+      'PDF expired band → 8 rows, summary.totalItems=8',
+    );
+    gate(
+      'PDF_FILTER_EXPIRED_VALUE',
+      expiredSummary.totalPotentialLoss === 265597,
+      'PDF expired band value matches KPI card',
+    );
+    gate(
+      'PDF_SUBTITLE',
+      expiringPdfFilterSubtitle('expired', 30).includes('Expired only'),
+      'PDF subtitle names active band filter',
+    );
   });
 
   it('SQL: includes past expiry; ACTIVE batches; business as-of date', () => {
@@ -189,6 +209,33 @@ describe('EVIDENCE — Expiring items shelf-life SSOT', () => {
       'regenerate resets band filter to all',
     );
     gate(
+      'PDF_PASSES_BAND',
+      /EXPIRING_ITEMS[\s\S]{0,400}urgency_band/.test(page) &&
+        page.includes("params.append('urgency_band', expiringBandFilter)"),
+      'PDF export passes active KPI band filter',
+    );
+    gate(
+      'CSV_RESPECTS_FILTER',
+      page.includes('filterExpiringRowsByBand(reportData.data, expiringBandFilter)'),
+      'CSV export uses same filtered rows as on-screen register',
+    );
+    gate(
+      'SVC_FILTER_BAND',
+      svc.includes('filterExpiringRowsByBand(rawData, urgencyBand)'),
+      'service filters before summarize for PDF/JSON',
+    );
+    gate(
+      'CTRL_PDF_FILTER',
+      ctrl.includes('expiringPdfFilterSubtitle(urgencyBand, days)') &&
+        ctrl.includes('expiring-items-${fileSuffix}.pdf'),
+      'PDF controller subtitle + filename reflect band filter',
+    );
+    gate(
+      'ZOD_URGENCY_BAND',
+      read('shared/zod/reports.ts').includes("urgency_band: z.enum(['all', 'expired'"),
+      'API schema accepts urgency_band query param',
+    );
+    gate(
       'SSOT_ASSERT_HELPER',
       ssot.includes('assertExpiringKpiFilterConsistency'),
       'shared assertExpiringKpiFilterConsistency exists',
@@ -214,7 +261,7 @@ describe('EVIDENCE — Expiring items shelf-life SSOT', () => {
       feature: 'EXPIRING_ITEMS_SSOT',
       provenAt: new Date().toISOString(),
       contract:
-        'shelf-life register; KPI card click filters list; card count/value === filtered rows (days-authoritative classify); ACTIVE; include expired; PDF keys match',
+        'shelf-life register; KPI card click filters list; PDF/CSV export same band filter; card count/value === filtered rows (days-authoritative classify); ACTIVE; include expired; PDF keys match',
       gates,
       summary: {
         total: gates.length,

@@ -9,7 +9,7 @@ import * as cnDnReportService from './cnDnReportService.js';
 import { systemSettingsService } from '../system-settings/systemSettingsService.js';
 import { SystemSettings } from '../../../../shared/types/systemSettings.js';
 import { summarizeSalesComparison } from '../../../../shared/reports/salesComparisonSsot.js';
-import { summarizeExpiringItems } from '../../../../shared/reports/expiringItemsSsot.js';
+import { summarizeExpiringItems, filterExpiringRowsByBand, type ExpiryBandFilter } from '../../../../shared/reports/expiringItemsSsot.js';
 import Decimal from 'decimal.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 
@@ -364,17 +364,20 @@ export const reportsService = {
     options: {
       daysAhead: number;
       categoryId?: string;
+      urgencyBand?: ExpiryBandFilter;
       format?: 'json' | 'pdf' | 'csv';
       userId?: string;
     }
   ) {
     const startTime = Date.now();
 
-    const data = await reportsRepository.getExpiringItems(pool, {
+    const rawData = await reportsRepository.getExpiringItems(pool, {
       daysAhead: options.daysAhead,
       categoryId: options.categoryId,
     });
 
+    const urgencyBand: ExpiryBandFilter = options.urgencyBand || 'all';
+    const data = filterExpiringRowsByBand(rawData, urgencyBand);
     const summary = summarizeExpiringItems(data);
 
     const executionTime = Date.now() - startTime;
@@ -382,7 +385,7 @@ export const reportsService = {
     await reportsRepository.logReportRun(pool, {
       reportType: 'EXPIRING_ITEMS',
       reportName: 'Expiring Items Report',
-      parameters: options,
+      parameters: { ...options, urgencyBand },
       generatedById: options.userId || null,
       recordCount: data.length,
       fileFormat: options.format || 'json',
@@ -401,7 +404,7 @@ export const reportsService = {
         second: '2-digit',
         hour12: false, timeZone: 'Africa/Kampala',
       }),
-      parameters: options,
+      parameters: { ...options, urgencyBand },
       data,
       summary,
       recordCount: data.length,

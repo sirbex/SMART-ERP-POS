@@ -54,6 +54,7 @@ import { DateRangeFilter } from '../components/ui/DateRangeFilter';
 import { formatTimestamp, formatTimestampDate, getBusinessDate } from '../utils/businessDate';
 import {
   expiryUrgencyLabel,
+  expiringBandFilterLabel,
   filterExpiringRowsByBand,
   resolveExpiryRowBand,
   type ExpiryBandFilter,
@@ -1486,6 +1487,9 @@ export default function ReportsPage() {
         params.append('group_by', groupBy);
       } else if (selectedReport === 'EXPIRING_ITEMS') {
         params.append('days_threshold', daysAhead.toString());
+        if (expiringBandFilter !== 'all') {
+          params.append('urgency_band', expiringBandFilter);
+        }
       } else if (selectedReport === 'LOW_STOCK') {
         params.append('threshold_percentage', threshold.toString());
       } else if (selectedReport === 'BEST_SELLING_PRODUCTS') {
@@ -1567,7 +1571,11 @@ export default function ReportsPage() {
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = downloadUrl;
-      a.download = `${selectedReport.toLowerCase()}-${getBusinessDate()}.pdf`;
+      const bandSuffix =
+        selectedReport === 'EXPIRING_ITEMS' && expiringBandFilter !== 'all'
+          ? `-${expiringBandFilter}`
+          : '';
+      a.download = `${selectedReport.toLowerCase()}${bandSuffix}-${getBusinessDate()}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1587,22 +1595,36 @@ export default function ReportsPage() {
   const handleExportCSV = () => {
     if (!reportData?.data) return;
 
+    const exportRows =
+      reportData.reportType === 'EXPIRING_ITEMS'
+        ? filterExpiringRowsByBand(reportData.data, expiringBandFilter)
+        : reportData.data;
+
+    if (!exportRows.length) {
+      alert('No rows to export for the current filter.');
+      return;
+    }
+
     // Dynamic CSV export - automatically includes all fields from first row
-    const headers = Object.keys(reportData.data[0] || {});
+    const headers = Object.keys(exportRows[0] || {});
     const csvContent =
       headers.join(',') +
       '\n' +
-      reportData.data
+      exportRows
         .map((row: Record<string, unknown>) =>
           headers.map((header) => JSON.stringify(row[header] || '')).join(',')
         )
         .join('\n');
 
+    const bandSuffix =
+      reportData.reportType === 'EXPIRING_ITEMS' && expiringBandFilter !== 'all'
+        ? `_${expiringBandFilter}`
+        : '';
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${selectedReport}_${getBusinessDate()}.csv`;
+    a.download = `${selectedReport}${bandSuffix}_${getBusinessDate()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -2438,10 +2460,7 @@ export default function ReportsPage() {
             expiringBandFilter === band
               ? 'ring-2 ring-offset-2 ring-slate-800 shadow-md'
               : 'hover:shadow-md hover:brightness-[0.98]';
-          const filterLabel =
-            expiringBandFilter === 'all'
-              ? 'All at risk'
-              : expiryUrgencyLabel(expiringBandFilter);
+          const filterLabel = expiringBandFilterLabel(expiringBandFilter);
 
           return (
           <div className="space-y-4">

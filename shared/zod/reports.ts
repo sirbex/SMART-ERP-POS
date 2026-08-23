@@ -367,6 +367,8 @@ export const SalesReportParamsSchema = z.object({
 export const ExpiringItemsParamsSchema = z.object({
   days_threshold: z.coerce.number().int().positive().default(30),
   category_id: z.string().uuid().optional(),
+  /** KPI band filter for PDF/CSV — matches on-screen register filter. */
+  urgency_band: z.enum(['all', 'expired', 'critical', 'warning', 'watch']).optional(),
   format: z.enum(['pdf', 'csv', 'json']).default('json'),
 });
 
