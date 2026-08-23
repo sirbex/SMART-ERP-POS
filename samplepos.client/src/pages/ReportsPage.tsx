@@ -53,9 +53,10 @@ import { ReportBackLink } from '../components/reports/ReportBackLink';
 import { DateRangeFilter } from '../components/ui/DateRangeFilter';
 import { formatTimestamp, formatTimestampDate, getBusinessDate } from '../utils/businessDate';
 import {
-  classifyExpiryUrgency,
   expiryUrgencyLabel,
-  type ExpiryUrgency,
+  filterExpiringRowsByBand,
+  resolveExpiryRowBand,
+  type ExpiryBandFilter,
 } from '@shared/reports/expiringItemsSsot';
 import {
   INVENTORY_LEDGER_REPORTS,
@@ -1070,6 +1071,8 @@ export default function ReportsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Expiring Items KPI card → register filter (all | expired | critical | warning | watch). */
+  const [expiringBandFilter, setExpiringBandFilter] = useState<ExpiryBandFilter>('all');
 
   // Filter states
   const [groupBy, setGroupBy] = useState<'day' | 'week' | 'month' | 'product' | 'customer' | 'payment_method'>('day');
@@ -1386,6 +1389,7 @@ export default function ReportsPage() {
 
       const { data: result } = await api.post('/reports/generate', params);
 
+      setExpiringBandFilter('all');
       setReportData(result.data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to generate report');
@@ -2421,17 +2425,40 @@ export default function ReportsPage() {
 
 
         {/* Expiring Items — shelf-life / expiry register (SSOT) */}
-        {reportData.reportType === 'EXPIRING_ITEMS' && reportData.summary && (
+        {reportData.reportType === 'EXPIRING_ITEMS' && reportData.summary && (() => {
+          const allRows = Array.isArray(reportData.data) ? reportData.data : [];
+          const filteredRows = filterExpiringRowsByBand(allRows, expiringBandFilter);
+          const selectBand = (band: ExpiryBandFilter) => {
+            setExpiringBandFilter((prev) => (prev === band ? 'all' : band));
+            requestAnimationFrame(() => {
+              document.getElementById('expiring-register')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+          };
+          const cardActive = (band: ExpiryBandFilter) =>
+            expiringBandFilter === band
+              ? 'ring-2 ring-offset-2 ring-slate-800 shadow-md'
+              : 'hover:shadow-md hover:brightness-[0.98]';
+          const filterLabel =
+            expiringBandFilter === 'all'
+              ? 'All at risk'
+              : expiryUrgencyLabel(expiringBandFilter);
+
+          return (
           <div className="space-y-4">
             <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
               <span className="font-semibold text-slate-800">Shelf-life register: </span>
               Active batches still on hand that are <strong>already expired</strong> or expire within
-              the horizon. Value at risk = remaining qty × unit cost (inventory cost). Urgency:
-              Expired (≤0d) · Critical (≤7d) · Warning (≤30d) · Watch (rest of horizon).
+              the horizon. Value at risk = remaining qty × unit cost (inventory cost). Click a KPI card
+              to show only that band in the list (click again to show all).
             </p>
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-expiring-kpi-cards="true">
+              <button
+                type="button"
+                onClick={() => selectBand('all')}
+                aria-pressed={expiringBandFilter === 'all'}
+                className={`rounded-lg border border-amber-200 bg-amber-50 p-4 text-center transition-all cursor-pointer ${cardActive('all')}`}
+              >
                 <p className="text-xs font-medium uppercase tracking-wide text-amber-800 mb-1">Batches at risk</p>
                 <p className="text-xl font-bold text-amber-900">
                   {Number(reportData.summary.totalItems ?? 0)}
@@ -2439,8 +2466,13 @@ export default function ReportsPage() {
                 <p className="text-xs text-amber-800/80 mt-1">
                   Qty {Number(reportData.summary.totalQuantityAtRisk ?? 0).toLocaleString()}
                 </p>
-              </div>
-              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+              </button>
+              <button
+                type="button"
+                onClick={() => selectBand('expired')}
+                aria-pressed={expiringBandFilter === 'expired'}
+                className={`rounded-lg border border-red-200 bg-red-50 p-4 text-center transition-all cursor-pointer ${cardActive('expired')}`}
+              >
                 <p className="text-xs font-medium uppercase tracking-wide text-red-700 mb-1">Expired</p>
                 <p className="text-xl font-bold text-red-800">
                   {Number(reportData.summary.expiredCount ?? 0)}
@@ -2448,8 +2480,13 @@ export default function ReportsPage() {
                 <p className="text-xs text-red-700/80 mt-1">
                   {formatCurrency(Number(reportData.summary.expiredValue ?? 0))}
                 </p>
-              </div>
-              <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-center">
+              </button>
+              <button
+                type="button"
+                onClick={() => selectBand('critical')}
+                aria-pressed={expiringBandFilter === 'critical'}
+                className={`rounded-lg border border-rose-200 bg-rose-50 p-4 text-center transition-all cursor-pointer ${cardActive('critical')}`}
+              >
                 <p className="text-xs font-medium uppercase tracking-wide text-rose-700 mb-1">Critical ≤7d</p>
                 <p className="text-xl font-bold text-rose-800">
                   {Number(reportData.summary.criticalCount ?? 0)}
@@ -2457,30 +2494,86 @@ export default function ReportsPage() {
                 <p className="text-xs text-rose-700/80 mt-1">
                   {formatCurrency(Number(reportData.summary.criticalValue ?? 0))}
                 </p>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+              </button>
+              <div
+                className={`rounded-lg border border-slate-200 bg-white p-4 text-center transition-all ${
+                  expiringBandFilter === 'warning' || expiringBandFilter === 'watch'
+                    ? 'ring-2 ring-offset-2 ring-slate-800 shadow-md'
+                    : ''
+                }`}
+              >
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Value at risk</p>
                 <p className="text-xl font-bold text-slate-900">
                   {formatCurrency(Number(reportData.summary.totalPotentialLoss ?? 0))}
                 </p>
-                <p className="text-xs text-slate-500 mt-1">
-                  Warn {Number(reportData.summary.warningCount ?? 0)} · Watch{' '}
-                  {Number(reportData.summary.watchCount ?? 0)}
+                <p className="text-xs text-slate-500 mt-1 flex flex-wrap justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => selectBand('warning')}
+                    aria-pressed={expiringBandFilter === 'warning'}
+                    className={`underline-offset-2 hover:underline ${
+                      expiringBandFilter === 'warning' ? 'font-semibold text-amber-800' : ''
+                    }`}
+                  >
+                    Warn {Number(reportData.summary.warningCount ?? 0)}
+                  </button>
+                  <span aria-hidden>·</span>
+                  <button
+                    type="button"
+                    onClick={() => selectBand('watch')}
+                    aria-pressed={expiringBandFilter === 'watch'}
+                    className={`underline-offset-2 hover:underline ${
+                      expiringBandFilter === 'watch' ? 'font-semibold text-slate-800' : ''
+                    }`}
+                  >
+                    Watch {Number(reportData.summary.watchCount ?? 0)}
+                  </button>
                 </p>
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="bg-slate-800 px-4 sm:px-6 py-3 flex justify-between items-center gap-2">
+            <div id="expiring-register" className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3 flex flex-wrap justify-between items-center gap-2">
                 <div>
                   <h4 className="text-base font-semibold text-white">Expiry register</h4>
-                  <p className="text-slate-300 text-xs mt-0.5">Most urgent first · cost valuation</p>
+                  <p className="text-slate-300 text-xs mt-0.5">
+                    Showing: {filterLabel}
+                    {expiringBandFilter !== 'all' ? (
+                      <>
+                        {' '}
+                        ·{' '}
+                        <button
+                          type="button"
+                          onClick={() => setExpiringBandFilter('all')}
+                          className="underline text-amber-200 hover:text-white"
+                        >
+                          Show all
+                        </button>
+                      </>
+                    ) : (
+                      ' · most urgent first · cost valuation'
+                    )}
+                  </p>
                 </div>
-                <span className="text-slate-300 text-xs">{reportData.data?.length || 0} batches</span>
+                <span className="text-slate-300 text-xs">
+                  {filteredRows.length}
+                  {expiringBandFilter !== 'all' ? ` of ${allRows.length}` : ''} batches
+                </span>
               </div>
-              {!reportData.data?.length ? (
+              {!allRows.length ? (
                 <div className="p-8 text-center text-sm text-slate-500">
                   No expired or near-expiry stock on hand in this horizon.
+                </div>
+              ) : !filteredRows.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">
+                  No batches in this band.{' '}
+                  <button
+                    type="button"
+                    onClick={() => setExpiringBandFilter('all')}
+                    className="underline text-slate-700"
+                  >
+                    Show all
+                  </button>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -2499,9 +2592,12 @@ export default function ReportsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {reportData.data.map((row, idx) => {
+                      {filteredRows.map((row, idx) => {
                         const days = Number(row.daysUntilExpiry ?? 0);
-                        const band = (String(row.urgency || '') as ExpiryUrgency) || classifyExpiryUrgency(days);
+                        const band = resolveExpiryRowBand({
+                          urgency: row.urgency != null ? String(row.urgency) : null,
+                          daysUntilExpiry: days,
+                        });
                         const bandClass =
                           band === 'expired'
                             ? 'bg-red-100 text-red-800'
@@ -2554,7 +2650,8 @@ export default function ReportsPage() {
               )}
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* Void Sales Report — cancellation register (SSOT; no generic dump) */}
         {reportData.reportType === 'VOID_SALES_REPORT' && reportData.summary && (

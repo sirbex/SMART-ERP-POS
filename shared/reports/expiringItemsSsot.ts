@@ -1,6 +1,9 @@
 /**
  * Expiring items / shelf-life SSOT — urgency bands for register UI, PDF, and summary.
  * Value at risk = remaining qty × unit cost (inventory cost, not retail).
+ *
+ * Invariant: for any row set, summarizeExpiringItems(band counts)
+ * === filterExpiringRowsByBand(rows, band).length (same classifier: days → band).
  */
 
 export type ExpiryUrgency = 'expired' | 'critical' | 'warning' | 'watch';
@@ -9,6 +12,7 @@ export type ExpiringItemLike = {
   daysUntilExpiry: number;
   quantityRemaining: number;
   potentialLoss: number;
+  urgency?: string | null;
 };
 
 export function classifyExpiryUrgency(daysUntilExpiry: number): ExpiryUrgency {
@@ -30,6 +34,35 @@ export function expiryUrgencyLabel(band: ExpiryUrgency): string {
     default:
       return 'Watch';
   }
+}
+
+/**
+ * Band for a register row. Days until expiry are authoritative
+ * (same path as summarize + repository). Urgency string is fallback only.
+ */
+export function resolveExpiryRowBand(row: {
+  urgency?: string | null;
+  daysUntilExpiry?: number | null;
+}): ExpiryUrgency {
+  if (row.daysUntilExpiry != null) {
+    const d = Number(row.daysUntilExpiry);
+    if (Number.isFinite(d)) return classifyExpiryUrgency(d);
+  }
+  const raw = String(row.urgency || '').toLowerCase();
+  if (raw === 'expired' || raw === 'critical' || raw === 'warning' || raw === 'watch') {
+    return raw;
+  }
+  return 'watch';
+}
+
+export type ExpiryBandFilter = 'all' | ExpiryUrgency;
+
+/** Filter register rows to match KPI card selection. */
+export function filterExpiringRowsByBand<
+  T extends { urgency?: string | null; daysUntilExpiry?: number | null },
+>(rows: T[], filter: ExpiryBandFilter): T[] {
+  if (!filter || filter === 'all') return rows;
+  return rows.filter((row) => resolveExpiryRowBand(row) === filter);
 }
 
 export function summarizeExpiringItems(rows: ExpiringItemLike[]): {
@@ -57,7 +90,7 @@ export function summarizeExpiringItems(rows: ExpiringItemLike[]): {
     const loss = Number(row.potentialLoss) || 0;
     totalQuantityAtRisk += qty;
     totalPotentialLoss += loss;
-    const band = classifyExpiryUrgency(Number(row.daysUntilExpiry));
+    const band = resolveExpiryRowBand(row);
     if (band === 'expired') {
       expiredCount += 1;
       expiredValue += loss;
@@ -81,5 +114,52 @@ export function summarizeExpiringItems(rows: ExpiringItemLike[]): {
     watchCount,
     expiredValue: Math.round(expiredValue * 100) / 100,
     criticalValue: Math.round(criticalValue * 100) / 100,
+  };
+}
+
+/** Prove KPI card numbers === filtered register length (and value cards). */
+export function assertExpiringKpiFilterConsistency(rows: ExpiringItemLike[]): {
+  ok: boolean;
+  detail: string;
+  summary: ReturnType<typeof summarizeExpiringItems>;
+  filtered: Record<ExpiryUrgency | 'all', number>;
+  valueCheck: { expired: number; critical: number };
+} {
+  const summary = summarizeExpiringItems(rows);
+  const filtered = {
+    all: filterExpiringRowsByBand(rows, 'all').length,
+    expired: filterExpiringRowsByBand(rows, 'expired').length,
+    critical: filterExpiringRowsByBand(rows, 'critical').length,
+    warning: filterExpiringRowsByBand(rows, 'warning').length,
+    watch: filterExpiringRowsByBand(rows, 'watch').length,
+  };
+  const expiredVal = Math.round(
+    filterExpiringRowsByBand(rows, 'expired').reduce((s, r) => s + Number(r.potentialLoss || 0), 0) * 100,
+  ) / 100;
+  const criticalVal = Math.round(
+    filterExpiringRowsByBand(rows, 'critical').reduce((s, r) => s + Number(r.potentialLoss || 0), 0) * 100,
+  ) / 100;
+
+  const countOk =
+    filtered.all === summary.totalItems &&
+    filtered.expired === summary.expiredCount &&
+    filtered.critical === summary.criticalCount &&
+    filtered.warning === summary.warningCount &&
+    filtered.watch === summary.watchCount;
+  const valueOk = expiredVal === summary.expiredValue && criticalVal === summary.criticalValue;
+  const partitionOk =
+    filtered.expired + filtered.critical + filtered.warning + filtered.watch === filtered.all;
+
+  const ok = countOk && valueOk && partitionOk;
+  const detail = ok
+    ? `KPI↔list match: all=${filtered.all} expired=${filtered.expired} critical=${filtered.critical} warn=${filtered.warning} watch=${filtered.watch}; values expired=${expiredVal} critical=${criticalVal}`
+    : `KPI↔list MISMATCH counts=${JSON.stringify(filtered)} vs summary counts expired=${summary.expiredCount}/${summary.criticalCount}/${summary.warningCount}/${summary.watchCount} values ${expiredVal}/${criticalVal} vs ${summary.expiredValue}/${summary.criticalValue}`;
+
+  return {
+    ok,
+    detail,
+    summary,
+    filtered,
+    valueCheck: { expired: expiredVal, critical: criticalVal },
   };
 }

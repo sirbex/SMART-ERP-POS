@@ -1,13 +1,17 @@
 /**
- * EVIDENCE: Expiring items — shelf-life register SSOT (include expired, urgency bands, PDF keys).
+ * EVIDENCE: Expiring items — shelf-life register SSOT + KPI card ↔ filtered list accuracy.
  * Run: npx vitest run src/__tests__/expiring-items-ssot.evidence.test.ts
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
+  assertExpiringKpiFilterConsistency,
   classifyExpiryUrgency,
+  filterExpiringRowsByBand,
+  resolveExpiryRowBand,
   summarizeExpiringItems,
+  type ExpiringItemLike,
 } from '@shared/reports/expiringItemsSsot';
 
 const repoRoot = path.resolve(__dirname, '../../..');
@@ -22,6 +26,46 @@ function gate(id: string, ok: boolean, detail: string): void {
 
 function read(rel: string): string {
   return readFileSync(path.join(repoRoot, rel), 'utf8');
+}
+
+/** Fixture shaped like live KPIs: 25 at risk, 8 expired, 15 critical, 2 warning. */
+function buildLiveShapedFixture(): ExpiringItemLike[] {
+  const rows: ExpiringItemLike[] = [];
+  // 8 expired — values sum to 265597.00
+  const expiredUnit = 265597 / 8;
+  for (let i = 0; i < 8; i++) {
+    rows.push({
+      daysUntilExpiry: -1 - (i % 3),
+      quantityRemaining: 10,
+      potentialLoss: Math.round(expiredUnit * 100) / 100,
+      urgency: 'expired',
+    });
+  }
+  // Fix last expired so sum is exact
+  const expiredSumSoFar = rows.reduce((s, r) => s + r.potentialLoss, 0);
+  rows[7].potentialLoss = Math.round((265597 - (expiredSumSoFar - rows[7].potentialLoss)) * 100) / 100;
+
+  // 15 critical — values sum to 203788.00
+  const criticalStart = rows.length;
+  const criticalUnit = 203788 / 15;
+  for (let i = 0; i < 15; i++) {
+    rows.push({
+      daysUntilExpiry: 1 + (i % 7),
+      quantityRemaining: 5,
+      potentialLoss: Math.round(criticalUnit * 100) / 100,
+      urgency: 'critical',
+    });
+  }
+  const critSlice = rows.slice(criticalStart);
+  const critSum = critSlice.reduce((s, r) => s + r.potentialLoss, 0);
+  rows[criticalStart + 14].potentialLoss =
+    Math.round((203788 - (critSum - rows[criticalStart + 14].potentialLoss)) * 100) / 100;
+
+  // 2 warning (remainder of 25)
+  rows.push({ daysUntilExpiry: 14, quantityRemaining: 2, potentialLoss: 1000, urgency: 'warning' });
+  rows.push({ daysUntilExpiry: 28, quantityRemaining: 5, potentialLoss: 500, urgency: 'warning' });
+
+  return rows;
 }
 
 describe('EVIDENCE — Expiring items shelf-life SSOT', () => {
@@ -41,6 +85,62 @@ describe('EVIDENCE — Expiring items shelf-life SSOT', () => {
     gate('SUM_ITEMS', sum.totalItems === 3 && sum.totalPotentialLoss === 175, 'overall totals');
   });
 
+  it('ACCURACY: KPI card counts/values === filtered register (days authoritative)', () => {
+    // Stale urgency must NOT override days (consistency with summary).
+    gate(
+      'DAYS_BEAT_STALE_URGENCY',
+      resolveExpiryRowBand({ urgency: 'warning', daysUntilExpiry: 3 }) === 'critical',
+      'daysUntilExpiry wins over stale urgency',
+    );
+
+    const fixture = buildLiveShapedFixture();
+    gate('FIXTURE_SIZE', fixture.length === 25, '25 batches at risk (live-shaped)');
+
+    const check = assertExpiringKpiFilterConsistency(fixture);
+    gate('KPI_LIST_CONSISTENCY', check.ok, check.detail);
+
+    gate(
+      'KPI_EXPIRED_COUNT',
+      check.summary.expiredCount === 8 && check.filtered.expired === 8,
+      'Expired card 8 === filtered list 8',
+    );
+    gate(
+      'KPI_CRITICAL_COUNT',
+      check.summary.criticalCount === 15 && check.filtered.critical === 15,
+      'Critical card 15 === filtered list 15',
+    );
+    gate(
+      'KPI_EXPIRED_VALUE',
+      check.summary.expiredValue === 265597 && check.valueCheck.expired === 265597,
+      'Expired value UGX 265597 matches filtered sum',
+    );
+    gate(
+      'KPI_CRITICAL_VALUE',
+      check.summary.criticalValue === 203788 && check.valueCheck.critical === 203788,
+      'Critical value UGX 203788 matches filtered sum',
+    );
+    gate(
+      'PARTITION',
+      check.filtered.expired + check.filtered.critical + check.filtered.warning + check.filtered.watch ===
+        25,
+      'bands partition all 25 rows with no overlap',
+    );
+
+    // Wrong-urgency rows still filter by days
+    const mixed = [
+      { daysUntilExpiry: -5, quantityRemaining: 1, potentialLoss: 10, urgency: 'watch' },
+      { daysUntilExpiry: 2, quantityRemaining: 1, potentialLoss: 20, urgency: 'expired' },
+    ];
+    const mixedCheck = assertExpiringKpiFilterConsistency(mixed);
+    gate('STALE_URGENCY_CONSISTENCY', mixedCheck.ok, mixedCheck.detail);
+    gate(
+      'FILTER_USES_DAYS',
+      filterExpiringRowsByBand(mixed, 'expired').length === 1 &&
+        filterExpiringRowsByBand(mixed, 'critical').length === 1,
+      'filter follows days, not stale urgency labels',
+    );
+  });
+
   it('SQL: includes past expiry; ACTIVE batches; business as-of date', () => {
     const repo = read('SamplePOS.Server/src/modules/reports/reportsRepository.ts');
     const start = repo.indexOf('async getExpiringItems');
@@ -50,18 +150,56 @@ describe('EVIDENCE — Expiring items shelf-life SSOT', () => {
     gate('ACTIVE_ONLY', slice.includes("status, 'ACTIVE'") || slice.includes("status = 'ACTIVE'"), 'ACTIVE batches only');
     gate('AS_OF_BIZ', slice.includes('getBusinessDate') || slice.includes('asOf'), 'business as-of date');
     gate('HAS_SKU', slice.includes('p.sku'), 'selects SKU');
+    gate(
+      'REPO_SETS_URGENCY',
+      slice.includes('classifyExpiryUrgency(daysUntilExpiry)'),
+      'repository stamps urgency from same classifier',
+    );
   });
 
-  it('UI + PDF SSOT', () => {
+  it('UI wires KPI click → filterExpiringRowsByBand; reset on regenerate', () => {
     const page = read('samplepos.client/src/pages/ReportsPage.tsx');
     const ctrl = read('SamplePOS.Server/src/modules/reports/reportsController.ts');
     const svc = read('SamplePOS.Server/src/modules/reports/reportsService.ts');
+    const ssot = read('shared/reports/expiringItemsSsot.ts');
+
     gate(
       'IN_SSOT',
       /FINANCIAL_SSOT_REPORTS[\s\S]*?'EXPIRING_ITEMS'/.test(page),
       'EXPIRING_ITEMS in FINANCIAL_SSOT_REPORTS',
     );
     gate('SHELF_COPY', page.includes('Shelf-life register'), 'dedicated shelf-life UI');
+    gate(
+      'KPI_CLICK',
+      page.includes('data-expiring-kpi-cards') &&
+        page.includes('filterExpiringRowsByBand') &&
+        page.includes("selectBand('expired')") &&
+        page.includes("selectBand('critical')") &&
+        page.includes("selectBand('all')"),
+      'KPI cards click-filter register',
+    );
+    gate(
+      'UI_MAPS_FILTERED',
+      page.includes('filteredRows.map') && page.includes('expiringBandFilter'),
+      'table maps filteredRows only',
+    );
+    gate(
+      'UI_RESET_ON_GENERATE',
+      /setExpiringBandFilter\('all'\);\s*\n\s*setReportData\(result\.data\)/.test(page),
+      'regenerate resets band filter to all',
+    );
+    gate(
+      'SSOT_ASSERT_HELPER',
+      ssot.includes('assertExpiringKpiFilterConsistency'),
+      'shared assertExpiringKpiFilterConsistency exists',
+    );
+    gate(
+      'SSOT_DAYS_AUTHORITATIVE',
+      ssot.includes('Days until expiry are authoritative') ||
+        ssot.includes('daysUntilExpiry wins') ||
+        /daysUntilExpiry[\s\S]{0,200}classifyExpiryUrgency/.test(ssot),
+      'resolveExpiryRowBand prefers days',
+    );
     gate('SVC_SUMMARIZE', svc.includes('summarizeExpiringItems'), 'service uses shared summarize');
     const pdfStart = ctrl.indexOf('async getExpiringItems');
     const pdf = ctrl.slice(pdfStart, pdfStart + 4500);
@@ -76,7 +214,7 @@ describe('EVIDENCE — Expiring items shelf-life SSOT', () => {
       feature: 'EXPIRING_ITEMS_SSOT',
       provenAt: new Date().toISOString(),
       contract:
-        'shelf-life register; include expired on-hand; ACTIVE; urgency bands; SSOT UI; PDF column keys match data',
+        'shelf-life register; KPI card click filters list; card count/value === filtered rows (days-authoritative classify); ACTIVE; include expired; PDF keys match',
       gates,
       summary: {
         total: gates.length,

@@ -1,7 +1,7 @@
 {
   "feature": "EXPIRING_ITEMS_SSOT",
-  "provenAt": "2026-08-23T12:13:51.825Z",
-  "contract": "shelf-life register; include expired on-hand; ACTIVE; urgency bands; SSOT UI; PDF column keys match data",
+  "provenAt": "2026-08-23T13:04:59.346Z",
+  "contract": "shelf-life register; KPI card click filters list; card count/value === filtered rows (days-authoritative classify); ACTIVE; include expired; PDF keys match",
   "gates": [
     {
       "id": "EXPIRED",
@@ -39,6 +39,56 @@
       "detail": "overall totals"
     },
     {
+      "id": "DAYS_BEAT_STALE_URGENCY",
+      "ok": true,
+      "detail": "daysUntilExpiry wins over stale urgency"
+    },
+    {
+      "id": "FIXTURE_SIZE",
+      "ok": true,
+      "detail": "25 batches at risk (live-shaped)"
+    },
+    {
+      "id": "KPI_LIST_CONSISTENCY",
+      "ok": true,
+      "detail": "KPI↔list match: all=25 expired=8 critical=15 warn=2 watch=0; values expired=265597 critical=203788"
+    },
+    {
+      "id": "KPI_EXPIRED_COUNT",
+      "ok": true,
+      "detail": "Expired card 8 === filtered list 8"
+    },
+    {
+      "id": "KPI_CRITICAL_COUNT",
+      "ok": true,
+      "detail": "Critical card 15 === filtered list 15"
+    },
+    {
+      "id": "KPI_EXPIRED_VALUE",
+      "ok": true,
+      "detail": "Expired value UGX 265597 matches filtered sum"
+    },
+    {
+      "id": "KPI_CRITICAL_VALUE",
+      "ok": true,
+      "detail": "Critical value UGX 203788 matches filtered sum"
+    },
+    {
+      "id": "PARTITION",
+      "ok": true,
+      "detail": "bands partition all 25 rows with no overlap"
+    },
+    {
+      "id": "STALE_URGENCY_CONSISTENCY",
+      "ok": true,
+      "detail": "KPI↔list match: all=2 expired=1 critical=1 warn=0 watch=0; values expired=10 critical=20"
+    },
+    {
+      "id": "FILTER_USES_DAYS",
+      "ok": true,
+      "detail": "filter follows days, not stale urgency labels"
+    },
+    {
       "id": "NO_BETWEEN_ONLY_FUTURE",
       "ok": true,
       "detail": "does not exclude already-expired"
@@ -64,6 +114,11 @@
       "detail": "selects SKU"
     },
     {
+      "id": "REPO_SETS_URGENCY",
+      "ok": true,
+      "detail": "repository stamps urgency from same classifier"
+    },
+    {
       "id": "IN_SSOT",
       "ok": true,
       "detail": "EXPIRING_ITEMS in FINANCIAL_SSOT_REPORTS"
@@ -72,6 +127,31 @@
       "id": "SHELF_COPY",
       "ok": true,
       "detail": "dedicated shelf-life UI"
+    },
+    {
+      "id": "KPI_CLICK",
+      "ok": true,
+      "detail": "KPI cards click-filter register"
+    },
+    {
+      "id": "UI_MAPS_FILTERED",
+      "ok": true,
+      "detail": "table maps filteredRows only"
+    },
+    {
+      "id": "UI_RESET_ON_GENERATE",
+      "ok": true,
+      "detail": "regenerate resets band filter to all"
+    },
+    {
+      "id": "SSOT_ASSERT_HELPER",
+      "ok": true,
+      "detail": "shared assertExpiringKpiFilterConsistency exists"
+    },
+    {
+      "id": "SSOT_DAYS_AUTHORITATIVE",
+      "ok": true,
+      "detail": "resolveExpiryRowBand prefers days"
     },
     {
       "id": "SVC_SUMMARIZE",
@@ -95,8 +175,8 @@
     }
   ],
   "summary": {
-    "total": 18,
-    "passed": 18,
+    "total": 34,
+    "passed": 34,
     "failed": 0,
     "verdict": "PASS"
   }
