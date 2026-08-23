@@ -1,6 +1,6 @@
 {
   "feature": "SALES_COMPARISON_POP_ORDINAL",
-  "provenAt": "2026-08-23T12:06:24.741Z",
+  "provenAt": "2026-08-23T12:13:51.842Z",
   "defect": "Joined current/previous buckets ON calendar period label; Aug weeks vs Jul weeks → previous=0 and % forced to 100",
   "fix": "Bucket each range separately; align by ordinal index; % null when previous baseline is 0",
   "gates": [

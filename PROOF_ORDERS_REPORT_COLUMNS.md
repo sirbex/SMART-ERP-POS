@@ -1,7 +1,7 @@
 # PROOF — Orders report column chooser (never-fail / consistency)
 
 **Verdict:** PASS
-**Proven at:** 2026-08-23T12:06:24.720Z
+**Proven at:** 2026-08-23T12:13:51.825Z
 
 **Contract:** never-empty columns; screen/CSV/PDF same ids via shared/reports/ordersReportColumnsSsot
 

@@ -1,7 +1,7 @@
 # PROOF — Refund report SSOT (credit memo register)
 
 **Verdict:** PASS
-**Proven at:** 2026-08-23T12:06:24.659Z
+**Proven at:** 2026-08-23T12:13:51.758Z
 
 **Contract:** one row per refund document; credit-memo SSOT UI; numeric summary; no generic dump; no competitor brand copy
 

@@ -1,7 +1,7 @@
 # PROOF — Sales Comparison period-over-period
 
 **Verdict:** PASS
-**Proven at:** 2026-08-23T12:06:24.741Z
+**Proven at:** 2026-08-23T12:13:51.842Z
 
 ## Defect
 Joined current/previous buckets ON calendar period label; Aug weeks vs Jul weeks → previous=0 and % forced to 100

@@ -1,6 +1,6 @@
 {
   "feature": "ORDERS_REPORT_COLUMN_CHOOSER",
-  "provenAt": "2026-08-23T12:06:24.720Z",
+  "provenAt": "2026-08-23T12:13:51.825Z",
   "contract": "never-empty columns; screen/CSV/PDF same ids via shared/reports/ordersReportColumnsSsot",
   "gates": [
     {

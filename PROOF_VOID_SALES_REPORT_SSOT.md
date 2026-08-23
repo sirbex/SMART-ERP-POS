@@ -1,7 +1,7 @@
 # PROOF — Void Sales report SSOT (cancellation register)
 
 **Verdict:** PASS
-**Proven at:** 2026-08-23T12:06:24.655Z
+**Proven at:** 2026-08-23T12:13:51.770Z
 
 **Contract:** VOID cancellation register; coalesce void date; REVERSAL acct docs; numeric summary; SSOT UI; no competitor brand
 

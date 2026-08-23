@@ -1,6 +1,6 @@
 {
   "feature": "VOID_SALES_REPORT_SSOT",
-  "provenAt": "2026-08-23T12:06:24.655Z",
+  "provenAt": "2026-08-23T12:13:51.770Z",
   "contract": "VOID cancellation register; coalesce void date; REVERSAL acct docs; numeric summary; SSOT UI; no competitor brand",
   "gates": [
     {

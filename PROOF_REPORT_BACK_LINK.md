@@ -1,7 +1,7 @@
 # PROOF — Report back button SSOT
 
 **Verdict:** PASS
-**Proven at:** 2026-08-23T12:06:24.701Z
+**Proven at:** 2026-08-23T12:13:51.807Z
 
 **Contract:** Every report surface has Back to Reports via ReportBackLink
 

@@ -1,7 +1,7 @@
 # PROOF — Expiring items shelf-life SSOT
 
 **Verdict:** PASS
-**Proven at:** 2026-08-23T12:06:24.787Z
+**Proven at:** 2026-08-23T12:13:51.825Z
 
 **Contract:** shelf-life register; include expired on-hand; ACTIVE; urgency bands; SSOT UI; PDF column keys match data
 

@@ -1,6 +1,6 @@
 {
   "feature": "REPORT_BACK_LINK_SSOT",
-  "provenAt": "2026-08-23T12:06:24.701Z",
+  "provenAt": "2026-08-23T12:13:51.807Z",
   "contract": "Every report surface has Back to Reports via ReportBackLink",
   "gates": [
     {

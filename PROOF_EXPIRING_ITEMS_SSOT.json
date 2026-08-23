@@ -1,6 +1,6 @@
 {
   "feature": "EXPIRING_ITEMS_SSOT",
-  "provenAt": "2026-08-23T12:06:24.787Z",
+  "provenAt": "2026-08-23T12:13:51.825Z",
   "contract": "shelf-life register; include expired on-hand; ACTIVE; urgency bands; SSOT UI; PDF column keys match data",
   "gates": [
     {

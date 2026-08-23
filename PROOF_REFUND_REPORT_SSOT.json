@@ -1,6 +1,6 @@
 {
   "feature": "REFUND_REPORT_SSOT",
-  "provenAt": "2026-08-23T12:06:24.659Z",
+  "provenAt": "2026-08-23T12:13:51.758Z",
   "contract": "one row per refund document; credit-memo SSOT UI; numeric summary; no generic dump; no competitor brand copy",
   "gates": [
     {

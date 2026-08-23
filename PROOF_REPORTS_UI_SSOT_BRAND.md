@@ -1,7 +1,7 @@
 # PROOF — Reports UI SSOT + brand-free
 
 **Verdict:** PASS
-**Proven at:** 2026-08-23T12:06:24.742Z
+**Proven at:** 2026-08-23T12:13:51.867Z
 **Gates:** 24/24 passed
 
 ## What this proves
