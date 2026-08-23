@@ -4172,7 +4172,7 @@ export default function POSPage() {
                           )}
                         </td>
                         <td className={POS_ADAPTIVE_CLASSES.cartColQty}>
-                          <div className="ml-auto w-[7.25rem] max-w-full overflow-hidden">
+                          <div className="ml-auto w-fit max-w-full">
                             <FohLineQtyEditors
                               value={item.quantity}
                               overStock={lineQtyOverStock}

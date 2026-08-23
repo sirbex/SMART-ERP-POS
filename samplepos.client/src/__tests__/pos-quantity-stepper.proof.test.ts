@@ -39,11 +39,13 @@ describe('PROOF: FOH line qty editors (behavioral)', () => {
     expect(ssot).toContain('data-foh-qty-inc="true"');
     expect(ssot).toContain('Decrease quantity');
     expect(ssot).toContain('Increase quantity');
-    expect(ssot).toContain('grid grid-cols-[2.25rem_2.25rem_2.25rem]');
+    expect(ssot).toContain('grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem]');
     expect(ssot).toContain('w-[7.25rem]');
     expect(ssot).not.toContain('flex-1');
     expect(ssot).toContain('selectOnFocus');
-    pass('− and + separate FOH buttons; no flex-1 middle expansion');
+    expect(ssot).toContain("e.key === 'ArrowUp'");
+    expect(ssot).toContain("e.key === 'ArrowDown'");
+    pass('− and + separate FOH buttons; ArrowUp/Down step qty');
   });
 
   it('restaurant keeps inline min-w-9 ±; retail imports FohLineQtyEditors — no PosQuantityStepper', () => {
@@ -73,9 +75,9 @@ describe('PROOF: FOH line qty editors (behavioral)', () => {
   });
 
   it('qty table column uses fixed rem width so + stays in Qty column', () => {
-    expect(POS_ADAPTIVE_CLASSES.cartColQty).toContain('w-[7.25rem]');
+    expect(POS_ADAPTIVE_CLASSES.cartColQty).toContain('w-[7.75rem]');
     expect(POS_ADAPTIVE_CLASSES.cartColQty).toContain('overflow-hidden');
-    expect(POS_CART_COL_QTY_WIDTH).toBe('7.25rem');
+    expect(POS_CART_COL_QTY_WIDTH).toBe('7.75rem');
     expect(POS_CART_COL_WIDTHS_COMPACT[2]).toBe(POS_CART_COL_QTY_WIDTH);
     pass('table qty column fixed rem SSOT');
   });
@@ -91,14 +93,14 @@ afterAll(() => {
       '- Runner: `npm run proof:pos-quantity-stepper`',
       '',
       '## Policy',
-      'Restaurant keeps inline `min-h-9 min-w-9` − qty + (dense same-line row). Retail uses `FohLineQtyEditors` with fixed 7.25rem grid so + stays in Qty column. Shared `commitFohQuantityDraft` for typed qty commit.',
+      'Restaurant keeps inline `min-h-9 min-w-9` − qty + (dense same-line row). Retail uses `FohLineQtyEditors` with 7.25rem grid inside a 7.75rem cell (px-1) so + stays visible. ArrowUp/ArrowDown steps qty when the field is focused. Shared `commitFohQuantityDraft` for typed qty commit.',
       '',
       '## Results',
       ...results,
       '',
       '## Verdict',
       results.length >= 5
-        ? '**PASS** — restaurant inline ± intact; retail FohLineQtyEditors; column width safe.'
+        ? '**PASS** — restaurant inline ± intact; retail FohLineQtyEditors; column width safe; arrow keys.'
         : '**FAIL** — incomplete result set.',
       '',
     ].join('\n'),

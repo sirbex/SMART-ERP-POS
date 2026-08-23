@@ -78,7 +78,7 @@ describe('PROOF: POS adaptive layout (behavioral)', () => {
     expect(POS_ADAPTIVE_CLASSES.searchPanel).toContain('min-[1600px]:w-1/4');
     expect(POS_ADAPTIVE_CLASSES.mainLayout).toContain('min-[1600px]:flex-row');
     expect(POS_ADAPTIVE_CLASSES.keyboardFooter).toContain('min-[1600px]:flex');
-    expect(POS_ADAPTIVE_CLASSES.cartColQty).toContain('w-[7.25rem]');
+    expect(POS_ADAPTIVE_CLASSES.cartColQty).toContain('w-[7.75rem]');
     expect(POS_ADAPTIVE_CLASSES.cartColQty).toContain('overflow-hidden');
     expect(POS_CART_COL_WIDTHS_COMPACT[2]).toBe(POS_CART_COL_QTY_WIDTH);
     expect(POS_CART_COL_WIDTHS_COMPACT).toHaveLength(6);
