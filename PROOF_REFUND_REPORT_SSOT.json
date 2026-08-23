@@ -1,0 +1,73 @@
+{
+  "feature": "REFUND_REPORT_SSOT",
+  "provenAt": "2026-08-23T12:06:24.659Z",
+  "contract": "one row per refund document; credit-memo SSOT UI; numeric summary; no generic dump; no competitor brand copy",
+  "gates": [
+    {
+      "id": "NO_DIRECT_LT_JOIN",
+      "ok": true,
+      "detail": "header query does not join ledger_transactions (avoids duplicate docs)"
+    },
+    {
+      "id": "AGG_ACCT_DOCS",
+      "ok": true,
+      "detail": "accounting docs aggregated via string_agg"
+    },
+    {
+      "id": "COMPLETED_ONLY",
+      "ok": true,
+      "detail": "only completed refunds"
+    },
+    {
+      "id": "NO_FORMATTED_SUMMARY",
+      "ok": true,
+      "detail": "summary has no duplicate Formatted currency strings"
+    },
+    {
+      "id": "HAS_NUMERIC_SUMMARY",
+      "ok": true,
+      "detail": "numeric revenue in summary"
+    },
+    {
+      "id": "IN_FINANCIAL_SSOT",
+      "ok": true,
+      "detail": "REFUND_REPORT in FINANCIAL_SSOT_REPORTS"
+    },
+    {
+      "id": "CREDIT_MEMO_COPY",
+      "ok": true,
+      "detail": "business-logic credit memo blurb"
+    },
+    {
+      "id": "DOC_REGISTER",
+      "ok": true,
+      "detail": "document register section"
+    },
+    {
+      "id": "NO_GENERIC_WITH_SSOT",
+      "ok": true,
+      "detail": "SSOT skip prevents generic summary/table dump"
+    },
+    {
+      "id": "NO_BRAND",
+      "ok": true,
+      "detail": "no competitor brand in ReportsPage"
+    },
+    {
+      "id": "PDF_REGISTER_HEADING",
+      "ok": true,
+      "detail": "PDF section for document register"
+    },
+    {
+      "id": "PDF_ACCT_DOC",
+      "ok": true,
+      "detail": "PDF includes accounting doc column"
+    }
+  ],
+  "summary": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

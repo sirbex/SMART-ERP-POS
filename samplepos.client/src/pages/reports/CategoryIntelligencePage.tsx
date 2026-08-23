@@ -1,5 +1,5 @@
 /**
- * Category Intelligence Report (SAP/Odoo-style)
+ * Category Intelligence Report
  *
  * Filter-first, print-ready, accounting-grade category analysis.
  * Six report types: Inventory Position | Sales | Purchases |
@@ -9,9 +9,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
 import {
-    ArrowLeft,
     Download,
     Layers,
     BarChart2,
@@ -23,6 +21,7 @@ import {
 } from 'lucide-react';
 import Layout from '../../components/Layout';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
+import { ReportBackLink } from '../../components/reports/ReportBackLink';
 import { DatePicker } from '../../components/ui/date-picker';
 import { formatCurrency } from '../../utils/currency';
 import apiClient from '../../utils/api';
@@ -290,12 +289,7 @@ export default function CategoryIntelligencePage() {
             <div className="p-3 sm:p-6 max-w-7xl mx-auto space-y-5">
                 {/* ── Header ── */}
                 <header className="space-y-3">
-                    <Link
-                        to="/reports"
-                        className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors"
-                    >
-                        <ArrowLeft className="w-4 h-4" /> Back to Reports
-                    </Link>
+                    <ReportBackLink />
                     <div className="flex items-center gap-3">
                         <Layers className="w-6 h-6 text-indigo-600" />
                         <div>

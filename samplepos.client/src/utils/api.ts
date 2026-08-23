@@ -1039,6 +1039,9 @@ export const api = {
       include_expenses?: string;
     }) =>
       apiClient.get<ApiResponse>('reports/business-performance', { params }),
+    /** Day + customer breakdown of AR collections and deposits (Undeposited Funds). */
+    customerReceiptsByDay: (params: { start_date: string; end_date: string }) =>
+      apiClient.get<ApiResponse>('reports/customer-receipts-by-day', { params }),
     getTaxComplianceSummary: (params: { startDate: string; endDate: string }) =>
       apiClient.get<ApiResponse>('reports/tax-compliance/summary', { params }),
     getWhtRegister: (params: { startDate: string; endDate: string; side?: string }) =>

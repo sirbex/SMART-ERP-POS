@@ -8,6 +8,8 @@ import type { ReorderDashboardItem } from './reportTypes.js';
 import * as cnDnReportService from './cnDnReportService.js';
 import { systemSettingsService } from '../system-settings/systemSettingsService.js';
 import { SystemSettings } from '../../../../shared/types/systemSettings.js';
+import { summarizeSalesComparison } from '../../../../shared/reports/salesComparisonSsot.js';
+import { summarizeExpiringItems } from '../../../../shared/reports/expiringItemsSsot.js';
 import Decimal from 'decimal.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 
@@ -373,15 +375,7 @@ export const reportsService = {
       categoryId: options.categoryId,
     });
 
-    // Calculate summary
-    const totalPotentialLoss = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.potentialLoss),
-      new Decimal(0)
-    );
-    const totalQuantity = data.reduce(
-      (sum, item) => new Decimal(sum).plus(item.quantityRemaining),
-      new Decimal(0)
-    );
+    const summary = summarizeExpiringItems(data);
 
     const executionTime = Date.now() - startTime;
 
@@ -409,11 +403,7 @@ export const reportsService = {
       }),
       parameters: options,
       data,
-      summary: {
-        totalItems: data.length,
-        totalQuantityAtRisk: totalQuantity.toDecimalPlaces(3).toNumber(),
-        totalPotentialLoss: totalPotentialLoss.toDecimalPlaces(2).toNumber(),
-      },
+      summary,
       recordCount: data.length,
       executionTimeMs: executionTime,
     };
@@ -770,7 +760,7 @@ export const reportsService = {
   ) {
     const startTime = Date.now();
 
-    const { rows: data, summary: sqlSummary } = await reportsRepository.getCustomerPaymentsReport(pool, {
+    const { rows: data, paymentLines, summary: sqlSummary } = await reportsRepository.getCustomerPaymentsReport(pool, {
       startDate: options.startDate,
       endDate: options.endDate,
       customerId: options.customerId,
@@ -805,6 +795,7 @@ export const reportsService = {
       }),
       parameters: options,
       data,
+      paymentLines,
       summary: {
         totalCustomers: data.length,
         totalInvoiced: sqlSummary.totalInvoiced,
@@ -813,6 +804,8 @@ export const reportsService = {
         totalOverdue: sqlSummary.totalOverdue,
         totalDeposited: sqlSummary.totalDeposited,
         depositAvailable: sqlSummary.depositAvailable,
+        collectionsInPeriod: sqlSummary.collectionsInPeriod,
+        collectionCount: sqlSummary.collectionCount,
       },
       recordCount: data.length,
       executionTimeMs: executionTime,
@@ -1181,6 +1174,9 @@ export const reportsService = {
         amountPaid: entry.credit,
         balanceDue: entry.balanceAfter ?? 0,
         paymentStatus: entry.itemStatus,
+        documentType: entry.vchType,
+        description: entry.particulars,
+        referenceType: entry.referenceType,
         items: [{ product_name: entry.particulars, quantity: 1, unit_price: entry.debit, subtotal: entry.debit }],
       };
     });
@@ -1205,15 +1201,22 @@ export const reportsService = {
         totalPaid: totalCredit.toDecimalPlaces(2).toNumber(),
         totalOutstanding: smart.closingBalance,
       },
+      unallocatedReceipts: smart.unallocatedReceipts,
+      unallocatedReceiptsTotal: smart.unallocatedReceiptsTotal,
     };
 
     const summary = {
       openingBalance: smart.openingBalance,
       closingBalance: smart.closingBalance,
       totalTransactions: transactions.length,
+      totalDebits: totalDebit.toDecimalPlaces(2).toNumber(),
+      totalCredits: totalCredit.toDecimalPlaces(2).toNumber(),
+      // Keep legacy keys for older PDF/CSV consumers
       totalSales: totalDebit.toDecimalPlaces(2).toNumber(),
       totalPaid: totalCredit.toDecimalPlaces(2).toNumber(),
       totalOutstanding: smart.closingBalance,
+      unallocatedReceiptsTotal: smart.unallocatedReceiptsTotal,
+      isCustomerCredit: smart.closingBalance < -0.009,
     };
 
     const executionTime = Date.now() - startTime;
@@ -1243,8 +1246,13 @@ export const reportsService = {
         hour12: false, timeZone: 'Africa/Kampala',
       }),
       parameters: { ...options, startDate, endDate },
+      // Flatten for ReportsPage special layout (expects top-level customer/transactions)
+      customer: data.customer,
+      transactions: data.transactions,
       data,
       summary,
+      unallocatedReceipts: smart.unallocatedReceipts,
+      unallocatedReceiptsTotal: smart.unallocatedReceiptsTotal,
       recordCount: transactions.length,
       executionTimeMs: executionTime,
     };
@@ -1373,18 +1381,23 @@ export const reportsService = {
 
       // Business Intelligence Insights
       businessInsights: [
-        ...(sqlSummary.salesRevenue > sqlSummary.debtCollections
-          ? ['Strong new business growth - sales exceed collections']
+        sqlSummary.totalCashIn > 0
+          ? `Cash received ${sqlSummary.totalCashIn.toFixed(2)} across ${sqlSummary.totalTransactions} receipt(s)`
+          : 'No liquid cash receipts in this period',
+        ...(sqlSummary.salesRevenue > 0
+          ? [`POS cash/card/mobile: ${sqlSummary.salesRevenue.toFixed(2)} (${sqlSummary.salesTransactionCount} tickets)`]
           : []),
-        ...(sqlSummary.debtCollections > sqlSummary.salesRevenue
-          ? ['Focus on debt recovery - collections exceed new sales']
+        ...(sqlSummary.debtCollections > 0
+          ? [`AR collections (Undeposited Funds): ${sqlSummary.debtCollections.toFixed(2)}`]
           : []),
-        ...(sqlSummary.overallProfitMargin > 20
-          ? ['Healthy profit margins (>20%)']
-          : []),
-        ...(data.length > 0 && sqlSummary.totalCashIn > 0 ? ['Positive overall cash flow'] : []),
         ...(sqlSummary.depositReceipts > 0
-          ? [`Customer deposits received: ${sqlSummary.depositReceipts}`]
+          ? [`Customer deposits (liability): ${sqlSummary.depositReceipts.toFixed(2)}`]
+          : []),
+        ...(sqlSummary.creditExtended > 0
+          ? [`Credit extended (not cash): ${sqlSummary.creditExtended.toFixed(2)}`]
+          : []),
+        ...(sqlSummary.overallProfitMargin > 0
+          ? [`Period sales margin ${sqlSummary.overallProfitMargin.toFixed(1)}%`]
           : []),
       ],
     };
@@ -1602,6 +1615,8 @@ export const reportsService = {
       days90: sqlSummary.days90,
       over90: sqlSummary.over90,
       overdueAmount: sqlSummary.overdueAmount,
+      unallocatedCredits: sqlSummary.unallocatedCredits,
+      grossOpenItems: sqlSummary.grossOpenItems,
     };
 
     const executionTime = Date.now() - startTime;
@@ -2076,25 +2091,7 @@ export const reportsService = {
     const data = await reportsRepository.getSalesComparison(pool, options);
     const executionTime = Date.now() - startTime;
 
-    const totalCurrentSales = data.reduce(
-      (sum: Decimal, item) => sum.plus(item.currentSales),
-      new Decimal(0)
-    );
-    const totalPreviousSales = data.reduce(
-      (sum: Decimal, item) => sum.plus(item.previousSales),
-      new Decimal(0)
-    );
-    const overallChange = totalPreviousSales.isZero()
-      ? new Decimal(100)
-      : totalCurrentSales.minus(totalPreviousSales).dividedBy(totalPreviousSales).times(100);
-
-    const summary = {
-      totalPeriods: data.length,
-      currentPeriodSales: totalCurrentSales.toDecimalPlaces(2).toNumber(),
-      previousPeriodSales: totalPreviousSales.toDecimalPlaces(2).toNumber(),
-      totalDifference: totalCurrentSales.minus(totalPreviousSales).toDecimalPlaces(2).toNumber(),
-      overallPercentageChange: overallChange.toDecimalPlaces(2).toNumber(),
-    };
+    const summary = summarizeSalesComparison(data);
 
     // Audit logging handled by controller layer
 
@@ -2714,13 +2711,14 @@ export const reportsService = {
       parameters: options,
       data,
       byReason,
+      // Numeric SSOT only — UI/PDF format currency (no duplicate *Formatted dump fields)
       summary: {
         voidedSaleCount: summary.voidedSaleCount,
         totalVoidedAmount: summary.totalVoidedAmount,
-        totalVoidedAmountFormatted: formatCurrency(summary.totalVoidedAmount, systemContext.currencySymbol),
         totalVoidedCost: summary.totalVoidedCost,
         totalLostProfit: summary.totalLostProfit,
-        totalLostProfitFormatted: formatCurrency(summary.totalLostProfit, systemContext.currencySymbol),
+        withAccountingDocCount: summary.withAccountingDocCount,
+        withoutAccountingDocCount: summary.withoutAccountingDocCount,
       },
       recordCount: data.length,
       executionTimeMs: executionTime,
@@ -2776,14 +2774,12 @@ export const reportsService = {
       data: headers,
       lineItems: lines,
       topRefundedProducts,
+      // Numeric SSOT only — UI/PDF format currency (no duplicate *Formatted dump fields)
       summary: {
         refundCount: summary.refundCount,
         totalRevenueReversal: summary.totalRevenueReversal,
-        totalRevenueReversalFormatted: formatCurrency(summary.totalRevenueReversal, systemContext.currencySymbol),
         totalCOGSReversal: summary.totalCOGSReversal,
-        totalCOGSReversalFormatted: formatCurrency(summary.totalCOGSReversal, systemContext.currencySymbol),
         netProfitImpact: summary.netProfitImpact,
-        netProfitImpactFormatted: formatCurrency(summary.netProfitImpact, systemContext.currencySymbol),
         fullRefundCount: summary.fullRefundCount,
         partialRefundCount: summary.partialRefundCount,
         linesWithStockReturn: summary.linesWithStockReturn,

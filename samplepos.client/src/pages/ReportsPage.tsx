@@ -47,13 +47,50 @@ import Layout from '../components/Layout';
 import { formatCurrency } from '../utils/currency';
 import { api } from '../services/api';
 import CustomerAgingReport from '../components/reports/CustomerAgingReport';
+import ReportCustomerCombobox from '../components/reports/ReportCustomerCombobox';
+import ReportSupplierCombobox from '../components/reports/ReportSupplierCombobox';
+import { ReportBackLink } from '../components/reports/ReportBackLink';
 import { DateRangeFilter } from '../components/ui/DateRangeFilter';
 import { formatTimestamp, formatTimestampDate, getBusinessDate } from '../utils/businessDate';
+import {
+  classifyExpiryUrgency,
+  expiryUrgencyLabel,
+  type ExpiryUrgency,
+} from '@shared/reports/expiringItemsSsot';
 import {
   INVENTORY_LEDGER_REPORTS,
   INVENTORY_NETWORK_REPORTS,
   INVENTORY_OPERATIONAL_REPORTS,
 } from '../config/inventoryReportCatalog';
+
+/** Inclusive equal-length window immediately before [start, end] (YYYY-MM-DD). */
+function equalLengthPriorRange(startYmd: string, endYmd: string): { start: string; end: string } {
+  const parse = (s: string) => {
+    const [y, m, d] = s.slice(0, 10).split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d));
+  };
+  const fmt = (dt: Date) => {
+    const y = dt.getUTCFullYear();
+    const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(dt.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+  const start = parse(startYmd);
+  const end = parse(endYmd);
+  const days = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+  const prevEnd = new Date(start);
+  prevEnd.setUTCDate(prevEnd.getUTCDate() - 1);
+  const prevStart = new Date(prevEnd);
+  prevStart.setUTCDate(prevStart.getUTCDate() - (days - 1));
+  return { start: fmt(prevStart), end: fmt(prevEnd) };
+}
+
+function formatPoPPercent(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
+  return `${n.toFixed(2)}%`;
+}
 
 // TIMEZONE STRATEGY: DATE columns stay as YYYY-MM-DD; TIMESTAMPTZ uses business TZ display.
 const formatDisplayDate = (dateString: string | null | undefined): string => {
@@ -363,6 +400,62 @@ interface ReportOption {
   icon: string;
 }
 
+/** Customer suite — dedicated SSOT layout (skip generic summary/table dump). */
+const CUSTOMER_SSOT_REPORTS = new Set<ReportType>([
+  'CUSTOMER_PAYMENTS',
+  'CUSTOMER_ACCOUNT_STATEMENT',
+  'CUSTOMER_AGING_REPORT',
+  'TOP_CUSTOMERS',
+  'CUSTOMER_PURCHASE_HISTORY',
+  'AR_LEDGER',
+]);
+
+/** Reports that must pick one customer before generate. */
+const CUSTOMER_REQUIRED_REPORTS = new Set<ReportType>([
+  'CUSTOMER_ACCOUNT_STATEMENT',
+  'CUSTOMER_PURCHASE_HISTORY',
+]);
+
+/** Supplier suite — partner-ledger SSOT (skip generic dump). */
+const SUPPLIER_SSOT_REPORTS = new Set<ReportType>([
+  'SUPPLIER_STATEMENT',
+  'AP_LEDGER',
+]);
+
+/** Reports that must pick one supplier before generate. */
+const SUPPLIER_REQUIRED_REPORTS = new Set<ReportType>(['SUPPLIER_STATEMENT']);
+
+/** Financial + ops reports with dedicated SSOT layouts (skip generic dump). */
+const FINANCIAL_SSOT_REPORTS = new Set<string>([
+  'PAYMENT_REPORT',
+  'PROFIT_LOSS',
+  'PROFIT_MARGIN_BY_PRODUCT',
+  'DAILY_CASH_FLOW',
+  'CASH_REGISTER_SESSION',
+  'CASH_REGISTER_SESSION_SUMMARY',
+  'CASH_REGISTER_MOVEMENT_BREAKDOWN',
+  'CASH_REGISTER_SESSION_HISTORY',
+  'SALES_RETURNS_ALLOWANCES',
+  'PURCHASE_RETURNS_ALLOWANCES',
+  'NOTE_REGISTER',
+  'TAX_REVERSAL',
+  'SALES_BY_CASHIER',
+  'SALES_COMPARISON',
+  'REFUND_REPORT',
+  'VOID_SALES_REPORT',
+  'EXPIRING_ITEMS',
+]);
+
+/** True when this report type has a dedicated renderer — never also dump generic summary/table. */
+function isSsotReportType(reportType: string | undefined | null): boolean {
+  if (!reportType) return false;
+  return (
+    CUSTOMER_SSOT_REPORTS.has(reportType as ReportType) ||
+    SUPPLIER_SSOT_REPORTS.has(reportType as ReportType) ||
+    FINANCIAL_SSOT_REPORTS.has(reportType)
+  );
+}
+
 const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'SALES_REPORT',
@@ -377,7 +470,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'EXPIRING_ITEMS',
     label: 'Expiring Items',
-    description: 'Products approaching expiry dates with potential loss',
+    description:
+      'Shelf-life register — expired and near-expiry batches on hand, value at cost, urgency bands',
     requiresDateRange: false,
     supportsFilters: ['daysAhead', 'category'],
     category: 'Inventory',
@@ -422,7 +516,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'PAYMENT_REPORT',
     label: 'Payment Report',
-    description: 'Payment method breakdown with transaction counts',
+    description:
+      'Payment method breakdown — liquid receipts with counts, totals, and share of period collections',
     requiresDateRange: true,
     supportsFilters: ['paymentMethod'],
     category: 'Financial',
@@ -431,7 +526,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'CUSTOMER_PAYMENTS',
     label: 'Customer Payments',
-    description: 'Outstanding balances, overdue amounts, and payment history',
+    description:
+      'Collections by payment date, open-item outstanding/overdue, and payment history lines (AR receipts)',
     requiresDateRange: true,
     supportsFilters: ['customer', 'status'],
     category: 'Customer',
@@ -440,7 +536,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'PROFIT_LOSS',
     label: 'Profit & Loss',
-    description: 'Comprehensive P&L statement with COGS and margins',
+    description:
+      'Profit & loss — revenue, COGS, gross profit, operating expenses, and net margin for the period',
     requiresDateRange: true,
     supportsFilters: ['groupBy'],
     category: 'Financial',
@@ -485,7 +582,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'CUSTOMER_ACCOUNT_STATEMENT',
     label: 'Customer Account Statement',
-    description: 'Transaction history and balance tracking per customer',
+    description:
+      'Customer account statement — opening/closing balance, invoices, payments, credit/debit notes',
     requiresDateRange: true,
     supportsFilters: ['customer'],
     category: 'Customer',
@@ -494,7 +592,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'CUSTOMER_AGING_REPORT',
     label: 'Customer Aging Report',
-    description: 'Outstanding customer balances by aging periods (0-30, 31-60, 61-90, 90+ days)',
+    description:
+      'Open-item aged receivables (0-30, 31-60, 61-90, 90+) net of on-account receipts',
     requiresDateRange: false,
     supportsFilters: [],
     category: 'Customer',
@@ -503,7 +602,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'PROFIT_MARGIN_BY_PRODUCT',
     label: 'Profit Margin by Product',
-    description: 'Product-level profitability analysis with margins',
+    description:
+      'Product profitability — revenue, cost, gross profit, and margin % by SKU',
     requiresDateRange: true,
     supportsFilters: ['category', 'minMargin'],
     category: 'Financial',
@@ -512,7 +612,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'DAILY_CASH_FLOW',
     label: 'Daily Cash Flow',
-    description: 'Cash in/out tracking by payment method',
+    description:
+      'Daily cash journal — POS liquid receipts, AR collections, deposits; credit sales as memo only',
     requiresDateRange: true,
     supportsFilters: [],
     category: 'Financial',
@@ -530,7 +631,7 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'TOP_CUSTOMERS',
     label: 'Top Customers',
-    description: 'Customer ranking by revenue, orders, or profit',
+    description: 'Customer ranking by revenue, orders, or profit (voids excluded; AR open-item outstanding)',
     requiresDateRange: true,
     supportsFilters: ['limit', 'sortBy'],
     category: 'Customer',
@@ -593,7 +694,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'SALES_COMPARISON',
     label: 'Sales Comparison',
-    description: 'Period-over-period comparison with growth metrics',
+    description:
+      'Period-over-period sales — compare current vs previous range by day, week, or month (aligned by sequence, not calendar date)',
     requiresDateRange: true,
     supportsFilters: ['groupBy'],
     category: 'Sales',
@@ -602,7 +704,7 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'CUSTOMER_PURCHASE_HISTORY',
     label: 'Customer Purchase History',
-    description: 'Detailed transaction history for individual customers',
+    description: 'Sale history for a customer (excludes voided/refunded tickets)',
     requiresDateRange: true,
     supportsFilters: ['customer'],
     category: 'Customer',
@@ -638,7 +740,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'CASH_REGISTER_SESSION',
     label: 'Cash Register Session Summary',
-    description: 'Detailed summary of a specific cash register session',
+    description:
+      'Cash register session — opening float, sales, refunds, drops, expected vs counted cash',
     requiresDateRange: false,
     supportsFilters: ['sessionId'],
     category: 'Financial',
@@ -647,7 +750,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'CASH_REGISTER_MOVEMENT_BREAKDOWN',
     label: 'Cash Register Movement Breakdown',
-    description: 'Breakdown of cash movements by type (sales, refunds, adjustments)',
+    description:
+      'Cash drawer journal by movement type — sales, refunds, cash in/out, and adjustments',
     requiresDateRange: true,
     supportsFilters: [],
     category: 'Financial',
@@ -656,7 +760,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'CASH_REGISTER_SESSION_HISTORY',
     label: 'Cash Register Session History',
-    description: 'Historical view of all cash register sessions',
+    description:
+      'Historical till sessions with open/close times, cashiers, and variance',
     requiresDateRange: true,
     supportsFilters: ['cashierId'],
     category: 'Financial',
@@ -666,7 +771,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'SALES_RETURNS_ALLOWANCES',
     label: 'Sales Returns & Allowances',
-    description: 'P&L impact of customer credit notes — returns, discounts, and allowances',
+    description:
+      'Sales returns & allowances — customer credit notes impacting revenue and tax',
     requiresDateRange: true,
     supportsFilters: [],
     category: 'Financial',
@@ -675,7 +781,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'PURCHASE_RETURNS_ALLOWANCES',
     label: 'Purchase Returns & Allowances',
-    description: 'P&L impact of supplier credit notes — purchase returns and deductions',
+    description:
+      'Purchase returns & allowances — supplier credit notes impacting purchases and AP',
     requiresDateRange: true,
     supportsFilters: [],
     category: 'Financial',
@@ -684,7 +791,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'AR_LEDGER',
     label: 'Accounts Receivable Ledger',
-    description: 'GL-sourced AR ledger with invoices, credit notes, debit notes, and running balance',
+    description:
+      'GL control account 1200 ledger — invoices, payments, CN/DN, running balance (same axis as statement)',
     requiresDateRange: true,
     supportsFilters: ['customer'],
     category: 'Customer',
@@ -693,7 +801,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'AP_LEDGER',
     label: 'Accounts Payable Ledger',
-    description: 'GL-sourced AP ledger with supplier invoices, credit notes, and running balance',
+    description:
+      'Accounts payable ledger — bills, payments, credit/debit notes, running balance; filter one supplier or all',
     requiresDateRange: true,
     supportsFilters: ['supplier'],
     category: 'Supplier',
@@ -702,7 +811,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'NOTE_REGISTER',
     label: 'Credit / Debit Note Register',
-    description: 'Complete register of all credit and debit notes with status and GL references',
+    description:
+      'Complete CN/DN register (customer & supplier) with status, tax, and GL document references',
     requiresDateRange: true,
     supportsFilters: ['noteSide', 'noteDocumentType', 'status'],
     category: 'Financial',
@@ -711,7 +821,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'TAX_REVERSAL',
     label: 'Tax Reversal Report',
-    description: 'Tax impact of credit and debit notes for VAT/GST reconciliation',
+    description:
+      'Tax impact of credit and debit notes for VAT/GST period reconciliation',
     requiresDateRange: true,
     supportsFilters: [],
     category: 'Financial',
@@ -720,7 +831,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'TAX_COMPLIANCE',
     label: 'Tax Compliance Reports',
-    description: 'VAT summary, WHT register, and tax liability rollforward (accounting SSOT)',
+    description:
+      'VAT summary, WHT register, and tax liability rollforward',
     requiresDateRange: true,
     supportsFilters: [],
     category: 'Financial',
@@ -739,7 +851,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'SUPPLIER_STATEMENT',
     label: 'Supplier Statement',
-    description: 'Account statement for a specific supplier with invoices, payments, CN/DN, and balance',
+    description:
+      'Supplier account statement — bills, payments, credit/debit notes, opening/closing balance',
     requiresDateRange: true,
     supportsFilters: ['supplier'],
     category: 'Supplier',
@@ -757,7 +870,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'VOID_SALES_REPORT',
     label: 'Void Sales Report',
-    description: 'All voided/cancelled sales with reason analysis, GL reversal amounts, and operator tracking',
+    description:
+      'Cancellation register — voided sales with reason, operator, accounting reversal docs (not credit-memo returns)',
     requiresDateRange: true,
     supportsFilters: [],
     category: 'Sales',
@@ -766,7 +880,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'REFUND_REPORT',
     label: 'Refund / Returns Report',
-    description: 'Credit memo register with full/partial refund breakdown, top refunded products, and GL posting details',
+    description:
+      'Credit memo register — document headers, line reversals (revenue/COGS/profit), stock return proof, top products',
     requiresDateRange: true,
     supportsFilters: [],
     category: 'Sales',
@@ -775,7 +890,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'ORDERS_REPORT',
     label: 'Orders Report',
-    description: 'All orders with creator, assigned cashier, status, and completion/cancellation details',
+    description:
+      'Order register — pick columns to show or export (status, creator, cashier, cancel detail)',
     requiresDateRange: true,
     supportsFilters: ['status', 'userId'],
     category: 'Sales',
@@ -784,7 +900,8 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'CANCELLED_ORDERS_REPORT',
     label: 'Cancelled Orders Report',
-    description: 'Cancelled orders with cancellation reasons, who cancelled, and lost value analysis',
+    description:
+      'Cancelled orders designer — choose columns for reasons, canceller, and lost value export',
     requiresDateRange: true,
     supportsFilters: ['userId'],
     category: 'Sales',
@@ -806,6 +923,17 @@ interface ReportDataSummary {
   totalTransactions?: number;
   creditExtended?: number;
   businessInsights?: string | string[];
+  openingBalance?: number;
+  closingBalance?: number;
+  totalOutstanding?: number;
+  unallocatedReceiptsTotal?: number;
+  collectionsInPeriod?: number;
+  collectionCount?: number;
+  totalDebits?: number;
+  totalCredits?: number;
+  totalDebit?: number;
+  totalCredit?: number;
+  isCustomerCredit?: boolean;
   // Cash register session summary
   openingFloat?: number;
   expectedClosing?: number;
@@ -883,6 +1011,8 @@ interface ReportData {
   data: Record<string, unknown>[];
   customer?: ReportDataCustomer;
   transactions?: Record<string, unknown>[];
+  paymentLines?: Array<Record<string, unknown>>;
+  unallocatedReceiptsTotal?: number;
   byCategory?: ReportDataCategoryRow[];
   payments?: SupplierPaymentRecord[];
   // Void sales report
@@ -967,7 +1097,7 @@ export default function ReportsPage() {
 
   // Supplier Statement specific state
   const [supplierId, setSupplierId] = useState<string>('');
-  const [suppliersList, setSuppliersList] = useState<Array<{ id: string; name: string }>>([])
+  const [suppliersList, setSuppliersList] = useState<Array<{ id: string; supplierNumber: string; name: string }>>([]);
   const [suppliersLoading, setSuppliersLoading] = useState(false);
 
   // Note Register filters
@@ -988,9 +1118,10 @@ export default function ReportsPage() {
   const [sbcProductsList, setSbcProductsList] = useState<Array<{ id: string; name: string }>>([]);
   const [sbcProductsLoading, setSbcProductsLoading] = useState(false);
 
-  // Fetch customers when customer reports are selected
+  // Fetch customers for any report that supports the shared customer picker
   useEffect(() => {
-    if (selectedReport === 'CUSTOMER_PURCHASE_HISTORY' || selectedReport === 'CUSTOMER_ACCOUNT_STATEMENT' || selectedReport === 'AR_LEDGER') {
+    const option = REPORT_OPTIONS.find((r) => r.value === selectedReport);
+    if (option?.supportsFilters.includes('customer')) {
       setCustomersLoading(true);
       const token = localStorage.getItem('auth_token');
       api.get('/customers', {
@@ -1011,9 +1142,10 @@ export default function ReportsPage() {
     }
   }, [selectedReport]);
 
-  // Fetch suppliers when supplier statement or AP ledger is selected
+  // Fetch suppliers for any report that supports the shared supplier picker
   useEffect(() => {
-    if (selectedReport === 'SUPPLIER_STATEMENT' || selectedReport === 'AP_LEDGER') {
+    const option = REPORT_OPTIONS.find((r) => r.value === selectedReport);
+    if (option?.supportsFilters.includes('supplier')) {
       setSuppliersLoading(true);
       const token = localStorage.getItem('auth_token');
       api.get('/suppliers', {
@@ -1023,9 +1155,13 @@ export default function ReportsPage() {
         .then(res => {
           const data = res.data?.data;
           const list = Array.isArray(data) ? data : data?.data || [];
-          setSuppliersList(list.map((s: Record<string, unknown>) => ({ id: String(s.id), name: String(s.name || s.CompanyName || '') })));
+          setSuppliersList(list.map((s: Record<string, unknown>) => ({
+            id: String(s.id),
+            supplierNumber: String(s.supplierNumber || s.SupplierCode || ''),
+            name: String(s.name || s.CompanyName || ''),
+          })));
         })
-        .catch(() => { /* suppliers fetch failed, user can still type UUID */ })
+        .catch(() => { /* suppliers fetch failed */ })
         .finally(() => setSuppliersLoading(false));
     }
   }, [selectedReport]);
@@ -1113,10 +1249,56 @@ export default function ReportsPage() {
       return;
     }
 
+    if (selectedReport === 'ORDERS_REPORT') {
+      navigate('/reports/orders');
+      return;
+    }
+
+    if (selectedReport === 'CANCELLED_ORDERS_REPORT') {
+      navigate('/reports/orders?mode=cancelled');
+      return;
+    }
+
+    // Aging uses its own SSOT component (single fetch) — no duplicate generate API
+    if (selectedReport === 'CUSTOMER_AGING_REPORT') {
+      setError(null);
+      setReportData({
+        reportType: 'CUSTOMER_AGING_REPORT',
+        reportName: 'Customer Aging Report',
+        generatedAt: new Date().toISOString(),
+        data: [],
+        summary: {},
+        recordCount: 0,
+        executionTimeMs: 0,
+      });
+      return;
+    }
+
     const reportOption = REPORT_OPTIONS.find((r) => r.value === selectedReport);
     if (reportOption?.requiresDateRange && (!startDate || !endDate)) {
       setError('Please select start and end dates');
       return;
+    }
+
+    if (
+      selectedReport &&
+      CUSTOMER_REQUIRED_REPORTS.has(selectedReport) &&
+      !customerId.trim()
+    ) {
+      setError('Please select a customer');
+      return;
+    }
+
+    if (selectedReport === 'SUPPLIER_STATEMENT' && !supplierId.trim()) {
+      setError('Please select a supplier for Supplier Statement');
+      return;
+    }
+
+    if (selectedReport === 'SALES_COMPARISON') {
+      if (!previousStartDate || !previousEndDate) {
+        setError('Please select previous period start and end dates');
+        return;
+      }
     }
 
     setIsLoading(true);
@@ -1161,12 +1343,13 @@ export default function ReportsPage() {
         params.previousEndDate = previousEndDate;
         params.groupBy = groupBy;
       } else if (selectedReport === 'CUSTOMER_PURCHASE_HISTORY') {
-        // Customer Purchase History requires customer ID (UUID)
         params.customerId = customerId;
       } else if (selectedReport === 'CUSTOMER_ACCOUNT_STATEMENT') {
-        // Customer Account Statement requires customer number (CUST-0001)
         const selectedCustomer = customersList.find(c => c.id === customerId);
         params.customerNumber = selectedCustomer?.customerNumber || customerId;
+      } else if (selectedReport === 'CUSTOMER_PAYMENTS') {
+        if (customerId) params.customerId = customerId;
+        if (status) params.status = status;
       } else if (selectedReport === 'SALES_SUMMARY_BY_DATE') {
         // Sales Summary by Date - requires groupBy
         params.groupBy = groupBy;
@@ -1182,11 +1365,6 @@ export default function ReportsPage() {
         if (noteDocumentType) params.documentType = noteDocumentType;
         if (status) params.status = status;
       } else if (selectedReport === 'SUPPLIER_STATEMENT') {
-        if (!supplierId.trim()) {
-          setError('Please select a supplier for Supplier Statement');
-          setIsLoading(false);
-          return;
-        }
         params.supplierId = supplierId;
       } else if (selectedReport === 'ORDERS_REPORT') {
         if (status) params.status = status;
@@ -1196,6 +1374,14 @@ export default function ReportsPage() {
         if (sbcCashierId) params.cashierId = sbcCashierId;
         if (sbcOrderedById) params.orderedById = sbcOrderedById;
         if (sbcProductId) params.productId = sbcProductId;
+      }
+
+      // Shared supplier filter for any report that declares it
+      if (
+        reportOption?.supportsFilters.includes('supplier') &&
+        supplierId.trim()
+      ) {
+        params.supplierId = supplierId;
       }
 
       const { data: result } = await api.post('/reports/generate', params);
@@ -1217,6 +1403,10 @@ export default function ReportsPage() {
     const reportOption = REPORT_OPTIONS.find((r) => r.value === selectedReport);
     if (reportOption?.requiresDateRange && (!startDate || !endDate)) {
       alert('Please select start and end dates');
+      return;
+    }
+    if (selectedReport === 'SUPPLIER_STATEMENT' && !supplierId.trim()) {
+      alert('Please select a supplier');
       return;
     }
 
@@ -1304,6 +1494,13 @@ export default function ReportsPage() {
         params.append('customer_number', selectedCustomer?.customerNumber || customerId);
       } else if (selectedReport === 'CUSTOMER_PURCHASE_HISTORY' && customerId) {
         params.append('customer_id', customerId);
+      } else if (selectedReport === 'CUSTOMER_PAYMENTS') {
+        if (customerId) params.append('customer_id', customerId);
+        if (status) params.append('status', status);
+      } else if (selectedReport === 'AR_LEDGER' && customerId) {
+        params.append('customer_id', customerId);
+      } else if (selectedReport === 'AP_LEDGER' && supplierId) {
+        params.append('supplier_id', supplierId);
       } else if (selectedReport === 'WASTE_DAMAGE_REPORT' && reason) {
         params.append('reason', reason);
       } else if (selectedReport === 'SALES_COMPARISON') {
@@ -1320,7 +1517,11 @@ export default function ReportsPage() {
       }
 
       // Use relative URL to go through Vite proxy (avoids CORS issues)
-      const url = `/api/reports/${endpoint}?${params.toString()}`;
+      const path =
+        selectedReport === 'SUPPLIER_STATEMENT' && supplierId
+          ? `supplier-statement/${supplierId}`
+          : endpoint;
+      const url = `/api/reports/${path}?${params.toString()}`;
 
       const response = await fetch(url, {
         method: 'GET',
@@ -1494,7 +1695,7 @@ export default function ReportsPage() {
         {selectedReportOption.supportsFilters.includes('daysAhead') && (
           <div>
             <label htmlFor="daysAhead" className="block text-sm font-semibold text-gray-700 mb-2">
-              Days Ahead
+              Expiry horizon (days)
             </label>
             <input
               id="daysAhead"
@@ -1689,7 +1890,7 @@ export default function ReportsPage() {
 
         {/* Sales Comparison - Previous Period Dates */}
         {selectedReport === 'SALES_COMPARISON' && (
-          <div className="col-span-full">
+          <div className="col-span-full space-y-3">
             <DateRangeFilter
               startDate={previousStartDate}
               endDate={previousEndDate}
@@ -1698,34 +1899,43 @@ export default function ReportsPage() {
               label="Previous Period"
               defaultPreset="LAST_MONTH"
             />
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <button
+                type="button"
+                className="px-3 py-1.5 text-sm font-medium rounded-md border border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
+                onClick={() => {
+                  if (!startDate || !endDate) return;
+                  const prior = equalLengthPriorRange(startDate, endDate);
+                  setPreviousStartDate(prior.start);
+                  setPreviousEndDate(prior.end);
+                }}
+              >
+                Use equal-length period before current
+              </button>
+              <p className="text-xs text-slate-500">
+                Buckets are paired by sequence (1st week ↔ 1st week), not by matching calendar dates.
+              </p>
+            </div>
           </div>
         )}
 
-        {/* Customer Purchase History / Account Statement - Customer Dropdown */}
-        {(selectedReport === 'CUSTOMER_PURCHASE_HISTORY' || selectedReport === 'CUSTOMER_ACCOUNT_STATEMENT') && (
-          <div>
-            <label htmlFor="customerId" className="block text-sm font-semibold text-gray-700 mb-2">
-              Customer
-            </label>
-            <select
-              id="customerId"
-              value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              aria-label="Select customer"
-              disabled={customersLoading}
-            >
-              <option value="">
-                {customersLoading ? 'Loading customers...' : '-- Select Customer --'}
-              </option>
-              {customersList.map((c) => (
-                <option key={c.id} value={c.id}>{c.customerNumber} — {c.name}</option>
-              ))}
-            </select>
-            <p className="text-xs text-gray-500 mt-1">
-              {selectedReport === 'CUSTOMER_ACCOUNT_STATEMENT' ? 'Required: Select a customer' : 'Select a customer to view purchase history'}
-            </p>
-          </div>
+        {/* Shared searchable customer picker — same design for all customer-filter reports */}
+        {selectedReportOption?.supportsFilters.includes('customer') && selectedReport && (
+          <ReportCustomerCombobox
+            id="reportCustomerId"
+            value={customerId}
+            onChange={setCustomerId}
+            customers={customersList}
+            loading={customersLoading}
+            required={CUSTOMER_REQUIRED_REPORTS.has(selectedReport)}
+            allowEmpty={!CUSTOMER_REQUIRED_REPORTS.has(selectedReport)}
+            emptyLabel={
+              CUSTOMER_REQUIRED_REPORTS.has(selectedReport)
+                ? '-- Select Customer --'
+                : '-- All Customers --'
+            }
+            helperText="Type to search by name or CUST-####"
+          />
         )}
 
         {/* Cash Register Session - Session ID */}
@@ -1747,55 +1957,23 @@ export default function ReportsPage() {
           </div>
         )}
 
-        {/* Supplier Statement / AP Ledger - Supplier Dropdown */}
-        {(selectedReport === 'SUPPLIER_STATEMENT' || selectedReport === 'AP_LEDGER') && (
-          <div>
-            <label htmlFor="supplierId" className="block text-sm font-semibold text-gray-700 mb-2">
-              Supplier
-            </label>
-            <select
-              id="supplierId"
-              value={supplierId}
-              onChange={(e) => setSupplierId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              aria-label="Select supplier"
-              disabled={suppliersLoading}
-            >
-              <option value="">
-                {suppliersLoading ? 'Loading suppliers...' : selectedReport === 'SUPPLIER_STATEMENT' ? '-- Select Supplier (Required) --' : '-- All Suppliers --'}
-              </option>
-              {suppliersList.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-            <p className="text-xs text-gray-500 mt-1">
-              {selectedReport === 'SUPPLIER_STATEMENT' ? 'Required: Select a supplier' : 'Optional: Filter by supplier'}
-            </p>
-          </div>
-        )}
-
-        {/* AR Ledger - Customer Dropdown */}
-        {selectedReport === 'AR_LEDGER' && (
-          <div>
-            <label htmlFor="arCustomerId" className="block text-sm font-semibold text-gray-700 mb-2">
-              Customer (Optional)
-            </label>
-            <select
-              id="arCustomerId"
-              value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              aria-label="Select customer for AR Ledger"
-              disabled={customersLoading}
-            >
-              <option value="">
-                {customersLoading ? 'Loading customers...' : '-- All Customers --'}
-              </option>
-              {customersList.map((c) => (
-                <option key={c.id} value={c.id}>{c.customerNumber} — {c.name}</option>
-              ))}
-            </select>
-          </div>
+        {/* Supplier picker — searchable (Statement required; AP Ledger / others allow All) */}
+        {selectedReportOption?.supportsFilters.includes('supplier') && (
+          <ReportSupplierCombobox
+            id="supplierId"
+            value={supplierId}
+            onChange={setSupplierId}
+            suppliers={suppliersList}
+            loading={suppliersLoading}
+            required={SUPPLIER_REQUIRED_REPORTS.has(selectedReport)}
+            allowEmpty={!SUPPLIER_REQUIRED_REPORTS.has(selectedReport)}
+            emptyLabel={
+              SUPPLIER_REQUIRED_REPORTS.has(selectedReport)
+                ? '-- Select Supplier --'
+                : '-- All Suppliers --'
+            }
+            helperText="Type to search by name or SUP-####"
+          />
         )}
 
         {/* Note Register - Side filter */}
@@ -1914,7 +2092,8 @@ export default function ReportsPage() {
 
     return (
       <div className="space-y-6">
-        {/* Report Header - Enhanced */}
+        {/* Report Header — skip for self-contained SSOT panels (e.g. aging) */}
+        {reportData.reportType !== 'CUSTOMER_AGING_REPORT' && (
         <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6 rounded-xl shadow-lg">
           <div className="flex items-center justify-between">
             <div>
@@ -1932,166 +2111,291 @@ export default function ReportsPage() {
             </div>
           </div>
         </div>
+        )}
 
-        {/* Daily Cash Flow - Mobile-Optimized Summary */}
+        {/* Sales Comparison — period-over-period (ordinal align) */}
+        {reportData.reportType === 'SALES_COMPARISON' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Period-over-period: </span>
+              Current and previous ranges are bucketed separately, then paired by position
+              (1st week of current vs 1st week of previous). When previous sales are zero,
+              % change shows — (no baseline), not 100%.
+            </p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Current sales</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary?.currentPeriodSales ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Previous sales</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary?.previousPeriodSales ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Difference</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary?.totalDifference ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-teal-700 mb-1">% change</p>
+                <p className="text-xl font-bold text-teal-800">
+                  {formatPoPPercent(reportData.summary?.overallPercentageChange)}
+                </p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3 flex justify-between">
+                <h4 className="text-base font-semibold text-white">Aligned buckets</h4>
+                <span className="text-slate-300 text-xs">{reportData.data?.length || 0} rows</span>
+              </div>
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">No sales in either period.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Current period</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Previous period</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Current sales</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Previous sales</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Difference</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">% change</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Txn (cur)</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Txn (prev)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => {
+                        const pct = row.percentageChange;
+                        const pctTone =
+                          pct === null || pct === undefined
+                            ? 'text-slate-500'
+                            : Number(pct) > 0.009
+                              ? 'text-teal-800'
+                              : Number(pct) < -0.009
+                                ? 'text-red-700'
+                                : 'text-slate-800';
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50">
+                            <td className="px-3 py-2.5 font-mono text-xs">{String(row.period ?? '')}</td>
+                            <td className="px-3 py-2.5 font-mono text-xs text-slate-600">
+                              {String(row.previousPeriod ?? '—')}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                              {formatCurrency(Number(row.currentSales ?? 0))}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">
+                              {formatCurrency(Number(row.previousSales ?? 0))}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">
+                              {formatCurrency(Number(row.difference ?? 0))}
+                            </td>
+                            <td className={`px-3 py-2.5 text-right tabular-nums font-semibold ${pctTone}`}>
+                              {formatPoPPercent(pct)}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">
+                              {Number(row.currentTransactions ?? 0)}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">
+                              {Number(row.previousTransactions ?? 0)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Daily Cash Flow — cash journal */}
         {reportData.reportType === 'DAILY_CASH_FLOW' && reportData.summary ? (
           <div className="space-y-4">
-            {/* Key Metrics Overview */}
-            <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-              <div className="bg-gradient-to-r from-green-500 to-green-600 px-4 sm:px-6 py-3">
-                <h4 className="text-base sm:text-lg font-semibold text-white">💰 Cash Flow Overview</h4>
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Cash journal: </span>
+              <strong>Cash in</strong> = POS liquid receipts + AR collections (Undeposited Funds) + customer deposits.
+              Credit sales are shown as <strong>memo only</strong> — they do not increase cash.
+            </p>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-teal-700 mb-1">Total cash in</p>
+                <p className="text-xl font-bold text-teal-800">
+                  {formatCurrency(Number(reportData.summary.totalCashIn ?? 0))}
+                </p>
+                <p className="text-xs text-teal-700/80 mt-1">
+                  {Number(reportData.summary.totalTransactions ?? 0)} receipt(s) · {Number(reportData.summary.totalDays ?? 0)} day(s)
+                </p>
               </div>
-              <div className="p-4 sm:p-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="text-center">
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Total Cash In</p>
-                    <p className="text-2xl sm:text-3xl font-bold text-green-600">{formatCurrency(reportData.summary.totalCashIn ?? 0)}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Profit Margin</p>
-                    <p className="text-2xl sm:text-3xl font-bold text-blue-600">{reportData.summary.overallProfitMargin?.toFixed(1)}%</p>
-                  </div>
-                </div>
-
-                {/* Revenue Split Visualization */}
-                <div className="mt-6">
-                  <p className="text-sm font-medium text-gray-700 mb-3">Revenue Composition</p>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                        <span className="text-sm text-gray-600">Sales Revenue</span>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm font-semibold text-gray-900">{formatCurrency(reportData.summary.salesRevenue ?? 0)}</div>
-                        <div className="text-xs text-gray-500">{reportData.summary.salesPercent?.toFixed(1)}%</div>
-                      </div>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2 relative">
-                      <div className={`absolute left-0 top-0 bg-green-500 h-2 rounded-full transition-all duration-300 ${(reportData.summary.salesPercent || 0) >= 90 ? 'w-11/12' :
-                        (reportData.summary.salesPercent || 0) >= 75 ? 'w-3/4' :
-                          (reportData.summary.salesPercent || 0) >= 50 ? 'w-1/2' :
-                            (reportData.summary.salesPercent || 0) >= 25 ? 'w-1/4' : 'w-1/12'
-                        }`}></div>
-                    </div>
-
-                    <div className="flex items-center justify-between mt-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                        <span className="text-sm text-gray-600">Collections</span>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm font-semibold text-gray-900">{formatCurrency(reportData.summary.debtCollections ?? 0)}</div>
-                        <div className="text-xs text-gray-500">{reportData.summary.collectionsPercent?.toFixed(1)}%</div>
-                      </div>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2 relative">
-                      <div className={`absolute left-0 top-0 bg-blue-500 h-2 rounded-full transition-all duration-300 ${(reportData.summary.collectionsPercent || 0) >= 90 ? 'w-11/12' :
-                        (reportData.summary.collectionsPercent || 0) >= 75 ? 'w-3/4' :
-                          (reportData.summary.collectionsPercent || 0) >= 50 ? 'w-1/2' :
-                            (reportData.summary.collectionsPercent || 0) >= 25 ? 'w-1/4' : 'w-1/12'
-                        }`}></div>
-                    </div>
-
-                    {/* Customer Deposits bar */}
-                    {(reportData.summary.depositReceipts ?? 0) > 0 && (
-                      <>
-                        <div className="flex items-center justify-between mt-3">
-                          <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
-                            <span className="text-sm text-gray-600">Customer Deposits</span>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm font-semibold text-gray-900">{formatCurrency(reportData.summary.depositReceipts ?? 0)}</div>
-                            <div className="text-xs text-gray-500">{reportData.summary.depositsPercent?.toFixed(1)}%</div>
-                          </div>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2 relative">
-                          <div className={`absolute left-0 top-0 bg-purple-500 h-2 rounded-full transition-all duration-300 ${(reportData.summary.depositsPercent || 0) >= 90 ? 'w-11/12' :
-                            (reportData.summary.depositsPercent || 0) >= 75 ? 'w-3/4' :
-                              (reportData.summary.depositsPercent || 0) >= 50 ? 'w-1/2' :
-                                (reportData.summary.depositsPercent || 0) >= 25 ? 'w-1/4' : 'w-1/12'
-                            }`}></div>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">POS receipts</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary.salesRevenue ?? 0))}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {Number(reportData.summary.salesTransactionCount ?? 0)} ticket(s)
+                </p>
+              </div>
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-blue-700 mb-1">AR collections</p>
+                <p className="text-xl font-bold text-blue-800">
+                  {formatCurrency(Number(reportData.summary.debtCollections ?? 0))}
+                </p>
+                <p className="text-xs text-blue-700/80 mt-1">
+                  {Number(reportData.summary.collectionsTransactionCount ?? 0)} payment(s)
+                </p>
+              </div>
+              <div className="rounded-lg border border-purple-200 bg-purple-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-purple-700 mb-1">Customer deposits</p>
+                <p className="text-xl font-bold text-purple-900">
+                  {formatCurrency(Number(reportData.summary.depositReceipts ?? 0))}
+                </p>
+                <p className="text-xs text-purple-700/80 mt-1">
+                  {Number(reportData.summary.depositsTransactionCount ?? 0)} deposit(s)
+                </p>
               </div>
             </div>
 
-            {/* Performance Details - Collapsible */}
-            <details className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-              <summary className="bg-gradient-to-r from-blue-500 to-blue-600 px-4 sm:px-6 py-3 cursor-pointer">
-                <h4 className="text-base sm:text-lg font-semibold text-white inline">📊 Performance Details</h4>
-              </summary>
-              <div className="p-4 sm:p-6">
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Days Analyzed</p>
-                    <p className="text-lg font-bold text-gray-900">{reportData.summary.totalDays}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Total Sales</p>
-                    <p className="text-lg font-bold text-green-600">{formatCurrency(reportData.summary.totalSalesValue ?? 0)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Gross Profit</p>
-                    <p className="text-lg font-bold text-green-600">{formatCurrency(reportData.summary.grossProfit ?? 0)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Transactions</p>
-                    <p className="text-lg font-bold text-blue-600">{reportData.summary.totalTransactions}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Credit Extended</p>
-                    <p className="text-lg font-bold text-orange-600">{formatCurrency(reportData.summary.creditExtended ?? 0)}</p>
-                  </div>
-                  {(reportData.summary.depositReceipts ?? 0) > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Deposit Receipts</p>
-                      <p className="text-lg font-bold text-purple-600">{formatCurrency(reportData.summary.depositReceipts ?? 0)}</p>
-                    </div>
-                  )}
-                </div>
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Sales booked (incl. credit)</p>
+                <p className="text-lg font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary.totalSalesValue ?? 0))}
+                </p>
               </div>
-            </details>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Gross profit / margin</p>
+                <p className="text-lg font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary.grossProfit ?? 0))}
+                  <span className="text-sm font-medium text-slate-500 ml-2">
+                    {Number(reportData.summary.overallProfitMargin ?? 0).toFixed(1)}%
+                  </span>
+                </p>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-amber-700 mb-1">Credit extended (memo)</p>
+                <p className="text-lg font-bold text-amber-800">
+                  {formatCurrency(Number(reportData.summary.creditExtended ?? 0))}
+                </p>
+              </div>
+            </div>
 
-            {/* Business Insights */}
-            {reportData.summary.businessInsights && (
-              <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-                <div className="bg-gradient-to-r from-purple-500 to-purple-600 px-4 sm:px-6 py-3">
-                  <h4 className="text-base sm:text-lg font-semibold text-white">🎯 Business Insights</h4>
-                </div>
-                <div className="p-4 sm:p-6">
-                  <div className="space-y-2">
-                    {reportData.summary.businessInsights && typeof reportData.summary.businessInsights === 'string' ?
-                      reportData.summary.businessInsights.split(',').map((insight: string, idx: number) => (
-                        <div key={idx} className="flex items-start gap-2">
-                          <span className="text-green-500 mt-1">✓</span>
-                          <span className="text-sm text-gray-700">{insight.trim()}</span>
-                        </div>
-                      )) :
-                      Array.isArray(reportData.summary.businessInsights) ?
-                        reportData.summary.businessInsights.map((insight: string, idx: number) => (
-                          <div key={idx} className="flex items-start gap-2">
-                            <span className="text-green-500 mt-1">✓</span>
-                            <span className="text-sm text-gray-700">{insight}</span>
-                          </div>
-                        )) :
-                        <div className="flex items-start gap-2">
-                          <span className="text-blue-500 mt-1">ℹ</span>
-                          <span className="text-sm text-gray-700">No business insights available</span>
-                        </div>
-                    }
+            {Array.isArray(reportData.summary.businessInsights) &&
+              reportData.summary.businessInsights.length > 0 && (
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                  <div className="bg-slate-800 px-4 py-3">
+                    <h4 className="text-sm font-semibold text-white">Notes</h4>
                   </div>
+                  <ul className="p-4 space-y-1.5 text-sm text-slate-700">
+                    {(reportData.summary.businessInsights as string[]).map((insight, idx) => (
+                      <li key={idx} className="flex gap-2">
+                        <span className="text-teal-600">•</span>
+                        <span>{insight}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
+              )}
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3 flex justify-between items-center gap-2">
+                <div>
+                  <h4 className="text-base font-semibold text-white">Cash journal lines</h4>
+                  <p className="text-slate-300 text-xs mt-0.5">By business date, flow type, and payment method</p>
+                </div>
+                <span className="text-slate-300 text-xs">{reportData.data?.length || 0} lines</span>
               </div>
-            )}
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">
+                  No cash journal lines in this period.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Flow</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Method</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Count</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Cash in</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Credit (memo)</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">GP</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => {
+                        const flow = String(row.revenueType ?? '');
+                        const flowLabel =
+                          flow === 'POS_RECEIPT' || flow === 'SALES_REVENUE'
+                            ? 'POS receipt'
+                            : flow === 'AR_COLLECTION' || flow === 'DEBT_COLLECTION'
+                              ? 'AR collection'
+                              : flow === 'CUSTOMER_DEPOSIT' || flow === 'DEPOSIT_RECEIPT'
+                                ? 'Customer deposit'
+                                : flow === 'CREDIT_EXTENDED'
+                                  ? 'Credit extended'
+                                  : flow.replace(/_/g, ' ');
+                        const flowClass =
+                          flow === 'CREDIT_EXTENDED'
+                            ? 'bg-amber-100 text-amber-800'
+                            : flow.includes('DEPOSIT')
+                              ? 'bg-purple-100 text-purple-800'
+                              : flow.includes('AR') || flow.includes('DEBT')
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-teal-100 text-teal-800';
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50">
+                            <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                              {formatDisplayDate(String(row.transactionDate ?? ''))}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <span className={`px-2 py-0.5 rounded text-xs font-semibold ${flowClass}`}>
+                                {flowLabel}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              {String(row.paymentMethod ?? '').replace(/_/g, ' ')}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">
+                              {Number(row.transactionCount ?? 0)}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-teal-800">
+                              {Number(row.cashAmount ?? 0) > 0.009
+                                ? formatCurrency(Number(row.cashAmount))
+                                : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums text-amber-800">
+                              {Number(row.creditCreated ?? 0) > 0.009
+                                ? formatCurrency(Number(row.creditCreated))
+                                : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">
+                              {Number(row.grossProfit ?? 0) > 0.009
+                                ? formatCurrency(Number(row.grossProfit))
+                                : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         ) : (
-          /* Standard Summary Statistics for Other Reports (skip PROFIT_LOSS, SALES_BY_CASHIER - have custom renderers) */
-          reportData.reportType !== 'PROFIT_LOSS' && reportData.reportType !== 'SALES_BY_CASHIER' && reportData.summary && (
+          /* Standard Summary — skip dedicated SSOT renderers */
+          !isSsotReportType(reportData.reportType) &&
+          reportData.summary && (
             <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
               <div className="bg-gradient-to-r from-purple-500 to-purple-600 px-4 sm:px-6 py-3">
                 <h4 className="text-base sm:text-lg font-semibold text-white">📊 Summary Statistics</h4>
@@ -2116,204 +2420,292 @@ export default function ReportsPage() {
 
 
 
-        {/* Void Sales Report - Breakdown by Reason */}
-        {reportData.reportType === 'VOID_SALES_REPORT' && reportData.byReason && reportData.byReason.length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-            <div className="bg-gradient-to-r from-red-500 to-red-600 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <h4 className="text-base sm:text-lg font-semibold text-white">📋 Void Reasons Breakdown</h4>
-              <span className="text-red-100 text-xs sm:text-sm">{reportData.byReason.length} reasons</span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-full">
-                <thead className="bg-gray-100 border-b-2 border-gray-300">
-                  <tr>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Reason</th>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Count</th>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Total Amount</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {(reportData.byReason as Array<{ reason: string; count: number; totalAmount: number }>).map((item, idx: number) => (
-                    <tr key={idx} className="hover:bg-red-50 transition-colors">
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-900">{item.reason}</td>
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-blue-600 font-semibold">{item.count}</td>
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-red-600 font-semibold">{formatCurrency(item.totalAmount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+        {/* Expiring Items — shelf-life / expiry register (SSOT) */}
+        {reportData.reportType === 'EXPIRING_ITEMS' && reportData.summary && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Shelf-life register: </span>
+              Active batches still on hand that are <strong>already expired</strong> or expire within
+              the horizon. Value at risk = remaining qty × unit cost (inventory cost). Urgency:
+              Expired (≤0d) · Critical (≤7d) · Warning (≤30d) · Watch (rest of horizon).
+            </p>
 
-        {/* Refund Report - Line-Level Detail (ERP Audit Grade) */}
-        {reportData.reportType === 'REFUND_REPORT' && reportData.lineItems && (reportData.lineItems as Array<{ refundNumber: string; saleNumber: string; productName: string; sku: string | null; originalSoldQty: number; refundedQty: number; remainingQty: number; unitSellingPrice: number; unitCOGS: number; lineRevenueReversed: number; lineCOGSReversed: number; profitImpact: number; returnedToStock: boolean; batchNumber: string | null }>).length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-            <div className="bg-gradient-to-r from-purple-600 to-purple-700 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <h4 className="text-base sm:text-lg font-semibold text-white">📋 Line-Level Refund Detail</h4>
-              <span className="text-purple-100 text-xs sm:text-sm">{(reportData.lineItems as Array<Record<string, unknown>>).length} lines</span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1100px]">
-                <thead className="bg-gray-100 border-b-2 border-gray-300">
-                  <tr>
-                    <th className="px-2 sm:px-3 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Refund #</th>
-                    <th className="px-2 sm:px-3 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Product</th>
-                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Sold Qty</th>
-                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Refunded</th>
-                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Remaining</th>
-                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Unit Price</th>
-                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Unit COGS</th>
-                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Rev. Reversed</th>
-                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">COGS Reversed</th>
-                    <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Profit Impact</th>
-                    <th className="px-2 sm:px-3 py-3 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Stock Return</th>
-                    <th className="px-2 sm:px-3 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Batch</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {(reportData.lineItems as Array<{ refundNumber: string; saleNumber: string; productName: string; sku: string | null; originalSoldQty: number; refundedQty: number; remainingQty: number; unitSellingPrice: number; unitCOGS: number; lineRevenueReversed: number; lineCOGSReversed: number; profitImpact: number; returnedToStock: boolean; batchNumber: string | null }>).map((line, idx: number) => (
-                    <tr key={idx} className="hover:bg-purple-50 transition-colors">
-                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs font-medium text-blue-700">{line.refundNumber}</td>
-                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs font-semibold text-gray-900">{line.productName}{line.sku ? ` (${line.sku})` : ''}</td>
-                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right text-gray-700">{line.originalSoldQty}</td>
-                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right text-red-600 font-semibold">{line.refundedQty}</td>
-                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right text-gray-700">{line.remainingQty}</td>
-                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right text-gray-900">{formatCurrency(line.unitSellingPrice)}</td>
-                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right text-gray-600">{formatCurrency(line.unitCOGS)}</td>
-                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right text-red-600 font-semibold">{formatCurrency(line.lineRevenueReversed)}</td>
-                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right text-orange-600">{formatCurrency(line.lineCOGSReversed)}</td>
-                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-right font-bold text-red-700">{formatCurrency(line.profitImpact)}</td>
-                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-center">{line.returnedToStock ? <span className="text-green-600 font-bold">✓</span> : <span className="text-red-500 font-bold">✗</span>}</td>
-                      <td className="px-2 sm:px-3 py-2 sm:py-3 text-xs text-gray-600">{line.batchNumber || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Refund Report - Top Refunded Products */}
-        {reportData.reportType === 'REFUND_REPORT' && reportData.topRefundedProducts && reportData.topRefundedProducts.length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-            <div className="bg-gradient-to-r from-amber-500 to-amber-600 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <h4 className="text-base sm:text-lg font-semibold text-white">🔝 Top Refunded Products</h4>
-              <span className="text-amber-100 text-xs sm:text-sm">{reportData.topRefundedProducts.length} products</span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-full">
-                <thead className="bg-gray-100 border-b-2 border-gray-300">
-                  <tr>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Product</th>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Times Refunded</th>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Total Qty</th>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Total Amount</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {(reportData.topRefundedProducts as Array<{ productName: string; timesRefunded: number; totalQty: number; totalAmount: number }>).map((item, idx: number) => (
-                    <tr key={idx} className="hover:bg-amber-50 transition-colors">
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-900">{item.productName}</td>
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-blue-600 font-semibold">{item.timesRefunded}</td>
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-gray-900 font-semibold">{item.totalQty}</td>
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-right text-red-600 font-semibold">{formatCurrency(item.totalAmount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Customer Account Statement - Special Layout */}
-        {reportData.reportType === 'CUSTOMER_ACCOUNT_STATEMENT' && reportData.customer && (
-          <div className="space-y-4 sm:space-y-6">
-            {/* Customer Information Card */}
-            <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-              <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 px-4 sm:px-6 py-3">
-                <h4 className="text-base sm:text-lg font-semibold text-white">👤 Customer Information</h4>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-amber-800 mb-1">Batches at risk</p>
+                <p className="text-xl font-bold text-amber-900">
+                  {Number(reportData.summary.totalItems ?? 0)}
+                </p>
+                <p className="text-xs text-amber-800/80 mt-1">
+                  Qty {Number(reportData.summary.totalQuantityAtRisk ?? 0).toLocaleString()}
+                </p>
               </div>
-              <div className="p-4 sm:p-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                  <div>
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Customer Number</p>
-                    <p className="text-base sm:text-lg font-bold text-blue-600 bg-blue-50 px-2 sm:px-3 py-1.5 sm:py-2 rounded break-all">{reportData.customer.customerNumber}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Name</p>
-                    <p className="text-base sm:text-lg font-semibold text-gray-900 break-words">{reportData.customer.name}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Email</p>
-                    <p className="text-xs sm:text-sm text-gray-700 break-all">{reportData.customer.email || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Phone</p>
-                    <p className="text-xs sm:text-sm text-gray-700">{reportData.customer.phone || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Credit Limit</p>
-                    <p className="text-base sm:text-lg font-semibold text-gray-900">{formatCurrency(reportData.customer.creditLimit ?? 0)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Current Balance</p>
-                    <p className={`text-base sm:text-lg font-bold ${(reportData.customer.currentBalance ?? 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {formatCurrency(reportData.customer.currentBalance ?? 0)}
-                    </p>
-                  </div>
-                </div>
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-red-700 mb-1">Expired</p>
+                <p className="text-xl font-bold text-red-800">
+                  {Number(reportData.summary.expiredCount ?? 0)}
+                </p>
+                <p className="text-xs text-red-700/80 mt-1">
+                  {formatCurrency(Number(reportData.summary.expiredValue ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-rose-700 mb-1">Critical ≤7d</p>
+                <p className="text-xl font-bold text-rose-800">
+                  {Number(reportData.summary.criticalCount ?? 0)}
+                </p>
+                <p className="text-xs text-rose-700/80 mt-1">
+                  {formatCurrency(Number(reportData.summary.criticalValue ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Value at risk</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary.totalPotentialLoss ?? 0))}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Warn {Number(reportData.summary.warningCount ?? 0)} · Watch{' '}
+                  {Number(reportData.summary.watchCount ?? 0)}
+                </p>
               </div>
             </div>
 
-            {/* Transactions Table */}
-            {reportData.transactions && reportData.transactions.length > 0 ? (
-              <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-                <div className="bg-gradient-to-r from-green-500 to-green-600 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                  <h4 className="text-base sm:text-lg font-semibold text-white">📋 Transaction History</h4>
-                  <span className="text-green-100 text-xs sm:text-sm">{reportData.transactions.length} transactions</span>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3 flex justify-between items-center gap-2">
+                <div>
+                  <h4 className="text-base font-semibold text-white">Expiry register</h4>
+                  <p className="text-slate-300 text-xs mt-0.5">Most urgent first · cost valuation</p>
                 </div>
+                <span className="text-slate-300 text-xs">{reportData.data?.length || 0} batches</span>
+              </div>
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">
+                  No expired or near-expiry stock on hand in this horizon.
+                </div>
+              ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-full">
-                    <thead className="bg-gray-100 border-b-2 border-gray-300">
+                  <table className="w-full min-w-[960px] text-sm">
+                    <thead className="bg-slate-50 border-b">
                       <tr>
-                        <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider whitespace-nowrap">Sale Number</th>
-                        <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider whitespace-nowrap">Date</th>
-                        <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider whitespace-nowrap">Total Amount</th>
-                        <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider whitespace-nowrap">Amount Paid</th>
-                        <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider whitespace-nowrap">Balance Due</th>
-                        <th className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider whitespace-nowrap">Status</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Urgency</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Product</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">SKU</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Batch</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Expiry</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Days</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Qty</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Unit cost</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Value at risk</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {reportData.transactions.map((transaction: Record<string, unknown>, idx: number) => (
-                        <tr key={idx} className="hover:bg-blue-50 transition-colors">
-                          <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
-                            <span className="font-semibold text-indigo-600">{String(transaction.saleNumber ?? '')}</span>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => {
+                        const days = Number(row.daysUntilExpiry ?? 0);
+                        const band = (String(row.urgency || '') as ExpiryUrgency) || classifyExpiryUrgency(days);
+                        const bandClass =
+                          band === 'expired'
+                            ? 'bg-red-100 text-red-800'
+                            : band === 'critical'
+                              ? 'bg-rose-100 text-rose-800'
+                              : band === 'warning'
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-slate-100 text-slate-700';
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50">
+                            <td className="px-3 py-2.5">
+                              <span className={`px-2 py-0.5 rounded text-xs font-semibold ${bandClass}`}>
+                                {expiryUrgencyLabel(band)}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 font-semibold text-slate-900">
+                              {String(row.productName ?? '—')}
+                            </td>
+                            <td className="px-3 py-2.5 text-xs text-slate-600 font-mono">
+                              {String(row.sku ?? '—')}
+                            </td>
+                            <td className="px-3 py-2.5 text-xs text-slate-600">
+                              {String(row.batchNumber ?? '—')}
+                            </td>
+                            <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                              {formatDisplayDate(String(row.expiryDate ?? ''))}
+                            </td>
+                            <td
+                              className={`px-3 py-2.5 text-right tabular-nums font-semibold ${
+                                days <= 0 ? 'text-red-700' : days <= 7 ? 'text-rose-700' : 'text-slate-800'
+                              }`}
+                            >
+                              {days}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">
+                              {Number(row.quantityRemaining ?? 0).toLocaleString()}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums text-slate-700">
+                              {formatCurrency(Number(row.unitCost ?? 0))}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-amber-900">
+                              {formatCurrency(Number(row.potentialLoss ?? 0))}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Void Sales Report — cancellation register (SSOT; no generic dump) */}
+        {reportData.reportType === 'VOID_SALES_REPORT' && reportData.summary && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Void / cancellation register: </span>
+              One row per sale with status <strong>VOID</strong>, dated by when the void posted.
+              Posted returns and credit memos belong on <strong>Refund / Returns</strong> — not here.
+              Accounting docs are reversal postings (comma-joined when a void reverses more than one journal).
+            </p>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-red-700 mb-1">Voided sales</p>
+                <p className="text-xl font-bold text-red-800">
+                  {Number(reportData.summary.voidedSaleCount ?? 0)}
+                </p>
+                <p className="text-xs text-red-700/80 mt-1">
+                  With acct. doc: {Number(reportData.summary.withAccountingDocCount ?? 0)} · Without:{' '}
+                  {Number(reportData.summary.withoutAccountingDocCount ?? 0)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-amber-800 mb-1">Voided amount</p>
+                <p className="text-xl font-bold text-amber-900">
+                  {formatCurrency(Number(reportData.summary.totalVoidedAmount ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">COGS voided</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary.totalVoidedCost ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-rose-700 mb-1">Lost profit</p>
+                <p className="text-xl font-bold text-rose-800">
+                  {formatCurrency(Number(reportData.summary.totalLostProfit ?? 0))}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3 flex justify-between items-center gap-2">
+                <div>
+                  <h4 className="text-base font-semibold text-white">Void documents</h4>
+                  <p className="text-slate-300 text-xs mt-0.5">One row per cancelled sale</p>
+                </div>
+                <span className="text-slate-300 text-xs">{reportData.data?.length || 0} docs</span>
+              </div>
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500 space-y-2">
+                  <p>No voided sales in this period.</p>
+                  <p className="text-xs text-slate-400 max-w-lg mx-auto">
+                    Completed POS sales are reversed with Return / Refund (credit memo), not Void.
+                    If you expected return activity, open Refund / Returns Report for the same dates.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1000px] text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Sale #</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Sale date</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Voided at</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Customer</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Amount</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Profit lost</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Reason</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Voided by</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Approved by</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Acct. doc</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Items</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-3 py-2.5 font-medium text-blue-700 whitespace-nowrap">
+                            {String(row.saleNumber ?? '—')}
                           </td>
-                          <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-900 whitespace-nowrap">
-                            {formatDisplayDate(transaction.saleDate as string | undefined)}
+                          <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                            {formatDisplayDate(String(row.saleDate ?? ''))}
                           </td>
-                          <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
-                            <span className="font-semibold text-gray-900">{formatCurrency(Number(transaction.totalAmount ?? 0))}</span>
+                          <td className="px-3 py-2.5 whitespace-nowrap text-xs tabular-nums text-slate-600">
+                            {String(row.voidedAt ?? '—')}
                           </td>
-                          <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
-                            <span className="font-semibold text-green-600">{formatCurrency(Number(transaction.amountPaid ?? 0))}</span>
+                          <td className="px-3 py-2.5">{String(row.customerName ?? '—')}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-medium text-amber-800">
+                            {formatCurrency(Number(row.totalAmount ?? 0))}
                           </td>
-                          <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
-                            <span className={`font-bold ${Number(transaction.balanceDue ?? 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                              {formatCurrency(Number(transaction.balanceDue ?? 0))}
-                            </span>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-rose-700">
+                            {formatCurrency(Number(row.profit ?? 0))}
                           </td>
-                          <td className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
-                            <span className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-xs font-semibold whitespace-nowrap ${transaction.paymentStatus === 'PAID'
-                              ? 'bg-green-100 text-green-800'
-                              : transaction.paymentStatus === 'PARTIAL'
-                                ? 'bg-yellow-100 text-yellow-800'
-                                : 'bg-red-100 text-red-800'
-                              }`}>
-                              {String(transaction.paymentStatus ?? '')}
-                            </span>
+                          <td
+                            className="px-3 py-2.5 text-xs text-slate-600 max-w-[160px] truncate"
+                            title={String(row.voidReason ?? '')}
+                          >
+                            {String(row.voidReason ?? '—')}
+                          </td>
+                          <td className="px-3 py-2.5 text-xs text-slate-600">{String(row.voidedBy ?? '—')}</td>
+                          <td className="px-3 py-2.5 text-xs text-slate-600">
+                            {String(row.voidApprovedBy ?? '—')}
+                          </td>
+                          <td
+                            className="px-3 py-2.5 text-xs text-slate-600 max-w-[120px] truncate"
+                            title={String(row.accountingDocNumber ?? '')}
+                          >
+                            {String(row.accountingDocNumber ?? '—')}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{Number(row.itemCount ?? 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {Array.isArray(reportData.byReason) && reportData.byReason.length > 0 && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="bg-slate-800 px-4 sm:px-6 py-3 flex justify-between items-center gap-2">
+                  <div>
+                    <h4 className="text-base font-semibold text-white">By void reason</h4>
+                    <p className="text-slate-300 text-xs mt-0.5">Control totals for audit</p>
+                  </div>
+                  <span className="text-slate-300 text-xs">{reportData.byReason.length} reasons</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Reason</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Count</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(
+                        reportData.byReason as Array<{
+                          reason: string;
+                          count: number;
+                          totalAmount: number;
+                        }>
+                      ).map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-3 py-2.5 font-semibold text-slate-900">{item.reason}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{item.count}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-amber-800">
+                            {formatCurrency(item.totalAmount)}
                           </td>
                         </tr>
                       ))}
@@ -2321,33 +2713,1568 @@ export default function ReportsPage() {
                   </table>
                 </div>
               </div>
-            ) : (
-              <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-6 sm:p-8 text-center">
-                <p className="text-gray-500 text-sm sm:text-lg">No transactions found for this customer in the selected period.</p>
+            )}
+          </div>
+        )}
+
+        {/* Refund Report — credit memo / returns register (SSOT; no generic dump) */}
+        {reportData.reportType === 'REFUND_REPORT' && reportData.summary && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Credit memo register: </span>
+              One row per refund document. Revenue and COGS reversals drive profit impact.
+              Accounting document numbers are linked postings (comma-joined when a refund posts more than once).
+              Line detail shows quantity, cost, and whether stock was returned.
+            </p>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-red-700 mb-1">Refunds</p>
+                <p className="text-xl font-bold text-red-800">
+                  {Number(reportData.summary.refundCount ?? 0)}
+                </p>
+                <p className="text-xs text-red-700/80 mt-1">
+                  {Number(reportData.summary.fullRefundCount ?? 0)} full ·{' '}
+                  {Number(reportData.summary.partialRefundCount ?? 0)} partial
+                </p>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-amber-800 mb-1">Revenue reversed</p>
+                <p className="text-xl font-bold text-amber-900">
+                  {formatCurrency(Number(reportData.summary.totalRevenueReversal ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">COGS reversed</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary.totalCOGSReversal ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-rose-700 mb-1">Profit impact</p>
+                <p className="text-xl font-bold text-rose-800">
+                  {formatCurrency(Number(reportData.summary.netProfitImpact ?? 0))}
+                </p>
+                <p className="text-xs text-rose-700/80 mt-1">
+                  Stock returned: {Number(reportData.summary.linesWithStockReturn ?? 0)} /{' '}
+                  {Number(reportData.summary.linesWithStockReturn ?? 0) +
+                    Number(reportData.summary.linesWithoutStockReturn ?? 0)}{' '}
+                  lines
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3 flex justify-between items-center gap-2">
+                <div>
+                  <h4 className="text-base font-semibold text-white">Refund documents</h4>
+                  <p className="text-slate-300 text-xs mt-0.5">Header register — one row per credit memo</p>
+                </div>
+                <span className="text-slate-300 text-xs">{reportData.data?.length || 0} docs</span>
+              </div>
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">No refunds in this period.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[960px] text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Refund #</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Sale #</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Customer</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Type</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Revenue</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">COGS</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Profit</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Acct. doc</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Reason</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Created by</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => {
+                        const type = String(row.refundType ?? '');
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50">
+                            <td className="px-3 py-2.5 font-medium text-blue-700 whitespace-nowrap">
+                              {String(row.refundNumber ?? '—')}
+                            </td>
+                            <td className="px-3 py-2.5 whitespace-nowrap">{String(row.saleNumber ?? '—')}</td>
+                            <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                              {formatDisplayDate(String(row.refundDate ?? ''))}
+                            </td>
+                            <td className="px-3 py-2.5">{String(row.customerName ?? '—')}</td>
+                            <td className="px-3 py-2.5">
+                              <span
+                                className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                                  type === 'Full' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                                }`}
+                              >
+                                {type || '—'}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums text-amber-800 font-medium">
+                              {formatCurrency(Number(row.totalRevenueReversal ?? 0))}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums text-slate-700">
+                              {formatCurrency(Number(row.totalCOGSReversal ?? 0))}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-rose-700">
+                              {formatCurrency(Number(row.netProfitImpact ?? 0))}
+                            </td>
+                            <td className="px-3 py-2.5 text-xs text-slate-600 max-w-[140px] truncate" title={String(row.accountingDocNumber ?? '')}>
+                              {String(row.accountingDocNumber ?? '—')}
+                            </td>
+                            <td className="px-3 py-2.5 text-xs text-slate-600 max-w-[160px] truncate" title={String(row.reason ?? '')}>
+                              {String(row.reason ?? '—')}
+                            </td>
+                            <td className="px-3 py-2.5 text-xs text-slate-600">
+                              {String(row.createdBy ?? '—')}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {Array.isArray(reportData.lineItems) && reportData.lineItems.length > 0 && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="bg-slate-800 px-4 sm:px-6 py-3 flex justify-between items-center gap-2">
+                  <div>
+                    <h4 className="text-base font-semibold text-white">Line reversals</h4>
+                    <p className="text-slate-300 text-xs mt-0.5">Product lines with qty, cost, and stock return</p>
+                  </div>
+                  <span className="text-slate-300 text-xs">{reportData.lineItems.length} lines</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1100px] text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-2 sm:px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Refund #</th>
+                        <th className="px-2 sm:px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Product</th>
+                        <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Sold</th>
+                        <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Refunded</th>
+                        <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Remain</th>
+                        <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Unit price</th>
+                        <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Unit COGS</th>
+                        <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Rev. rev.</th>
+                        <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">COGS rev.</th>
+                        <th className="px-2 sm:px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Profit</th>
+                        <th className="px-2 sm:px-3 py-3 text-center text-xs font-bold text-slate-600 uppercase">Stock</th>
+                        <th className="px-2 sm:px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Batch</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(reportData.lineItems as Array<{
+                        refundNumber: string;
+                        productName: string;
+                        sku: string | null;
+                        originalSoldQty: number;
+                        refundedQty: number;
+                        remainingQty: number;
+                        unitSellingPrice: number;
+                        unitCOGS: number;
+                        lineRevenueReversed: number;
+                        lineCOGSReversed: number;
+                        profitImpact: number;
+                        returnedToStock: boolean;
+                        batchNumber: string | null;
+                      }>).map((line, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-2 sm:px-3 py-2 text-xs font-medium text-blue-700">{line.refundNumber}</td>
+                          <td className="px-2 sm:px-3 py-2 text-xs font-semibold text-slate-900">
+                            {line.productName}
+                            {line.sku ? ` (${line.sku})` : ''}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 text-xs text-right tabular-nums">{line.originalSoldQty}</td>
+                          <td className="px-2 sm:px-3 py-2 text-xs text-right tabular-nums text-red-600 font-semibold">
+                            {line.refundedQty}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 text-xs text-right tabular-nums">{line.remainingQty}</td>
+                          <td className="px-2 sm:px-3 py-2 text-xs text-right tabular-nums">
+                            {formatCurrency(line.unitSellingPrice)}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 text-xs text-right tabular-nums text-slate-600">
+                            {formatCurrency(line.unitCOGS)}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 text-xs text-right tabular-nums text-amber-800 font-medium">
+                            {formatCurrency(line.lineRevenueReversed)}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 text-xs text-right tabular-nums">
+                            {formatCurrency(line.lineCOGSReversed)}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 text-xs text-right tabular-nums font-bold text-rose-700">
+                            {formatCurrency(line.profitImpact)}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 text-xs text-center">
+                            {line.returnedToStock ? (
+                              <span className="text-teal-700 font-semibold">Yes</span>
+                            ) : (
+                              <span className="text-slate-400">No</span>
+                            )}
+                          </td>
+                          <td className="px-2 sm:px-3 py-2 text-xs text-slate-600">{line.batchNumber || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
+
+            {Array.isArray(reportData.topRefundedProducts) && reportData.topRefundedProducts.length > 0 && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="bg-slate-800 px-4 sm:px-6 py-3 flex justify-between items-center gap-2">
+                  <div>
+                    <h4 className="text-base font-semibold text-white">Top refunded products</h4>
+                    <p className="text-slate-300 text-xs mt-0.5">By revenue reversed in period</p>
+                  </div>
+                  <span className="text-slate-300 text-xs">{reportData.topRefundedProducts.length} products</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Product</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Times</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Qty</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(
+                        reportData.topRefundedProducts as Array<{
+                          productName: string;
+                          timesRefunded: number;
+                          totalQty: number;
+                          totalAmount: number;
+                        }>
+                      ).map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-3 py-2.5 font-semibold text-slate-900">{item.productName}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{item.timesRefunded}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{item.totalQty}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-amber-800">
+                            {formatCurrency(item.totalAmount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Customer Account Statement — partner ledger */}
+        {reportData.reportType === 'CUSTOMER_ACCOUNT_STATEMENT' && (reportData.customer || (reportData.data as { customer?: ReportDataCustomer })?.customer) && (
+          <div className="space-y-4 sm:space-y-6">
+            {(() => {
+              const stmtCustomer =
+                reportData.customer ||
+                ((reportData.data as { customer?: ReportDataCustomer })?.customer as ReportDataCustomer);
+              const stmtTx =
+                reportData.transactions ||
+                ((reportData.data as { transactions?: Record<string, unknown>[] })?.transactions ?? []);
+              const opening =
+                Number(reportData.summary?.openingBalance ?? 0) ||
+                Number((reportData.data as { transactionSummary?: { openingBalance?: number } })?.transactionSummary?.openingBalance ?? 0);
+              const closing =
+                Number(reportData.summary?.closingBalance ?? stmtCustomer?.currentBalance ?? 0);
+              const totalDebits = Number(
+                reportData.summary?.totalDebits ?? reportData.summary?.totalSales ?? 0,
+              );
+              const totalCredits = Number(
+                reportData.summary?.totalCredits ?? reportData.summary?.totalPaid ?? 0,
+              );
+              const unalloc = Number(
+                reportData.unallocatedReceiptsTotal ??
+                  reportData.summary?.unallocatedReceiptsTotal ??
+                  0,
+              );
+              const isCredit = closing < -0.009;
+              const typeClass = (status: string) => {
+                const s = (status || '').toUpperCase();
+                if (s === 'PAID' || s === 'RECEIVED' || s === 'APPLIED' || s === 'POSTED') return 'bg-green-100 text-green-800';
+                if (s === 'PARTIAL' || s === 'UNPAID') return 'bg-amber-100 text-amber-800';
+                if (s === 'CANCELLED' || s === 'VOIDED' || s === 'REVERSED') return 'bg-slate-100 text-slate-700';
+                return 'bg-slate-100 text-slate-700';
+              };
+              return (
+                <>
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Account statement: </span>
+              Debits increase what the customer owes; credits reduce it (payments, deposit applications, credit notes).
+              A <strong>negative closing balance</strong> is a <strong>customer credit</strong> (credit on account) — not a report error by itself.
+            </p>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Opening</p>
+                <p className="text-xl font-bold text-slate-900">{formatCurrency(opening)}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Debits (charges)</p>
+                <p className="text-xl font-bold text-slate-900">{formatCurrency(totalDebits)}</p>
+              </div>
+              <div className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-teal-700 mb-1">Credits (settlements)</p>
+                <p className="text-xl font-bold text-teal-800">{formatCurrency(totalCredits)}</p>
+              </div>
+              <div className={`rounded-lg border p-4 text-center ${isCredit ? 'border-green-300 bg-green-50' : closing > 0.009 ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-white'}`}>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-600 mb-1">
+                  {isCredit ? 'Closing — customer credit' : 'Closing — amount due'}
+                </p>
+                <p className={`text-xl font-bold ${isCredit ? 'text-green-800' : closing > 0.009 ? 'text-red-700' : 'text-slate-900'}`}>
+                  {formatCurrency(Math.abs(closing))}
+                  {isCredit ? ' CR' : closing > 0.009 ? ' DR' : ''}
+                </p>
+                {unalloc > 0.009 ? (
+                  <p className="text-xs text-slate-500 mt-1">On-account unallocated: {formatCurrency(unalloc)}</p>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-indigo-700 px-4 sm:px-6 py-3">
+                <h4 className="text-base font-semibold text-white">Customer</h4>
+                <p className="text-indigo-100 text-sm mt-0.5">
+                  <span className="font-mono font-semibold">{stmtCustomer?.customerNumber}</span>
+                  {' · '}
+                  {stmtCustomer?.name}
+                  {stmtCustomer?.phone ? ` · ${stmtCustomer.phone}` : ''}
+                </p>
+              </div>
+            </div>
+
+            {stmtTx && stmtTx.length > 0 ? (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="bg-slate-800 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <div>
+                    <h4 className="text-base font-semibold text-white">Account movements (GL AR 1200)</h4>
+                    <p className="text-slate-300 text-xs mt-0.5">Running balance after each posted document</p>
+                  </div>
+                  <span className="text-slate-300 text-xs sm:text-sm">{stmtTx.length} lines</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Type</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Document</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Description</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Debit</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Credit</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {stmtTx.map((transaction: Record<string, unknown>, idx: number) => {
+                        const bal = Number(transaction.balanceDue ?? 0);
+                        const desc =
+                          String(transaction.description ?? '') ||
+                          String((transaction.items as Array<{ product_name?: string }> | undefined)?.[0]?.product_name ?? '');
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50">
+                            <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                              {formatDisplayDate(transaction.saleDate as string | undefined)}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <span className={`px-2 py-0.5 rounded text-xs font-semibold ${typeClass(String(transaction.paymentStatus ?? ''))}`}>
+                                {String(transaction.documentType ?? transaction.paymentStatus ?? '')}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 font-mono text-xs text-indigo-700">
+                              {String(transaction.saleNumber ?? '')}
+                            </td>
+                            <td className="px-3 py-2.5 text-slate-700">{desc}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">
+                              {Number(transaction.totalAmount ?? 0) > 0.009
+                                ? formatCurrency(Number(transaction.totalAmount ?? 0))
+                                : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums text-teal-800 font-medium">
+                              {Number(transaction.amountPaid ?? 0) > 0.009
+                                ? formatCurrency(Number(transaction.amountPaid ?? 0))
+                                : '—'}
+                            </td>
+                            <td className={`px-3 py-2.5 text-right tabular-nums font-semibold ${bal < -0.009 ? 'text-green-700' : bal > 0.009 ? 'text-red-700' : 'text-slate-800'}`}>
+                              {formatCurrency(Math.abs(bal))}
+                              {bal < -0.009 ? ' CR' : bal > 0.009 ? ' DR' : ''}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {isCredit && (
+                  <div className="border-t border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
+                    Closing credit {formatCurrency(Math.abs(closing))}: credits ({formatCurrency(totalCredits)}) exceeded
+                    charges in this period ({formatCurrency(totalDebits)}). This remains a customer credit
+                    until applied to a future invoice or refunded.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 sm:p-8 text-center">
+                <p className="text-gray-500 text-sm sm:text-lg">No AR movements for this customer in the selected period.</p>
+              </div>
+            )}
+                </>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Supplier Statement — AP partner ledger */}
+        {reportData.reportType === 'SUPPLIER_STATEMENT' && (
+          <div className="space-y-4 sm:space-y-6">
+            {(() => {
+              const opening = Number(reportData.summary?.openingBalance ?? 0);
+              const closing = Number(reportData.summary?.closingBalance ?? 0);
+              const totalDebits = Number(
+                reportData.summary?.totalDebits ?? reportData.summary?.totalDebit ?? 0,
+              );
+              const totalCredits = Number(
+                reportData.summary?.totalCredits ?? reportData.summary?.totalCredit ?? 0,
+              );
+              const supplierName = String(reportData.summary?.supplierName ?? 'Supplier');
+              const unalloc = Number(reportData.summary?.unallocatedPrepaymentsTotal ?? 0);
+              const isCredit = closing < -0.009;
+              const rows = reportData.data || [];
+              const typeClass = (status: string) => {
+                const s = (status || '').toUpperCase();
+                if (s === 'PAID' || s === 'RECEIVED' || s === 'APPLIED' || s === 'POSTED') return 'bg-green-100 text-green-800';
+                if (s === 'UNPAID' || s === 'PENDING BILL' || s === 'UNALLOCATED') return 'bg-amber-100 text-amber-800';
+                if (s === 'CANCELLED' || s === 'VOIDED' || s === 'REVERSED') return 'bg-slate-100 text-slate-700';
+                return 'bg-slate-100 text-slate-700';
+              };
+              return (
+                <>
+                  <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+                    <span className="font-semibold text-slate-800">Supplier statement: </span>
+                    Debits increase what you owe the supplier (bills / goods received);
+                    credits reduce it (payments, returns, supplier credit notes).
+                    A <strong>negative closing balance</strong> is a <strong>supplier credit</strong> (prepaid / CN on account).
+                  </p>
+
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Opening</p>
+                      <p className="text-xl font-bold text-slate-900">{formatCurrency(opening)}</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Debits (liability ↑)</p>
+                      <p className="text-xl font-bold text-slate-900">{formatCurrency(totalDebits)}</p>
+                    </div>
+                    <div className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-center">
+                      <p className="text-xs font-medium uppercase tracking-wide text-teal-700 mb-1">Credits (settlements)</p>
+                      <p className="text-xl font-bold text-teal-800">{formatCurrency(totalCredits)}</p>
+                    </div>
+                    <div className={`rounded-lg border p-4 text-center ${isCredit ? 'border-green-300 bg-green-50' : closing > 0.009 ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-white'}`}>
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-600 mb-1">
+                        {isCredit ? 'Closing — supplier credit' : 'Closing — amount payable'}
+                      </p>
+                      <p className={`text-xl font-bold ${isCredit ? 'text-green-800' : closing > 0.009 ? 'text-red-700' : 'text-slate-900'}`}>
+                        {formatCurrency(Math.abs(closing))}
+                        {isCredit ? ' CR' : closing > 0.009 ? ' DR' : ''}
+                      </p>
+                      {unalloc > 0.009 ? (
+                        <p className="text-xs text-slate-500 mt-1">Unallocated prepayments: {formatCurrency(unalloc)}</p>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="bg-indigo-700 px-4 sm:px-6 py-3">
+                      <h4 className="text-base font-semibold text-white">Supplier</h4>
+                      <p className="text-indigo-100 text-sm mt-0.5">{supplierName}</p>
+                    </div>
+                  </div>
+
+                  {rows.length > 0 ? (
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                      <div className="bg-slate-800 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                        <div>
+                          <h4 className="text-base font-semibold text-white">Account movements (AP partner ledger)</h4>
+                          <p className="text-slate-300 text-xs mt-0.5">One row per business document — running balance after each</p>
+                        </div>
+                        <span className="text-slate-300 text-xs sm:text-sm">{rows.length} lines</span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-full text-sm">
+                          <thead className="bg-slate-50 border-b">
+                            <tr>
+                              <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
+                              <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Type</th>
+                              <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Document</th>
+                              <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Particulars</th>
+                              <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Debit</th>
+                              <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Credit</th>
+                              <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Balance</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {rows.map((row, idx) => {
+                              const bal = Number(row.balanceAfter ?? row.balance ?? 0);
+                              return (
+                                <tr key={idx} className="hover:bg-slate-50">
+                                  <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                                    {formatDisplayDate(String(row.date ?? ''))}
+                                  </td>
+                                  <td className="px-3 py-2.5">
+                                    <span className={`px-2 py-0.5 rounded text-xs font-semibold ${typeClass(String(row.itemStatus ?? row.vchType ?? ''))}`}>
+                                      {String(row.vchType ?? row.itemStatus ?? '')}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2.5 font-mono text-xs text-indigo-700">
+                                    {String(row.vchNo ?? row.docNumber ?? '')}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-slate-700">
+                                    {String(row.particulars ?? row.description ?? '')}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-right tabular-nums">
+                                    {Number(row.debit ?? 0) > 0.009 ? formatCurrency(Number(row.debit)) : '—'}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-right tabular-nums text-teal-800 font-medium">
+                                    {Number(row.credit ?? 0) > 0.009 ? formatCurrency(Number(row.credit)) : '—'}
+                                  </td>
+                                  <td className={`px-3 py-2.5 text-right tabular-nums font-semibold ${bal < -0.009 ? 'text-green-700' : bal > 0.009 ? 'text-red-700' : 'text-slate-800'}`}>
+                                    {formatCurrency(Math.abs(bal))}
+                                    {bal < -0.009 ? ' CR' : bal > 0.009 ? ' DR' : ''}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 sm:p-8 text-center">
+                      <p className="text-gray-500 text-sm sm:text-lg">No AP movements for this supplier in the selected period.</p>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Customer Payments — open-item + receipt journal */}
+        {reportData.reportType === 'CUSTOMER_PAYMENTS' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">How to read this: </span>
+              <strong>Collected</strong> = customer receipts in the date range (posts to Undeposited Funds).{' '}
+              <strong>Open balance</strong> = what they still owe now (open invoices − on-account).{' '}
+              <strong>Invoiced</strong> = invoices issued in the range (not the same as collected). Deposits are a separate liability.
+            </p>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-teal-700 mb-1">Collected in period</p>
+                <p className="text-xl font-bold text-teal-800">
+                  {formatCurrency(Number(reportData.summary?.collectionsInPeriod ?? reportData.summary?.totalPaid ?? 0))}
+                </p>
+                <p className="text-xs text-teal-700/80 mt-1">
+                  {Number(reportData.summary?.collectionCount ?? 0)} receipt(s)
+                </p>
+              </div>
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-red-700 mb-1">Open receivables</p>
+                <p className="text-xl font-bold text-red-800">
+                  {formatCurrency(Number(reportData.summary?.totalOutstanding ?? 0))}
+                </p>
+                <p className="text-xs text-red-700/80 mt-1">as of now</p>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-amber-700 mb-1">Overdue</p>
+                <p className="text-xl font-bold text-amber-800">
+                  {formatCurrency(Number(reportData.summary?.totalOverdue ?? 0))}
+                </p>
+                <p className="text-xs text-amber-700/80 mt-1">past due date</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-600 mb-1">Invoiced in period</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary?.totalInvoiced ?? 0))}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {Number(reportData.summary?.totalCustomers ?? 0)} customer(s)
+                </p>
+              </div>
+            </div>
+
+            {/* 1) Receipt journal — primary cashier view */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-teal-700 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <h4 className="text-base font-semibold text-white">1 — Customer receipts (payment journal)</h4>
+                  <p className="text-teal-100 text-xs mt-0.5">Who paid, when, how much — by payment date</p>
+                </div>
+                <span className="text-teal-100 text-xs sm:text-sm">
+                  {(reportData.paymentLines || []).length} receipt(s)
+                </span>
+              </div>
+              {(reportData.paymentLines || []).length === 0 ? (
+                <div className="p-8 text-center text-sm text-slate-500">
+                  No AR receipts in this period. (Cash sales that never created a customer payment receipt will not appear here.)
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Customer</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Receipt #</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Method</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Amount</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Unallocated</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(reportData.paymentLines || []).map((line, idx) => (
+                        <tr key={idx} className="hover:bg-teal-50/40">
+                          <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">{String(line.paymentDate ?? '')}</td>
+                          <td className="px-3 py-2.5">
+                            <div className="font-medium text-slate-900">{String(line.customerName ?? '')}</div>
+                            <div className="text-xs text-slate-500 font-mono">{String(line.customerNumber ?? '')}</div>
+                          </td>
+                          <td className="px-3 py-2.5 font-mono text-xs text-indigo-700">{String(line.paymentNumber ?? '')}</td>
+                          <td className="px-3 py-2.5">{String(line.paymentMethod ?? '').replace(/_/g, ' ')}</td>
+                          <td className="px-3 py-2.5 text-right font-semibold text-teal-800 tabular-nums">
+                            {formatCurrency(Number(line.amount ?? 0))}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
+                            {formatCurrency(Number(line.unallocatedAmount ?? 0))}
+                          </td>
+                          <td className="px-3 py-2.5 text-xs">{String(line.status ?? '')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* 2) Partner open balances */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <h4 className="text-base font-semibold text-white">2 — Customer open balances</h4>
+                  <p className="text-slate-300 text-xs mt-0.5">
+                    Invoiced in range vs collected in range vs open AR now
+                  </p>
+                </div>
+                <span className="text-slate-300 text-xs sm:text-sm">{reportData.data?.length || 0} customer(s)</span>
+              </div>
+              {!reportData.data || reportData.data.length === 0 ? (
+                <div className="p-8 text-center text-sm text-slate-500">No customer AR activity in this period.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Customer</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Invoices</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Invoiced (period)</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Collected (period)</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Open balance</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Overdue</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-3 py-2.5">
+                            <div className="font-medium text-slate-900">{String(row.customerName ?? '')}</div>
+                            <div className="text-xs text-slate-500 font-mono">{String(row.customerNumber ?? '')}</div>
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{Number(row.totalInvoices ?? 0)}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(row.totalInvoiced ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-teal-800">
+                            {formatCurrency(Number(row.totalPaid ?? 0))}
+                          </td>
+                          <td className={`px-3 py-2.5 text-right tabular-nums font-semibold ${Number(row.totalOutstanding ?? 0) > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                            {formatCurrency(Number(row.totalOutstanding ?? 0))}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-amber-800">
+                            {formatCurrency(Number(row.overdueAmount ?? 0))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* 3) Deposits — separate liability */}
+            {(Number(reportData.summary?.totalDeposited ?? 0) > 0 ||
+              Number(reportData.summary?.depositAvailable ?? 0) > 0) && (
+              <div className="bg-white rounded-xl shadow-sm border border-purple-200 overflow-hidden">
+                <div className="bg-purple-800 px-4 sm:px-6 py-3">
+                  <h4 className="text-base font-semibold text-white">3 — Customer deposits (liability — not AR)</h4>
+                  <p className="text-purple-200 text-xs mt-0.5">
+                    Prepayments held on account. Not the same as receivable collections above.
+                  </p>
+                </div>
+                <div className="p-4 grid grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-purple-50 border border-purple-100 p-3 text-center">
+                    <p className="text-xs uppercase text-purple-600 mb-1">Deposits taken (active book)</p>
+                    <p className="text-lg font-bold text-purple-900">
+                      {formatCurrency(Number(reportData.summary?.totalDeposited ?? 0))}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-purple-50 border border-purple-100 p-3 text-center">
+                    <p className="text-xs uppercase text-purple-600 mb-1">Still available</p>
+                    <p className="text-lg font-bold text-purple-900">
+                      {formatCurrency(Number(reportData.summary?.depositAvailable ?? 0))}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* AR Ledger — same GL partner-ledger pattern as Customer Account Statement */}
+        {reportData.reportType === 'AR_LEDGER' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Accounts receivable ledger: </span>
+              Same axis as Customer Account Statement. Debits = charges; credits = settlements.
+              Negative closing = customer credit.
+            </p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Opening</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary?.openingBalance ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Debits</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary?.totalDebit ?? reportData.summary?.totalDebits ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-teal-700 mb-1">Credits</p>
+                <p className="text-xl font-bold text-teal-800">
+                  {formatCurrency(Number(reportData.summary?.totalCredit ?? reportData.summary?.totalCredits ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-600 mb-1">Closing</p>
+                {(() => {
+                  const c = Number(reportData.summary?.closingBalance ?? 0);
+                  const credit = c < -0.009;
+                  return (
+                    <p className={`text-xl font-bold ${credit ? 'text-green-800' : c > 0.009 ? 'text-red-700' : 'text-slate-900'}`}>
+                      {formatCurrency(Math.abs(c))}
+                      {credit ? ' CR' : c > 0.009 ? ' DR' : ''}
+                    </p>
+                  );
+                })()}
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3 flex justify-between items-center">
+                <div>
+                  <h4 className="text-base font-semibold text-white">AR ledger movements</h4>
+                  <p className="text-slate-300 text-xs mt-0.5">Running balance on GL 1200</p>
+                </div>
+                <span className="text-slate-300 text-xs">{reportData.data?.length || 0} lines</span>
+              </div>
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">No AR ledger lines in this period.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Type</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Document</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Description</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Debit</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Credit</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => {
+                        const bal = Number(row.balance ?? 0);
+                        const refType = String(row.referenceType ?? '').replace(/_/g, ' ');
+                        const doc = String(row.referenceNumber || row.transactionNumber || '');
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50">
+                            <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                              {formatDisplayDate(String(row.date ?? ''))}
+                            </td>
+                            <td className="px-3 py-2.5 text-xs font-medium text-slate-700">{refType}</td>
+                            <td className="px-3 py-2.5 font-mono text-xs text-indigo-700">{doc}</td>
+                            <td className="px-3 py-2.5 text-slate-700">{String(row.description ?? '')}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">
+                              {Number(row.debit ?? 0) > 0.009 ? formatCurrency(Number(row.debit)) : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums text-teal-800 font-medium">
+                              {Number(row.credit ?? 0) > 0.009 ? formatCurrency(Number(row.credit)) : '—'}
+                            </td>
+                            <td className={`px-3 py-2.5 text-right tabular-nums font-semibold ${bal < -0.009 ? 'text-green-700' : bal > 0.009 ? 'text-red-700' : 'text-slate-800'}`}>
+                              {formatCurrency(Math.abs(bal))}
+                              {bal < -0.009 ? ' CR' : bal > 0.009 ? ' DR' : ''}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* AP Ledger — same GL partner-ledger pattern as Supplier Statement */}
+        {reportData.reportType === 'AP_LEDGER' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Accounts payable ledger: </span>
+              Same axis as Supplier Statement. Debits = liability increases; credits = settlements.
+              Negative closing = supplier credit / prepaid.
+            </p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Opening</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary?.openingBalance ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Debits</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary?.totalDebit ?? reportData.summary?.totalDebits ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-teal-700 mb-1">Credits</p>
+                <p className="text-xl font-bold text-teal-800">
+                  {formatCurrency(Number(reportData.summary?.totalCredit ?? reportData.summary?.totalCredits ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-600 mb-1">Closing</p>
+                {(() => {
+                  const c = Number(reportData.summary?.closingBalance ?? 0);
+                  const credit = c < -0.009;
+                  return (
+                    <p className={`text-xl font-bold ${credit ? 'text-green-800' : c > 0.009 ? 'text-red-700' : 'text-slate-900'}`}>
+                      {formatCurrency(Math.abs(c))}
+                      {credit ? ' CR' : c > 0.009 ? ' DR' : ''}
+                    </p>
+                  );
+                })()}
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3 flex justify-between items-center">
+                <div>
+                  <h4 className="text-base font-semibold text-white">AP ledger movements</h4>
+                  <p className="text-slate-300 text-xs mt-0.5">Running balance on AP control</p>
+                </div>
+                <span className="text-slate-300 text-xs">{reportData.data?.length || 0} lines</span>
+              </div>
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">No AP ledger lines in this period.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Type</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Document</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Description</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Debit</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Credit</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => {
+                        const bal = Number(row.balance ?? 0);
+                        const refType = String(row.referenceType ?? '').replace(/_/g, ' ');
+                        const doc = String(row.referenceNumber || row.transactionNumber || '');
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50">
+                            <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                              {formatDisplayDate(String(row.date ?? ''))}
+                            </td>
+                            <td className="px-3 py-2.5 text-xs font-medium text-slate-700">{refType}</td>
+                            <td className="px-3 py-2.5 font-mono text-xs text-indigo-700">{doc}</td>
+                            <td className="px-3 py-2.5 text-slate-700">{String(row.description ?? '')}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">
+                              {Number(row.debit ?? 0) > 0.009 ? formatCurrency(Number(row.debit)) : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums text-teal-800 font-medium">
+                              {Number(row.credit ?? 0) > 0.009 ? formatCurrency(Number(row.credit)) : '—'}
+                            </td>
+                            <td className={`px-3 py-2.5 text-right tabular-nums font-semibold ${bal < -0.009 ? 'text-green-700' : bal > 0.009 ? 'text-red-700' : 'text-slate-800'}`}>
+                              {formatCurrency(Math.abs(bal))}
+                              {bal < -0.009 ? ' CR' : bal > 0.009 ? ' DR' : ''}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Top Customers — sales ranking + open-item AR outstanding */}
+        {reportData.reportType === 'TOP_CUSTOMERS' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Customer ranking: </span>
+              Revenue/orders/profit from <strong>posted sales in the period</strong> (voids excluded).
+              <strong> Open balance</strong> is current open-item AR (same SSOT as Aging), not period residual.
+            </p>
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Customers ranked</p>
+                <p className="text-xl font-bold text-slate-900">{reportData.data?.length || 0}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Period revenue</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(
+                    (reportData.data || []).reduce((s, r) => s + Number(r.totalRevenue ?? 0), 0),
+                  )}
+                </p>
+              </div>
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-red-700 mb-1">Open AR (now)</p>
+                <p className="text-xl font-bold text-red-800">
+                  {formatCurrency(
+                    (reportData.data || []).reduce((s, r) => s + Number(r.outstandingBalance ?? 0), 0),
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3">
+                <h4 className="text-base font-semibold text-white">Customer ranking</h4>
+              </div>
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">No customer sales in this period.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">#</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Customer</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Orders</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Revenue</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Profit</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Avg ticket</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Last sale</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Open balance</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-3 py-2.5 tabular-nums text-slate-500">{Number(row.rank ?? idx + 1)}</td>
+                          <td className="px-3 py-2.5">
+                            <div className="font-medium text-slate-900">{String(row.customerName ?? '')}</div>
+                            <div className="text-xs font-mono text-slate-500">{String(row.customerNumber ?? '')}</div>
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{Number(row.totalPurchases ?? 0)}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                            {formatCurrency(Number(row.totalRevenue ?? 0))}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-teal-800">
+                            {formatCurrency(Number(row.totalProfit ?? 0))}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">
+                            {formatCurrency(Number(row.averagePurchaseValue ?? 0))}
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            {formatDisplayDate(String(row.lastPurchaseDate ?? ''))}
+                          </td>
+                          <td className={`px-3 py-2.5 text-right tabular-nums font-semibold ${Number(row.outstandingBalance ?? 0) > 0.009 ? 'text-red-700' : 'text-green-700'}`}>
+                            {formatCurrency(Number(row.outstandingBalance ?? 0))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Customer Purchase History — sales tickets (not AR statement) */}
+        {reportData.reportType === 'CUSTOMER_PURCHASE_HISTORY' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Purchase history (POS sales): </span>
+              Ticket list for one customer. Voids/refunds excluded. For running AR balance use{' '}
+              <strong>Customer Account Statement</strong> or <strong>AR Ledger</strong>.
+            </p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Tickets</p>
+                <p className="text-xl font-bold text-slate-900">{reportData.data?.length || 0}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Sales total</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(
+                    (reportData.data || []).reduce((s, r) => s + Number(r.totalAmount ?? 0), 0),
+                  )}
+                </p>
+              </div>
+              <div className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-teal-700 mb-1">Paid on tickets</p>
+                <p className="text-xl font-bold text-teal-800">
+                  {formatCurrency(
+                    (reportData.data || []).reduce((s, r) => s + Number(r.amountPaid ?? 0), 0),
+                  )}
+                </p>
+              </div>
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-red-700 mb-1">Still due on tickets</p>
+                <p className="text-xl font-bold text-red-800">
+                  {formatCurrency(
+                    (reportData.data || []).reduce((s, r) => s + Number(r.outstandingBalance ?? 0), 0),
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3">
+                <h4 className="text-base font-semibold text-white">Sales tickets</h4>
+              </div>
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">No sales for this customer in the period.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Sale #</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Method</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Items</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Total</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Paid</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Due</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                            {formatDisplayDate(String(row.saleDate ?? ''))}
+                          </td>
+                          <td className="px-3 py-2.5 font-mono text-xs text-indigo-700">
+                            {String(row.saleNumber ?? '')}
+                          </td>
+                          <td className="px-3 py-2.5">{String(row.paymentMethod ?? '').replace(/_/g, ' ')}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{Number(row.itemCount ?? 0)}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                            {formatCurrency(Number(row.totalAmount ?? 0))}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-teal-800">
+                            {formatCurrency(Number(row.amountPaid ?? 0))}
+                          </td>
+                          <td className={`px-3 py-2.5 text-right tabular-nums font-semibold ${Number(row.outstandingBalance ?? 0) > 0.009 ? 'text-red-700' : 'text-green-700'}`}>
+                            {formatCurrency(Number(row.outstandingBalance ?? 0))}
+                          </td>
+                          <td className="px-3 py-2.5 text-xs">{String(row.status ?? '')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
         {/* Customer Aging Report - Special Handling (No API call needed, component fetches own data) */}
         {selectedReport === 'CUSTOMER_AGING_REPORT' && (
           <div className="space-y-6">
-            {/* Back Button */}
-            <button
-              onClick={() => {
-                setSelectedReport(null);
-                setError(null);
-              }}
-              className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-white rounded-lg transition-colors"
-            >
-              ← Back to Reports
-            </button>
-
             <CustomerAgingReport />
           </div>
         )}
 
         {/* Cash Register Session Summary - Custom Renderer */}
+        {/* Payment Report — tender / payment method analysis */}
+        {reportData.reportType === 'PAYMENT_REPORT' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Payment methods: </span>
+              Liquid receipts by payment method for the period (cash, card, mobile money, etc.).
+            </p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-teal-700 mb-1">Total collected</p>
+                <p className="text-xl font-bold text-teal-800">
+                  {formatCurrency(Number(reportData.summary?.totalAmount ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Transactions</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {Number(reportData.summary?.totalTransactions ?? 0)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Methods</p>
+                <p className="text-xl font-bold text-slate-900">{reportData.data?.length || 0}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Top method</p>
+                <p className="text-lg font-bold text-slate-900 truncate">
+                  {String(reportData.data?.[0]?.paymentMethod ?? '—')}
+                </p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3">
+                <h4 className="text-base font-semibold text-white">Payment method breakdown</h4>
+              </div>
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">No payments in this period.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Method</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Count</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Total</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Avg</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Share</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-3 py-2.5 font-medium text-slate-900">
+                            {String(row.paymentMethod ?? '')}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">
+                            {Number(row.transactionCount ?? 0)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                            {formatCurrency(Number(row.totalAmount ?? 0))}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">
+                            {formatCurrency(Number(row.avgAmount ?? 0))}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-teal-800">
+                            {Number(row.percentageOfTotal ?? 0).toFixed(1)}%
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Profit Margin by Product */}
+        {reportData.reportType === 'PROFIT_MARGIN_BY_PRODUCT' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Product margins: </span>
+              Revenue − cost = gross profit; margin % is contribution by SKU for the period.
+            </p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Products</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {Number(reportData.summary?.totalProducts ?? reportData.data?.length ?? 0)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Revenue</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary?.totalRevenue ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-teal-700 mb-1">Gross profit</p>
+                <p className="text-xl font-bold text-teal-800">
+                  {formatCurrency(Number(reportData.summary?.totalProfit ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Avg margin</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {Number(reportData.summary?.averageMarginPercent ?? 0).toFixed(1)}%
+                </p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3 flex justify-between">
+                <h4 className="text-base font-semibold text-white">Product margins</h4>
+                <span className="text-slate-300 text-xs">{reportData.data?.length || 0} SKUs</span>
+              </div>
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">No product margins for this period.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Product</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Category</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Qty</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Revenue</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Cost</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Profit</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Margin %</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-3 py-2.5 font-medium text-slate-900">{String(row.productName ?? '')}</td>
+                          <td className="px-3 py-2.5 text-slate-600">{String(row.category ?? '')}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{Number(row.totalQuantitySold ?? 0)}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(row.totalRevenue ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(row.totalCost ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-teal-800 font-medium">
+                            {formatCurrency(Number(row.grossProfit ?? row.totalProfit ?? 0))}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                            {Number(row.profitMarginPercent ?? row.marginPercent ?? row.profitMargin ?? 0).toFixed(1)}%
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Sales Returns & Allowances */}
+        {reportData.reportType === 'SALES_RETURNS_ALLOWANCES' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Sales returns: </span>
+              Customer credit notes reducing revenue (and output tax). Net sales = gross sales − returns.
+            </p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Gross sales</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary?.totalSales ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-red-700 mb-1">Returns</p>
+                <p className="text-xl font-bold text-red-800">
+                  {formatCurrency(Number(reportData.summary?.totalReturns ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-teal-700 mb-1">Net sales</p>
+                <p className="text-xl font-bold text-teal-800">
+                  {formatCurrency(Number(reportData.summary?.netSales ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Credit notes</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {Number(reportData.summary?.totalCreditNotes ?? 0)}
+                </p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3">
+                <h4 className="text-base font-semibold text-white">By period</h4>
+              </div>
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">No sales returns in this period.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Period</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Gross sales</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Returns</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Net sales</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">CN count</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-3 py-2.5 font-mono text-xs">{String(row.period ?? '')}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(row.totalSales ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-red-700">{formatCurrency(Number(row.salesReturns ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold">{formatCurrency(Number(row.netSales ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{Number(row.creditNoteCount ?? 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Purchase Returns & Allowances */}
+        {reportData.reportType === 'PURCHASE_RETURNS_ALLOWANCES' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Purchase returns: </span>
+              Supplier credit notes reducing purchases / COGS. Net purchases = gross − returns.
+            </p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Gross purchases</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary?.totalPurchases ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-amber-700 mb-1">Returns</p>
+                <p className="text-xl font-bold text-amber-800">
+                  {formatCurrency(Number(reportData.summary?.totalReturns ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-teal-700 mb-1">Net purchases</p>
+                <p className="text-xl font-bold text-teal-800">
+                  {formatCurrency(Number(reportData.summary?.netPurchases ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">SCN count</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {Number(reportData.summary?.totalCreditNotes ?? 0)}
+                </p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3">
+                <h4 className="text-base font-semibold text-white">By period</h4>
+              </div>
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">No purchase returns in this period.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Period</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Gross purchases</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Returns</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Net</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">SCN count</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-3 py-2.5 font-mono text-xs">{String(row.period ?? '')}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(row.totalPurchases ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-amber-800">{formatCurrency(Number(row.purchaseReturns ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold">{formatCurrency(Number(row.netPurchases ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{Number(row.creditNoteCount ?? 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Credit / Debit Note Register */}
+        {reportData.reportType === 'NOTE_REGISTER' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Credit / debit note register: </span>
+              All customer and supplier credit/debit notes with status and amounts for the period.
+            </p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Notes</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {Number(reportData.summary?.totalNotes ?? reportData.data?.length ?? 0)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Total amount</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary?.totalAmount ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-teal-700 mb-1">Posted</p>
+                <p className="text-xl font-bold text-teal-800">
+                  {Number(reportData.summary?.postedCount ?? 0)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-amber-700 mb-1">Draft</p>
+                <p className="text-xl font-bold text-amber-800">
+                  {Number(reportData.summary?.draftCount ?? 0)}
+                </p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3 flex justify-between">
+                <h4 className="text-base font-semibold text-white">Note register</h4>
+                <span className="text-slate-300 text-xs">{reportData.data?.length || 0} rows</span>
+              </div>
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">No credit/debit notes in this period.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Note #</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Type</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Side</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Party</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Ref invoice</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Tax</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Total</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-600 uppercase">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                            {formatDisplayDate(String(row.issueDate ?? ''))}
+                          </td>
+                          <td className="px-3 py-2.5 font-mono text-xs text-indigo-700">{String(row.noteNumber ?? '')}</td>
+                          <td className="px-3 py-2.5 text-xs">{String(row.documentType ?? '').replace(/_/g, ' ')}</td>
+                          <td className="px-3 py-2.5 text-xs">{String(row.side ?? '')}</td>
+                          <td className="px-3 py-2.5">{String(row.partyName ?? '')}</td>
+                          <td className="px-3 py-2.5 font-mono text-xs">{String(row.referenceInvoiceNumber ?? '—')}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(row.taxAmount ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold">{formatCurrency(Number(row.totalAmount ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-xs font-semibold">{String(row.status ?? '')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tax Reversal Report */}
+        {reportData.reportType === 'TAX_REVERSAL' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+              <span className="font-semibold text-slate-800">Tax reconciliation: </span>
+              Output tax from sales vs reversed by customer CNs; input tax from purchases vs reversed by supplier CNs.
+            </p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Output VAT</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary?.totalSalesTax ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-red-700 mb-1">CN tax reversal</p>
+                <p className="text-xl font-bold text-red-800">
+                  {formatCurrency(Number(reportData.summary?.totalSalesReversed ?? reportData.summary?.totalTaxReversedByCN ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">Input VAT</p>
+                <p className="text-xl font-bold text-slate-900">
+                  {formatCurrency(Number(reportData.summary?.totalPurchaseTax ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-amber-700 mb-1">SCN tax reversal</p>
+                <p className="text-xl font-bold text-amber-800">
+                  {formatCurrency(Number(reportData.summary?.totalPurchaseReversed ?? reportData.summary?.totalTaxReversedBySCN ?? 0))}
+                </p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-slate-800 px-4 sm:px-6 py-3">
+                <h4 className="text-base font-semibold text-white">By tax rate</h4>
+              </div>
+              {!reportData.data?.length ? (
+                <div className="p-8 text-center text-sm text-slate-500">No tax reversal lines in this period.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Rate %</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Sales tax</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">CN reversed</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Net output</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Purchase tax</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">SCN reversed</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Net input</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportData.data.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-3 py-2.5 text-right tabular-nums font-medium">{Number(row.taxRate ?? 0)}%</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(row.salesTax ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-red-700">{formatCurrency(Number(row.taxReversedByCN ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold">{formatCurrency(Number(row.netSalesTax ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrency(Number(row.purchaseTax ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-amber-800">{formatCurrency(Number(row.taxReversedBySCN ?? 0))}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold">{formatCurrency(Number(row.netPurchaseTax ?? 0))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {reportData.reportType === 'CASH_REGISTER_SESSION_SUMMARY' && reportData.session && (
           <div className="space-y-6">
             {/* Session Info Card */}
@@ -2825,100 +4752,10 @@ export default function ReportsPage() {
           </div>
         )}
 
-        {/* Daily Cash Flow - Mobile-Optimized Data Cards */}
-        {reportData.reportType === 'DAILY_CASH_FLOW' && reportData.data && reportData.data.length > 0 ? (
-          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-            <div className="bg-gradient-to-r from-green-500 to-green-600 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <h4 className="text-base sm:text-lg font-semibold text-white">📋 Daily Transactions</h4>
-              <span className="text-green-100 text-xs sm:text-sm">{reportData.data.length} entries</span>
-            </div>
-
-            {/* Mobile Card View */}
-            <div className="block sm:hidden p-4 space-y-4">
-              {reportData.data.map((row: Record<string, unknown>, idx: number) => (
-                <div key={idx} className="border border-gray-200 rounded-lg p-4 bg-gradient-to-r from-gray-50 to-white">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <div className="font-semibold text-gray-900">{formatDisplayDate(row.transactionDate as string | undefined)}</div>
-                      <div className="text-sm text-gray-600 mt-1">{String(row.paymentMethod ?? '')}</div>
-                    </div>
-                    <div className={`px-3 py-1 rounded-full text-xs font-medium ${row.revenueType === 'SALES_REVENUE'
-                      ? 'bg-green-100 text-green-800'
-                      : 'bg-blue-100 text-blue-800'
-                      }`}>
-                      {row.revenueType === 'SALES_REVENUE' ? '💵 Sales' : '💳 Collection'}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 mb-3">
-                    <div>
-                      <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Cash Amount</div>
-                      <div className="text-lg font-bold text-green-600">{formatCurrency(Number(row.cashAmount ?? 0))}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Transactions</div>
-                      <div className="text-lg font-bold text-blue-600">{String(row.transactionCount ?? '')}</div>
-                    </div>
-                  </div>
-
-                  {row.revenueType === 'SALES_REVENUE' && (
-                    <div className="grid grid-cols-2 gap-4 pt-3 border-t border-gray-200">
-                      <div>
-                        <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Gross Profit</div>
-                        <div className="text-sm font-semibold text-green-600">{formatCurrency(Number(row.grossProfit ?? 0))}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Profit Margin</div>
-                        <div className="text-sm font-semibold text-blue-600">{typeof row.profitMargin === 'number' ? row.profitMargin.toFixed(2) : '0.00'}%</div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Desktop Table View */}
-            <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full min-w-full">
-                <thead className="bg-gray-100 border-b-2 border-gray-300">
-                  <tr>
-                    {Object.keys(reportData.data[0]).map((header) => (
-                      <th
-                        key={header}
-                        className="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider whitespace-nowrap"
-                      >
-                        {header.replace(/([A-Z])/g, ' $1').trim().replace(/^\w/, c => c.toUpperCase())}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {reportData.data.slice(0, 100).map((row: Record<string, unknown>, idx: number) => (
-                    <tr key={idx} className="hover:bg-blue-50 transition-colors">
-                      {Object.entries(row).map(([key, value], colIdx) => (
-                        <td key={colIdx} className="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm whitespace-nowrap">
-                          <span className={`font-semibold ${getFieldColorClass(key, value)}`}>
-                            {formatFieldValue(key, value)}
-                          </span>
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {reportData.data.length > 100 && (
-              <div className="bg-yellow-50 border-t border-yellow-200 p-4 text-center">
-                <p className="text-sm text-yellow-800 font-medium">
-                  ⚠️ Showing first 100 of {reportData.data.length} records. Export to CSV or PDF to see all data.
-                </p>
-              </div>
-            )}
-          </div>
-        ) : (
-          /* Standard Data Table for Other Reports (skip PROFIT_LOSS, SALES_BY_CASHIER - have custom renderers) */
-          reportData.reportType !== 'PROFIT_LOSS' && reportData.reportType !== 'SALES_BY_CASHIER' && reportData.data && reportData.data.length > 0 && (
+        {/* Standard Data Table — skip dedicated SSOT renderers */}
+        {!isSsotReportType(reportData.reportType) &&
+          reportData.data &&
+          reportData.data.length > 0 && (
             <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
               <div className="bg-gradient-to-r from-green-500 to-green-600 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <h4 className="text-base sm:text-lg font-semibold text-white">📋 Detailed Data</h4>
@@ -3015,7 +4852,6 @@ export default function ReportsPage() {
                 </div>
               )}
             </div>
-          )
         )}
 
         {/* Supplier Payment Records Detail */}
@@ -3632,16 +5468,12 @@ export default function ReportsPage() {
             >
               {/* Back Button & Report Title */}
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
-                <button
-                  type="button"
+                <ReportBackLink
                   onClick={() => {
                     setSelectedReport(null);
                     setError(null);
                   }}
-                  className="flex items-center gap-2 px-3 sm:px-4 py-2 text-sm sm:text-base text-gray-600 hover:text-gray-900 hover:bg-white rounded-lg transition-colors self-start"
-                >
-                  ← Back
-                </button>
+                />
                 <div className="flex-1">
                   <h2 className="text-2xl font-bold text-gray-900">
                     {selectedReportOption?.icon} {selectedReportOption?.label}
@@ -3698,16 +5530,13 @@ export default function ReportsPage() {
           {/* Report Results */}
           {reportData && (
             <div className="space-y-6">
-              {/* Back to Configuration */}
-              <button
+              <ReportBackLink
                 onClick={() => {
                   setReportData(null);
+                  setSelectedReport(null);
                   setError(null);
                 }}
-                className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-white rounded-lg transition-colors"
-              >
-                ← Back to Configuration
-              </button>
+              />
 
               {renderReportData()}
             </div>

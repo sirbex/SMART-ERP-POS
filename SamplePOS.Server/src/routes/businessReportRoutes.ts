@@ -17,6 +17,7 @@ router.use(authenticate);
  *       Section 3: Cost & Stock Impact (COGS + adjustments)
  *       Section 4: Expenses by GL Account (6xxx/7xxx)
  *       Section 5: Net Business Position (summary)
+ *       Additive: arCollections + customerDeposits.byDay (day/customer receipts)
  */
 router.get(
   '/business-performance',
@@ -40,6 +41,30 @@ router.get(
         transactionType: transaction_type as string | undefined,
         includeStockAdjustments: include_stock_adjustments !== 'false',
         includeExpenses: include_expenses !== 'false',
+      },
+      pool
+    );
+
+    res.json({ success: true, data: report });
+  })
+);
+
+/**
+ * @route GET /api/reports/customer-receipts-by-day
+ * @desc Day breakdown of AR collections + customer deposits taken
+ *       (cash into Undeposited Funds 1015). Additive for cashiers/managers.
+ */
+router.get(
+  '/customer-receipts-by-day',
+  requirePermission('reports.read'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const { start_date, end_date } = req.query;
+
+    const report = await businessReportService.getCustomerReceiptsDayBreakdown(
+      {
+        startDate: start_date as string | undefined,
+        endDate: end_date as string | undefined,
       },
       pool
     );

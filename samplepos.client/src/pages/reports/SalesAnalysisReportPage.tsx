@@ -1,12 +1,11 @@
 /**
- * Sales Analysis — modern responsive designer (SAP/Odoo-style).
+ * Sales Analysis — modern responsive designer.
  * Business logic: dimension presets, share-of-total, ranking, margin health, Pareto insight.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { apiClient } from '../../utils/api';
+import { api, apiClient } from '../../utils/api';
 import type { ApiResponse } from '../../utils/api';
 import { downloadFile } from '../../utils/download';
 import { printReportDocument } from '../../lib/print';
@@ -15,6 +14,8 @@ import {
   AdaptiveReportSummary,
   type AdaptiveReportMetric,
 } from '../../components/adaptive';
+import { CustomerReceiptsByDayPanel } from '../../components/reports/CustomerReceiptsByDayPanel';
+import { ReportBackLink } from '../../components/reports/ReportBackLink';
 import { DateRangeFilter } from '../../components/ui/DateRangeFilter';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
@@ -28,6 +29,8 @@ import {
   Columns3,
   FileSpreadsheet,
   FileText,
+  HandCoins,
+  Landmark,
   Lightbulb,
   Loader2,
   Printer,
@@ -86,6 +89,47 @@ type SalesSummary = {
   averageDiscountRate: number;
   totalTransactions: number;
   totalQuantitySold: number;
+};
+
+type ReceiptsBreakdown = {
+  arCollections: {
+    totalCollected: number;
+    paymentCount: number;
+    customerCount: number;
+    byDay: Array<{
+      businessDate: string;
+      totalAmount: number;
+      receiptCount: number;
+      lines: Array<{
+        businessDate: string;
+        customerId: string;
+        customerNumber: string;
+        customerName: string;
+        documentNumber: string;
+        paymentMethod: string;
+        amount: number;
+      }>;
+    }>;
+  };
+  customerDeposits: {
+    totalDeposited: number;
+    depositCount: number;
+    customerCount: number;
+    byDay: Array<{
+      businessDate: string;
+      totalAmount: number;
+      receiptCount: number;
+      lines: Array<{
+        businessDate: string;
+        customerId: string;
+        customerNumber: string;
+        customerName: string;
+        documentNumber: string;
+        paymentMethod: string;
+        amount: number;
+      }>;
+    }>;
+  };
 };
 
 type EnrichedRow = SalesRow & {
@@ -274,6 +318,7 @@ export default function SalesAnalysisReportPage() {
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<SalesRow[]>([]);
   const [summary, setSummary] = useState<SalesSummary | null>(null);
+  const [receipts, setReceipts] = useState<ReceiptsBreakdown | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState<'pdf' | 'csv' | 'print' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -331,7 +376,7 @@ export default function SalesAnalysisReportPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiClient.get<
+      const salesRes = await apiClient.get<
         ApiResponse<{
           data: SalesRow[];
           summary: SalesSummary;
@@ -345,7 +390,7 @@ export default function SalesAnalysisReportPage() {
           group_by: groupBy,
         },
       });
-      const payload = res.data?.data;
+      const payload = salesRes.data?.data;
       setRows(Array.isArray(payload?.data) ? payload.data : []);
       setSummary(payload?.summary ?? null);
       setMeta({
@@ -356,6 +401,17 @@ export default function SalesAnalysisReportPage() {
       setError(err instanceof Error ? err.message : 'Failed to load sales report');
       setRows([]);
       setSummary(null);
+    }
+
+    try {
+      const receiptsRes = await api.reports.customerReceiptsByDay({
+        start_date: startDate,
+        end_date: endDate,
+      });
+      setReceipts((receiptsRes.data?.data ?? null) as ReceiptsBreakdown | null);
+    } catch {
+      // Additive panel only — never block sales analysis if receipts fail
+      setReceipts(null);
     } finally {
       setLoading(false);
     }
@@ -458,6 +514,10 @@ export default function SalesAnalysisReportPage() {
     params.set('end_date', endDate);
     params.set('group_by', groupBy);
     params.set('format', format);
+    params.set('columns', visibleCols.map((c) => c.id).join(','));
+    params.set('sort_by', sortKey);
+    params.set('sort_dir', sortDir);
+    params.set('top_n', topN);
     return `/reports/sales?${params.toString()}`;
   };
 
@@ -616,13 +676,7 @@ export default function SalesAnalysisReportPage() {
         {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <div className="mb-1 flex items-center gap-2 text-xs text-slate-500 sm:text-sm">
-              <Link to="/reports" className="hover:text-blue-700">
-                Reports
-              </Link>
-              <span>/</span>
-              <span>Sales Analysis</span>
-            </div>
+            <ReportBackLink className="mb-1" />
             <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
               <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
                 <ShoppingCart className="h-5 w-5" />
@@ -631,7 +685,8 @@ export default function SalesAnalysisReportPage() {
             </h1>
             <p className="mt-1 max-w-2xl text-sm text-slate-500">
               Slice sales by time, team, payment, category, or product — with share of net, ranking,
-              and margin health.
+              and margin health. Day breakdown also shows receivable collections and customer
+              deposits received.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1109,6 +1164,72 @@ export default function SalesAnalysisReportPage() {
             </div>
           }
         />
+
+        {/* Additive: cash into Undeposited Funds — does not alter sales totals above */}
+        {receipts && (
+          <div className="space-y-4">
+            {(receipts.arCollections.paymentCount > 0 ||
+              receipts.arCollections.byDay.length > 0) && (
+              <CustomerReceiptsByDayPanel
+                title="Receivable collections (by day)"
+                description="Customers who paid against receivables in this period. Cash posts to Undeposited Funds (1015) until banked."
+                accentClass="text-teal-700"
+                icon={<HandCoins className="h-5 w-5 text-teal-600" />}
+                summaryCards={[
+                  {
+                    label: 'Collected from AR',
+                    value: formatCurrency(receipts.arCollections.totalCollected),
+                    sub: `${receipts.arCollections.paymentCount} payment(s)`,
+                    tone: 'bg-teal-50',
+                  },
+                  {
+                    label: 'Customers paid',
+                    value: String(receipts.arCollections.customerCount),
+                    sub: 'in period',
+                    tone: 'bg-blue-50',
+                  },
+                  {
+                    label: 'Days',
+                    value: String(receipts.arCollections.byDay.length),
+                    sub: 'with collections',
+                    tone: 'bg-slate-50',
+                  },
+                ]}
+                byDay={receipts.arCollections.byDay}
+              />
+            )}
+            {(receipts.customerDeposits.depositCount > 0 ||
+              receipts.customerDeposits.byDay.length > 0) && (
+              <CustomerReceiptsByDayPanel
+                title="Customer deposits taken (by day)"
+                description="Prepayments received in this period (Undeposited Funds → Customer Deposits liability)."
+                accentClass="text-purple-700"
+                icon={<Landmark className="h-5 w-5 text-purple-600" />}
+                summaryCards={[
+                  {
+                    label: 'Deposits received',
+                    value: formatCurrency(receipts.customerDeposits.totalDeposited),
+                    sub: `${receipts.customerDeposits.depositCount} deposit(s)`,
+                    tone: 'bg-purple-50',
+                  },
+                  {
+                    label: 'Customers',
+                    value: String(receipts.customerDeposits.customerCount),
+                    sub: 'who deposited',
+                    tone: 'bg-blue-50',
+                  },
+                  {
+                    label: 'Days',
+                    value: String(receipts.customerDeposits.byDay.length),
+                    sub: 'with deposits',
+                    tone: 'bg-slate-50',
+                  },
+                ]}
+                byDay={receipts.customerDeposits.byDay}
+              />
+            )}
+          </div>
+        )}
       </div>
     </Layout>
   );

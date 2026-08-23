@@ -1,0 +1,103 @@
+{
+  "feature": "EXPIRING_ITEMS_SSOT",
+  "provenAt": "2026-08-23T12:06:24.787Z",
+  "contract": "shelf-life register; include expired on-hand; ACTIVE; urgency bands; SSOT UI; PDF column keys match data",
+  "gates": [
+    {
+      "id": "EXPIRED",
+      "ok": true,
+      "detail": "0 days → expired"
+    },
+    {
+      "id": "CRITICAL",
+      "ok": true,
+      "detail": "5 days → critical"
+    },
+    {
+      "id": "WARNING",
+      "ok": true,
+      "detail": "20 days → warning"
+    },
+    {
+      "id": "WATCH",
+      "ok": true,
+      "detail": "45 days → watch"
+    },
+    {
+      "id": "SUM_EXPIRED",
+      "ok": true,
+      "detail": "expired band totals"
+    },
+    {
+      "id": "SUM_CRITICAL",
+      "ok": true,
+      "detail": "critical band totals"
+    },
+    {
+      "id": "SUM_ITEMS",
+      "ok": true,
+      "detail": "overall totals"
+    },
+    {
+      "id": "NO_BETWEEN_ONLY_FUTURE",
+      "ok": true,
+      "detail": "does not exclude already-expired"
+    },
+    {
+      "id": "INCLUDES_PAST_DUE",
+      "ok": true,
+      "detail": "horizon includes past due"
+    },
+    {
+      "id": "ACTIVE_ONLY",
+      "ok": true,
+      "detail": "ACTIVE batches only"
+    },
+    {
+      "id": "AS_OF_BIZ",
+      "ok": true,
+      "detail": "business as-of date"
+    },
+    {
+      "id": "HAS_SKU",
+      "ok": true,
+      "detail": "selects SKU"
+    },
+    {
+      "id": "IN_SSOT",
+      "ok": true,
+      "detail": "EXPIRING_ITEMS in FINANCIAL_SSOT_REPORTS"
+    },
+    {
+      "id": "SHELF_COPY",
+      "ok": true,
+      "detail": "dedicated shelf-life UI"
+    },
+    {
+      "id": "SVC_SUMMARIZE",
+      "ok": true,
+      "detail": "service uses shared summarize"
+    },
+    {
+      "id": "PDF_QTY_KEY",
+      "ok": true,
+      "detail": "PDF uses quantityRemaining"
+    },
+    {
+      "id": "PDF_LOSS_KEY",
+      "ok": true,
+      "detail": "PDF uses potentialLoss"
+    },
+    {
+      "id": "NO_BRAND",
+      "ok": true,
+      "detail": "no competitor brand in ReportsPage"
+    }
+  ],
+  "summary": {
+    "total": 18,
+    "passed": 18,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

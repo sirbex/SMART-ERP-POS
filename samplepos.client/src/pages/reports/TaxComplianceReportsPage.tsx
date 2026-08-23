@@ -16,6 +16,7 @@ import {
   Scale,
   ShieldCheck,
 } from 'lucide-react';
+import { ReportBackLink } from '../../components/reports/ReportBackLink';
 
 const tabs = [
   { key: 'summary', label: 'Tax Summary', icon: Scale },
@@ -121,6 +122,7 @@ export default function TaxComplianceReportsPage() {
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
+          <ReportBackLink className="mb-1" />
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <FileBarChart2 className="h-6 w-6 text-blue-600" />
             Tax Compliance Reports
@@ -132,9 +134,6 @@ export default function TaxComplianceReportsPage() {
             </Link>
           </p>
           <div className="flex flex-wrap gap-3 mt-2 text-sm">
-            <Link to="/reports" className="text-blue-600 hover:text-blue-800">
-              All reports
-            </Link>
             <Link to="/accounting/withholding-tax" className="text-blue-600 hover:text-blue-800">
               WHT operations
             </Link>

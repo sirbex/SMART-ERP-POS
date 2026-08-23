@@ -74,6 +74,17 @@ export interface CustomerDepositSummaryRow {
   customers_with_deposits: number;
 }
 
+/** Day + customer receipt line (AR collection or deposit taken) */
+export interface CustomerReceiptDetailRow {
+  business_date: string;
+  customer_id: string;
+  customer_number: string;
+  customer_name: string;
+  document_number: string;
+  payment_method: string;
+  amount: string;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers — date filter fragment for ledger_entries."EntryDate"
 // ---------------------------------------------------------------------------
@@ -159,7 +170,8 @@ export async function getMoneyIn(
         AND lt."Status" = 'POSTED'
         AND le."DebitAmount" > 0
         AND a."AccountType" = 'ASSET'
-        AND a."AccountCode" IN ('1010', '1020', '1030', '1040', '1050')
+        -- 1015 Undeposited Funds is the SSOT cash leg for AR receipts (and legacy paths may hit bank/cash)
+        AND a."AccountCode" IN ('1010', '1015', '1020', '1030', '1040', '1050')
         ${dateClause(1)}
       GROUP BY a."AccountCode", a."AccountName"
 
@@ -525,4 +537,70 @@ export async function getCustomerDepositSummary(
     active_deposit_count: parseInt(liab.active_deposit_count, 10) || 0,
     customers_with_deposits: parseInt(liab.customers_with_deposits, 10) || 0,
   };
+}
+
+// ---------------------------------------------------------------------------
+// AR collections by day + customer (open-item receipts → Undeposited Funds 1015)
+// ---------------------------------------------------------------------------
+
+export async function getArCollectionsByDay(
+  filters: BusinessReportFilters,
+  dbPool?: Pool | PoolClient
+): Promise<CustomerReceiptDetailRow[]> {
+  const db = dbPool || globalPool;
+  const startDate = filters.startDate?.trim() || null;
+  const endDate = filters.endDate?.trim() || null;
+
+  const query = `
+    SELECT
+      p.payment_date::text AS business_date,
+      c.id::text AS customer_id,
+      c.customer_number,
+      c.name AS customer_name,
+      p.payment_number AS document_number,
+      p.payment_method,
+      ROUND(p.total_amount::numeric, 2)::text AS amount
+    FROM ar_customer_payments p
+    JOIN customers c ON c.id = p.customer_id
+    WHERE p.status <> 'REVERSED'
+      AND p.reversal_of_payment_id IS NULL
+      AND ($1::date IS NULL OR p.payment_date >= $1::date)
+      AND ($2::date IS NULL OR p.payment_date <= $2::date)
+    ORDER BY p.payment_date ASC, c.name ASC, p.payment_number ASC
+  `;
+
+  const result = await db.query(query, [startDate, endDate]);
+  return result.rows;
+}
+
+// ---------------------------------------------------------------------------
+// Customer deposits taken by day + customer (prepayments → Undeposited Funds 1015)
+// ---------------------------------------------------------------------------
+
+export async function getCustomerDepositsByDay(
+  filters: BusinessReportFilters,
+  dbPool?: Pool | PoolClient
+): Promise<CustomerReceiptDetailRow[]> {
+  const db = dbPool || globalPool;
+  const params = dateParams(filters);
+
+  const query = `
+    SELECT
+      (cd.created_at AT TIME ZONE '${BUSINESS_TIMEZONE}')::date::text AS business_date,
+      c.id::text AS customer_id,
+      c.customer_number,
+      c.name AS customer_name,
+      cd.deposit_number AS document_number,
+      cd.payment_method,
+      ROUND(cd.amount::numeric, 2)::text AS amount
+    FROM pos_customer_deposits cd
+    JOIN customers c ON c.id = cd.customer_id
+    WHERE cd.status IN ('ACTIVE', 'DEPLETED')
+      AND ($1::timestamptz IS NULL OR cd.created_at >= $1::timestamptz)
+      AND ($2::timestamptz IS NULL OR cd.created_at < $2::timestamptz)
+    ORDER BY business_date ASC, c.name ASC, cd.deposit_number ASC
+  `;
+
+  const result = await db.query(query, params);
+  return result.rows;
 }

@@ -1,0 +1,147 @@
+{
+  "feature": "REPORTS_UI_SSOT_BRAND_FREE",
+  "provenAt": "2026-08-23T12:06:24.742Z",
+  "scope": {
+    "in": [
+      "Competitor-brand token absence in report UI source",
+      "isSsotReportType gates generic summary + table",
+      "Dedicated renderers ⊆ SSOT sets (with documented supplemental exclusions)",
+      "Customer Aging single-fetch short-circuit",
+      "Supplier combobox + statement renderer wiring",
+      "Server envelope/PDF structural alignment"
+    ],
+    "out": [
+      "Live numeric accuracy of GL balances / P&L totals (requires API+DB fixture proof)",
+      "Non-report modules elsewhere in the app"
+    ]
+  },
+  "gates": [
+    {
+      "id": "BRAND_FREE_REPORT_UI",
+      "ok": true,
+      "detail": "scanned 20 files; brand hits=0"
+    },
+    {
+      "id": "HAS_IS_SSOT_HELPER",
+      "ok": true,
+      "detail": "isSsotReportType defined"
+    },
+    {
+      "id": "SUMMARY_GATED",
+      "ok": true,
+      "detail": "generic summary gated by isSsotReportType"
+    },
+    {
+      "id": "TABLE_GATED",
+      "ok": true,
+      "detail": "generic data table gated by isSsotReportType"
+    },
+    {
+      "id": "NO_LEGACY_OR_SKIP",
+      "ok": true,
+      "detail": "no legacy DAILY_CASH_FLOW||PROFIT_LOSS||… OR-chain skip"
+    },
+    {
+      "id": "CUSTOMER_SSOT_NONEMPTY",
+      "ok": true,
+      "detail": "customer SSOT count=6"
+    },
+    {
+      "id": "SUPPLIER_SSOT_HAS_STATEMENT",
+      "ok": true,
+      "detail": "SUPPLIER_STATEMENT in set"
+    },
+    {
+      "id": "SUPPLIER_SSOT_HAS_AP",
+      "ok": true,
+      "detail": "AP_LEDGER in set"
+    },
+    {
+      "id": "FINANCIAL_HAS_PAYMENT",
+      "ok": true,
+      "detail": "PAYMENT_REPORT in set"
+    },
+    {
+      "id": "FINANCIAL_HAS_PL",
+      "ok": true,
+      "detail": "PROFIT_LOSS in set"
+    },
+    {
+      "id": "FINANCIAL_HAS_CASHFLOW",
+      "ok": true,
+      "detail": "DAILY_CASH_FLOW in set"
+    },
+    {
+      "id": "DEDICATED_COVERED_BY_SSOT",
+      "ok": true,
+      "detail": "dedicated=24; missing=0",
+      "evidence": "SALES_COMPARISON,DAILY_CASH_FLOW,EXPIRING_ITEMS,VOID_SALES_REPORT,REFUND_REPORT,CUSTOMER_ACCOUNT_STATEMENT,SUPPLIER_STATEMENT,CUSTOMER_PAYMENTS,AR_LEDGER,AP_LEDGER,TOP_CUSTOMERS,CUSTOMER_PURCHASE_HISTORY,PAYMENT_REPORT,PROFIT_MARGIN_BY_PRODUCT,SALES_RETURNS_ALLOWANCES,PURCHASE_RETURNS_ALLOWANCES,NOTE_REGISTER,TAX_REVERSAL,CASH_REGISTER_SESSION_SUMMARY,CASH_REGISTER_SESSION_HISTORY,CASH_REGISTER_MOVEMENT_BREAKDOWN,SUPPLIER_PAYMENT_STATUS,SALES_BY_CASHIER,PROFIT_LOSS"
+    },
+    {
+      "id": "AGING_SHORT_CIRCUIT",
+      "ok": true,
+      "detail": "aging sets local stub before API generate"
+    },
+    {
+      "id": "AGING_RETURNS_BEFORE_POST",
+      "ok": true,
+      "detail": "aging branch returns before generate POST"
+    },
+    {
+      "id": "AGING_HEADER_SUPPRESSED",
+      "ok": true,
+      "detail": "blue records header skipped for aging"
+    },
+    {
+      "id": "AGING_USES_COMPONENT",
+      "ok": true,
+      "detail": "CustomerAgingReport is the SSOT UI"
+    },
+    {
+      "id": "HAS_SUPPLIER_COMBOBOX",
+      "ok": true,
+      "detail": "combobox component exists"
+    },
+    {
+      "id": "COMBO_WIRED",
+      "ok": true,
+      "detail": "ReportsPage imports and renders ReportSupplierCombobox"
+    },
+    {
+      "id": "SUPPLIER_REQUIRED",
+      "ok": true,
+      "detail": "supplier required for statement"
+    },
+    {
+      "id": "SUPPLIER_STATEMENT_UI",
+      "ok": true,
+      "detail": "dedicated supplier statement renderer"
+    },
+    {
+      "id": "NO_PLAIN_SELECT_FOR_STATEMENT",
+      "ok": true,
+      "detail": "no plain <select> path for supplier statement"
+    },
+    {
+      "id": "SUPPLIER_STMT_PDF",
+      "ok": true,
+      "detail": "supplier statement PDF branch present"
+    },
+    {
+      "id": "SALES_RETURNS_TYPE",
+      "ok": true,
+      "detail": "sales returns envelope uses client ReportType"
+    },
+    {
+      "id": "PURCHASE_RETURNS_TYPE",
+      "ok": true,
+      "detail": "purchase returns envelope uses client ReportType"
+    }
+  ],
+  "summary": {
+    "total": 24,
+    "passed": 24,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

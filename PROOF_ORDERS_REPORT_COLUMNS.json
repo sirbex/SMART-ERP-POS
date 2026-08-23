@@ -1,0 +1,188 @@
+{
+  "feature": "ORDERS_REPORT_COLUMN_CHOOSER",
+  "provenAt": "2026-08-23T12:06:24.720Z",
+  "contract": "never-empty columns; screen/CSV/PDF same ids via shared/reports/ordersReportColumnsSsot",
+  "gates": [
+    {
+      "id": "NEVER_EMPTY_ALL",
+      "ok": true,
+      "detail": "empty → defaults (all)"
+    },
+    {
+      "id": "DEFAULTS_ALL",
+      "ok": true,
+      "detail": "empty equals defaultsForMode(all)"
+    },
+    {
+      "id": "JUNK_HEAL_ALL",
+      "ok": true,
+      "detail": "unknown ids dropped (all)"
+    },
+    {
+      "id": "PDF_NEVER_EMPTY_ALL",
+      "ok": true,
+      "detail": "PDF param never empty (all)"
+    },
+    {
+      "id": "PDF_MATCH_VISIBLE_ALL",
+      "ok": true,
+      "detail": "PDF null ≡ visible null (all)"
+    },
+    {
+      "id": "SCREEN_PDF_SAME_ALL",
+      "ok": true,
+      "detail": "screen ids === PDF ids (all)"
+    },
+    {
+      "id": "SANITIZE_ALL",
+      "ok": true,
+      "detail": "sanitize(['x']) → defaults (all)"
+    },
+    {
+      "id": "NEVER_EMPTY_CANCELLED",
+      "ok": true,
+      "detail": "empty → defaults (cancelled)"
+    },
+    {
+      "id": "DEFAULTS_CANCELLED",
+      "ok": true,
+      "detail": "empty equals defaultsForMode(cancelled)"
+    },
+    {
+      "id": "JUNK_HEAL_CANCELLED",
+      "ok": true,
+      "detail": "unknown ids dropped (cancelled)"
+    },
+    {
+      "id": "PDF_NEVER_EMPTY_CANCELLED",
+      "ok": true,
+      "detail": "PDF param never empty (cancelled)"
+    },
+    {
+      "id": "PDF_MATCH_VISIBLE_CANCELLED",
+      "ok": true,
+      "detail": "PDF null ≡ visible null (cancelled)"
+    },
+    {
+      "id": "SCREEN_PDF_SAME_CANCELLED",
+      "ok": true,
+      "detail": "screen ids === PDF ids (cancelled)"
+    },
+    {
+      "id": "SANITIZE_CANCELLED",
+      "ok": true,
+      "detail": "sanitize(['x']) → defaults (cancelled)"
+    },
+    {
+      "id": "HAS_SSOT_IMPORT",
+      "ok": true,
+      "detail": "page imports column SSOT"
+    },
+    {
+      "id": "HAS_CHOOSER",
+      "ok": true,
+      "detail": "column chooser UI"
+    },
+    {
+      "id": "PERSIST_V2",
+      "ok": true,
+      "detail": "layout v2 persisted"
+    },
+    {
+      "id": "MIGRATE_V1",
+      "ok": true,
+      "detail": "migrates v1 layout"
+    },
+    {
+      "id": "HEAL",
+      "ok": true,
+      "detail": "heals columns"
+    },
+    {
+      "id": "ABORT",
+      "ok": true,
+      "detail": "fetch abort on race"
+    },
+    {
+      "id": "DATE_SWAP",
+      "ok": true,
+      "detail": "swaps inverted date range"
+    },
+    {
+      "id": "CSV_VISIBLE",
+      "ok": true,
+      "detail": "CSV uses visible columns"
+    },
+    {
+      "id": "PDF_COLUMNS_PARAM",
+      "ok": true,
+      "detail": "PDF passes columns query"
+    },
+    {
+      "id": "MODES",
+      "ok": true,
+      "detail": "all + cancelled modes"
+    },
+    {
+      "id": "MIN_COLS",
+      "ok": true,
+      "detail": "cannot toggle below 2 columns"
+    },
+    {
+      "id": "NO_BRAND",
+      "ok": true,
+      "detail": "no competitor brand copy"
+    },
+    {
+      "id": "APP_ROUTE",
+      "ok": true,
+      "detail": "App route wired"
+    },
+    {
+      "id": "NAV_ORDERS",
+      "ok": true,
+      "detail": "Orders Report opens designer"
+    },
+    {
+      "id": "NAV_CANCELLED",
+      "ok": true,
+      "detail": "Cancelled opens designer cancelled mode"
+    },
+    {
+      "id": "SCHEMA_COLUMNS",
+      "ok": true,
+      "detail": "query schema accepts columns"
+    },
+    {
+      "id": "SERVER_SSOT_IMPORT",
+      "ok": true,
+      "detail": "controller imports resolvePdfColumnIds"
+    },
+    {
+      "id": "BUILD_HELPER",
+      "ok": true,
+      "detail": "PDF builder fail-closed helper"
+    },
+    {
+      "id": "ORDERS_PDF_SSOT",
+      "ok": true,
+      "detail": "orders PDF via SSOT"
+    },
+    {
+      "id": "CANCEL_PDF_SSOT",
+      "ok": true,
+      "detail": "cancelled PDF via SSOT"
+    },
+    {
+      "id": "SSOT_NEVER_EMPTY_DOC",
+      "ok": true,
+      "detail": "SSOT documents never-empty contract"
+    }
+  ],
+  "summary": {
+    "total": 35,
+    "passed": 35,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

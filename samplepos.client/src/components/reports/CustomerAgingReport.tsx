@@ -142,7 +142,7 @@ const CustomerAgingReport: React.FC<CustomerAgingReportProps> = ({ className = '
                     <div>
                         <h2 className="text-xl font-semibold text-gray-900">Customer Aging Report</h2>
                         <p className="text-sm text-gray-600 mt-1">
-                            Outstanding customer balances by aging periods
+                            Open-item aged receivables (net of on-account receipts) — same AR SSOT as Payments & Statement
                         </p>
                     </div>
                     <div className="flex gap-2">
@@ -150,141 +150,155 @@ const CustomerAgingReport: React.FC<CustomerAgingReportProps> = ({ className = '
                             onClick={loadAgingReport}
                             className="px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
                         >
-                            🔄 Refresh
+                            Refresh
                         </button>
                         <button
                             onClick={exportToCsv}
-                            className="px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                            className="px-3 py-2 text-sm bg-slate-800 text-white rounded hover:bg-slate-900"
                         >
-                            📊 Export CSV
+                            Export CSV
                         </button>
                     </div>
                 </div>
             </div>
 
+            <div className="px-6 py-3 bg-slate-50 border-b border-slate-200 text-sm text-slate-600">
+                <span className="font-semibold text-slate-800">Aging: </span>
+                Buckets are open invoices by days past due. Totals are net of unallocated (on-account) receipts.
+                For period movements use Account Statement / AR Ledger; for who paid use Customer Payments.
+            </div>
+
             {/* Summary Cards */}
-            <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="text-center">
-                        <div className="text-2xl font-bold text-green-600">
+            <div className="px-6 py-4 bg-white border-b border-gray-200">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                    <div className="rounded-lg border border-slate-200 p-3 text-center">
+                        <div className="text-lg font-bold text-slate-900">
                             {formatCurrency(totals.current)}
                         </div>
-                        <div className="text-sm text-gray-600">Current</div>
+                        <div className="text-xs text-gray-600 uppercase tracking-wide mt-1">Current</div>
                     </div>
-                    <div className="text-center">
-                        <div className="text-2xl font-bold text-yellow-600">
+                    <div className="rounded-lg border border-amber-100 bg-amber-50/50 p-3 text-center">
+                        <div className="text-lg font-bold text-amber-700">
                             {formatCurrency(totals.days30)}
                         </div>
-                        <div className="text-sm text-gray-600">1-30 Days</div>
+                        <div className="text-xs text-gray-600 uppercase tracking-wide mt-1">1–30</div>
                     </div>
-                    <div className="text-center">
-                        <div className="text-2xl font-bold text-orange-600">
+                    <div className="rounded-lg border border-orange-100 bg-orange-50/50 p-3 text-center">
+                        <div className="text-lg font-bold text-orange-700">
                             {formatCurrency(totals.days60)}
                         </div>
-                        <div className="text-sm text-gray-600">31-60 Days</div>
+                        <div className="text-xs text-gray-600 uppercase tracking-wide mt-1">31–60</div>
                     </div>
-                    <div className="text-center">
-                        <div className="text-2xl font-bold text-red-600">
+                    <div className="rounded-lg border border-orange-100 bg-orange-50/50 p-3 text-center">
+                        <div className="text-lg font-bold text-orange-800">
+                            {formatCurrency(totals.days90)}
+                        </div>
+                        <div className="text-xs text-gray-600 uppercase tracking-wide mt-1">61–90</div>
+                    </div>
+                    <div className="rounded-lg border border-red-100 bg-red-50/50 p-3 text-center">
+                        <div className="text-lg font-bold text-red-700">
                             {formatCurrency(totals.over90)}
                         </div>
-                        <div className="text-sm text-gray-600">90+ Days</div>
+                        <div className="text-xs text-gray-600 uppercase tracking-wide mt-1">90+</div>
+                    </div>
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-center">
+                        <div className="text-lg font-bold text-red-800">
+                            {formatCurrency(totals.totalOutstanding)}
+                        </div>
+                        <div className="text-xs text-gray-600 uppercase tracking-wide mt-1">Net open AR</div>
                     </div>
                 </div>
             </div>
 
             {/* Data Table */}
             <div className="overflow-x-auto">
-                <table className="w-full">
-                    <thead className="bg-gray-50">
+                <table className="w-full text-sm">
+                    <thead className="bg-slate-50">
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">
                                 Customer
                             </th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            <th className="px-4 py-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider">
                                 Current
                             </th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                1-30 Days
+                            <th className="px-4 py-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider">
+                                1-30
                             </th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                31-60 Days
+                            <th className="px-4 py-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider">
+                                31-60
                             </th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                61-90 Days
+                            <th className="px-4 py-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider">
+                                61-90
                             </th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                90+ Days
+                            <th className="px-4 py-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider">
+                                90+
                             </th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Total Outstanding
+                            <th className="px-4 py-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider">
+                                Open balance
                             </th>
                         </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                        {agingData.map((row, index) => {
+                    <tbody className="bg-white divide-y divide-slate-100">
+                        {agingData.map((row) => {
                             const overdueAmount = toNumber(row.overdueAmount);
                             const isOverdue = overdueAmount > 0;
 
                             return (
-                                <tr key={row.customerId} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <div className="flex items-center">
-                                            <div>
-                                                <div className="text-sm font-medium text-gray-900">
-                                                    {row.customerName}
-                                                </div>
-                                                {isOverdue && (
-                                                    <div className="text-xs text-red-600">
-                                                        Overdue: {formatCurrency(overdueAmount)}
-                                                    </div>
-                                                )}
-                                            </div>
+                                <tr key={row.customerId} className="hover:bg-slate-50">
+                                    <td className="px-4 py-3 whitespace-nowrap">
+                                        <div className="font-medium text-slate-900">{row.customerName}</div>
+                                        <div className="text-xs font-mono text-slate-500">
+                                            {row.customerNumber || ''}
                                         </div>
+                                        {isOverdue && (
+                                            <div className="text-xs text-red-600 mt-0.5">
+                                                Overdue: {formatCurrency(overdueAmount)}
+                                            </div>
+                                        )}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-green-600">
+                                    <td className="px-4 py-3 whitespace-nowrap text-right tabular-nums text-slate-800">
                                         {formatCurrency(toNumber(row.current))}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-yellow-600">
+                                    <td className="px-4 py-3 whitespace-nowrap text-right tabular-nums text-amber-700">
                                         {formatCurrency(toNumber(row.days30))}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-orange-600">
+                                    <td className="px-4 py-3 whitespace-nowrap text-right tabular-nums text-orange-700">
                                         {formatCurrency(toNumber(row.days60))}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-orange-600">
+                                    <td className="px-4 py-3 whitespace-nowrap text-right tabular-nums text-orange-800">
                                         {formatCurrency(toNumber(row.days90))}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-red-600">
+                                    <td className="px-4 py-3 whitespace-nowrap text-right tabular-nums text-red-700">
                                         {formatCurrency(toNumber(row.over90))}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">
+                                    <td className="px-4 py-3 whitespace-nowrap text-right tabular-nums font-semibold text-slate-900">
                                         {formatCurrency(toNumber(row.totalOutstanding))}
                                     </td>
                                 </tr>
                             );
                         })}
                     </tbody>
-                    {/* Totals Footer */}
-                    <tfoot className="bg-gray-100">
+                    <tfoot className="bg-slate-100">
                         <tr>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900">
+                            <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-slate-900">
                                 TOTALS
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-green-600">
+                            <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold tabular-nums">
                                 {formatCurrency(totals.current)}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-yellow-600">
+                            <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold tabular-nums text-amber-700">
                                 {formatCurrency(totals.days30)}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-orange-600">
+                            <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold tabular-nums text-orange-700">
                                 {formatCurrency(totals.days60)}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-orange-600">
+                            <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold tabular-nums text-orange-800">
                                 {formatCurrency(totals.days90)}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-red-600">
+                            <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold tabular-nums text-red-700">
                                 {formatCurrency(totals.over90)}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-gray-900">
+                            <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold tabular-nums text-slate-900">
                                 {formatCurrency(totals.totalOutstanding)}
                             </td>
                         </tr>
@@ -294,7 +308,7 @@ const CustomerAgingReport: React.FC<CustomerAgingReportProps> = ({ className = '
 
             {agingData.length === 0 && (
                 <div className="text-center py-8 text-gray-500">
-                    No aging data available
+                    No open receivables
                 </div>
             )}
         </div>

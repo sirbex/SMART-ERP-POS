@@ -1,0 +1,43 @@
+{
+  "feature": "REPORT_BACK_LINK_SSOT",
+  "provenAt": "2026-08-23T12:06:24.701Z",
+  "contract": "Every report surface has Back to Reports via ReportBackLink",
+  "gates": [
+    {
+      "id": "HAS_COMPONENT",
+      "ok": true,
+      "detail": "ReportBackLink exists"
+    },
+    {
+      "id": "ADAPTIVE_SLOT",
+      "ok": true,
+      "detail": "AdaptivePage renders backLink"
+    },
+    {
+      "id": "HUB_IMPORT",
+      "ok": true,
+      "detail": "ReportsPage imports ReportBackLink"
+    },
+    {
+      "id": "HUB_USES",
+      "ok": true,
+      "detail": "ReportsPage uses ReportBackLink (2×)"
+    },
+    {
+      "id": "PAGES_FOUND",
+      "ok": true,
+      "detail": "found 13 report pages"
+    },
+    {
+      "id": "ALL_PAGES_BACK",
+      "ok": true,
+      "detail": "13 pages have back"
+    }
+  ],
+  "summary": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

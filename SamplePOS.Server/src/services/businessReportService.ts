@@ -95,6 +95,46 @@ export interface CustomerDepositSummary {
   outstandingLiability: number;
   activeDepositCount: number;
   customersWithDeposits: number;
+  /** Additive: deposits taken in period, day → customer lines */
+  byDay: CustomerReceiptsDayGroup[];
+}
+
+// ---------------------------------------------------------------------------
+// AR collections / deposits — day + customer breakdown (additive)
+// ---------------------------------------------------------------------------
+
+export interface CustomerReceiptLine {
+  businessDate: string;
+  customerId: string;
+  customerNumber: string;
+  customerName: string;
+  documentNumber: string;
+  paymentMethod: string;
+  amount: number;
+}
+
+export interface CustomerReceiptsDayGroup {
+  businessDate: string;
+  totalAmount: number;
+  receiptCount: number;
+  lines: CustomerReceiptLine[];
+}
+
+export interface ArCollectionsSection {
+  totalCollected: number;
+  paymentCount: number;
+  customerCount: number;
+  byDay: CustomerReceiptsDayGroup[];
+}
+
+export interface CustomerReceiptsDayBreakdown {
+  arCollections: ArCollectionsSection;
+  customerDeposits: {
+    totalDeposited: number;
+    depositCount: number;
+    customerCount: number;
+    byDay: CustomerReceiptsDayGroup[];
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -126,11 +166,91 @@ export interface BusinessPerformanceReport {
   expensesByAccount: ExpenseByAccountEntry[];
   supplierPaymentsByAccount: SupplierPaymentByAccountEntry[];
   customerDeposits: CustomerDepositSummary;
+  /** Additive: AR collections received in period (posts to Undeposited Funds) */
+  arCollections: ArCollectionsSection;
 }
 
 // ---------------------------------------------------------------------------
 // Main report builder
 // ---------------------------------------------------------------------------
+
+function mapReceiptLines(rows: repo.CustomerReceiptDetailRow[]): CustomerReceiptLine[] {
+  return rows.map((r) => ({
+    businessDate: String(r.business_date),
+    customerId: String(r.customer_id),
+    customerNumber: String(r.customer_number || ''),
+    customerName: String(r.customer_name || ''),
+    documentNumber: String(r.document_number || ''),
+    paymentMethod: String(r.payment_method || ''),
+    amount: Money.toNumber(Money.parseDb(r.amount)),
+  }));
+}
+
+function groupReceiptsByDay(lines: CustomerReceiptLine[]): CustomerReceiptsDayGroup[] {
+  const byDate = new Map<string, CustomerReceiptLine[]>();
+  for (const line of lines) {
+    const list = byDate.get(line.businessDate) || [];
+    list.push(line);
+    byDate.set(line.businessDate, list);
+  }
+  return Array.from(byDate.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([businessDate, dayLines]) => ({
+      businessDate,
+      receiptCount: dayLines.length,
+      totalAmount: dayLines.reduce(
+        (sum, l) => Money.toNumber(Money.add(sum, l.amount)),
+        0,
+      ),
+      lines: dayLines,
+    }));
+}
+
+function buildArCollectionsSection(rows: repo.CustomerReceiptDetailRow[]): ArCollectionsSection {
+  const lines = mapReceiptLines(rows);
+  const customerIds = new Set(lines.map((l) => l.customerId));
+  return {
+    totalCollected: lines.reduce((sum, l) => Money.toNumber(Money.add(sum, l.amount)), 0),
+    paymentCount: lines.length,
+    customerCount: customerIds.size,
+    byDay: groupReceiptsByDay(lines),
+  };
+}
+
+/**
+ * Lightweight day breakdown of cash receipts into Undeposited Funds:
+ * AR collections + customer deposits taken. Safe for cashiers (reports.read).
+ */
+export async function getCustomerReceiptsDayBreakdown(
+  filters: BusinessReportFilters,
+  dbPool?: Pool | PoolClient
+): Promise<CustomerReceiptsDayBreakdown> {
+  const pool = dbPool || globalPool;
+  const { startDate, endDate } = requireReportDates(filters);
+  const datedFilters: BusinessReportFilters = { ...filters, startDate, endDate };
+
+  const [arRows, depositRows] = await Promise.all([
+    repo.getArCollectionsByDay(datedFilters, pool),
+    repo.getCustomerDepositsByDay(datedFilters, pool),
+  ]);
+
+  const arCollections = buildArCollectionsSection(arRows);
+  const depositLines = mapReceiptLines(depositRows);
+  const depositCustomerIds = new Set(depositLines.map((l) => l.customerId));
+
+  return {
+    arCollections,
+    customerDeposits: {
+      totalDeposited: depositLines.reduce(
+        (sum, l) => Money.toNumber(Money.add(sum, l.amount)),
+        0,
+      ),
+      depositCount: depositLines.length,
+      customerCount: depositCustomerIds.size,
+      byDay: groupReceiptsByDay(depositLines),
+    },
+  };
+}
 
 export async function getBusinessPerformanceReport(
   filters: BusinessReportFilters,
@@ -141,9 +261,18 @@ export async function getBusinessPerformanceReport(
   const datedFilters: BusinessReportFilters = { ...filters, startDate, endDate };
 
   try {
-    // Run all 5 sections in parallel
-    // Section 2 uses the canonical reportsRepository.getSalesByCategory (live transaction tables)
-    const [moneyInRows, revRows, costRows, expRows, supplierPayRows, totals, depositSummary] = await Promise.all([
+    // Run sections in parallel (additive receipt queries do not alter existing totals)
+    const [
+      moneyInRows,
+      revRows,
+      costRows,
+      expRows,
+      supplierPayRows,
+      totals,
+      depositSummary,
+      arCollectionRows,
+      depositDetailRows,
+    ] = await Promise.all([
       repo.getMoneyIn(datedFilters, pool),
       reportsRepository.getSalesByCategory(pool as Pool, {
         startDate,
@@ -156,6 +285,8 @@ export async function getBusinessPerformanceReport(
       repo.getSupplierPaymentsByAccount(datedFilters, pool),
       repo.getSummaryTotals(datedFilters, pool),
       repo.getCustomerDepositSummary(datedFilters, pool),
+      repo.getArCollectionsByDay(datedFilters, pool),
+      repo.getCustomerDepositsByDay(datedFilters, pool),
     ]);
 
     // --- Normalize Section 1 ---
@@ -206,6 +337,9 @@ export async function getBusinessPerformanceReport(
       totalPaid: Money.toNumber(Money.parseDb(r.total_paid)),
     }));
 
+    const arCollections = buildArCollectionsSection(arCollectionRows);
+    const depositByDay = groupReceiptsByDay(mapReceiptLines(depositDetailRows));
+
     // --- Normalize Customer Deposits ---
     const customerDeposits: CustomerDepositSummary = {
       totalDeposited: Money.toNumber(Money.parseDb(depositSummary.total_deposited)),
@@ -215,6 +349,7 @@ export async function getBusinessPerformanceReport(
       outstandingLiability: Money.toNumber(Money.parseDb(depositSummary.outstanding_liability)),
       activeDepositCount: depositSummary.active_deposit_count,
       customersWithDeposits: depositSummary.customers_with_deposits,
+      byDay: depositByDay,
     };
 
     // --- Section 5: Summary ---
@@ -259,6 +394,7 @@ export async function getBusinessPerformanceReport(
       expensesByAccount,
       supplierPaymentsByAccount,
       customerDeposits,
+      arCollections,
     };
   } catch (error) {
     logger.error('Error generating business performance report', { error, filters });

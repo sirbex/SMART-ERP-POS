@@ -1,13 +1,13 @@
 /**
- * Inventory Valuation Report (SAP/Odoo-style)
+ * Inventory Valuation Report
  *
  * FINANCIAL TRUTH. Renders exactly: Product | Qty | Unit Cost | Stock Value.
  * Source: cost_layers (subledger).  No GL, no pricing, no margins, no ABC.
  */
 
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Package, ArrowLeft, Download } from 'lucide-react';
+import { Package, Download } from 'lucide-react';
+import { ReportBackLink } from '../../../components/reports/ReportBackLink';
 import Layout from '../../../components/Layout';
 import { ResponsiveTableWrapper } from '../../../components/ui/ResponsiveTableWrapper';
 import { formatCurrency } from '../../../utils/currency';
@@ -53,9 +53,7 @@ export default function InventoryValuationReportPage() {
     <Layout>
       <div className="p-3 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
         <header className="space-y-3">
-          <Link to="/reports" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors">
-            <ArrowLeft className="w-4 h-4" /> Back to Reports
-          </Link>
+          <ReportBackLink />
           <div className="flex items-center gap-3">
             <Package className="w-6 h-6 text-blue-600" />
             <div>

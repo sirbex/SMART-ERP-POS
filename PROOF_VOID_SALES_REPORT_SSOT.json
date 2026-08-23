@@ -1,0 +1,73 @@
+{
+  "feature": "VOID_SALES_REPORT_SSOT",
+  "provenAt": "2026-08-23T12:06:24.655Z",
+  "contract": "VOID cancellation register; coalesce void date; REVERSAL acct docs; numeric summary; SSOT UI; no competitor brand",
+  "gates": [
+    {
+      "id": "STATUS_VOID",
+      "ok": true,
+      "detail": "filters status VOID only"
+    },
+    {
+      "id": "COALESCE_VOID_DATE",
+      "ok": true,
+      "detail": "void posting date falls back to created_at (sales has no updated_at)"
+    },
+    {
+      "id": "NO_REQUIRE_VOIDED_AT",
+      "ok": true,
+      "detail": "does not drop legacy voids missing voided_at"
+    },
+    {
+      "id": "AGG_REVERSAL_DOCS",
+      "ok": true,
+      "detail": "accounting docs aggregated from REVERSAL journals"
+    },
+    {
+      "id": "NO_FORMATTED_SUMMARY",
+      "ok": true,
+      "detail": "summary has no duplicate Formatted currency strings"
+    },
+    {
+      "id": "IN_FINANCIAL_SSOT",
+      "ok": true,
+      "detail": "VOID_SALES_REPORT in FINANCIAL_SSOT_REPORTS"
+    },
+    {
+      "id": "CANCEL_COPY",
+      "ok": true,
+      "detail": "business-logic cancellation blurb"
+    },
+    {
+      "id": "POINTS_TO_REFUND",
+      "ok": true,
+      "detail": "empty/help points to credit-memo report"
+    },
+    {
+      "id": "DOC_REGISTER",
+      "ok": true,
+      "detail": "document register section"
+    },
+    {
+      "id": "NO_BRAND",
+      "ok": true,
+      "detail": "no competitor brand in ReportsPage"
+    },
+    {
+      "id": "PDF_REGISTER",
+      "ok": true,
+      "detail": "PDF register heading"
+    },
+    {
+      "id": "PDF_BY_REASON",
+      "ok": true,
+      "detail": "PDF includes reason breakdown"
+    }
+  ],
+  "summary": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

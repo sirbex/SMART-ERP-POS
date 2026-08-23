@@ -14,6 +14,7 @@ import { Badge } from '../../components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
 import { getBusinessDate } from '../../utils/businessDate';
 import { formatCurrency } from '../../utils/currency';
+import { ReportBackLink } from '../../components/reports/ReportBackLink';
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -303,6 +304,7 @@ export default function LiquidityMovementsReportPage() {
       <div className="mx-auto max-w-[1400px] space-y-5 p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
+            <ReportBackLink className="mb-1" />
             <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-slate-900">
               <Landmark className="h-6 w-6 text-indigo-600" />
               Liquidity Movements
@@ -312,9 +314,6 @@ export default function LiquidityMovementsReportPage() {
               where money moved.
             </p>
             <div className="mt-2 flex flex-wrap gap-3 text-sm">
-              <Link to="/reports" className="text-indigo-600 hover:text-indigo-800">
-                All reports
-              </Link>
               <Link to="/accounting/banking" className="text-indigo-600 hover:text-indigo-800">
                 Banking &amp; Liquidity
               </Link>

@@ -1,5 +1,5 @@
 /**
- * Expense Reports — SAP/Odoo-style designer.
+ * Expense Reports designer.
  * Business logic:
  *   Recognized (P&L) = APPROVED + PAID (GL posts on approval)
  *   Unpaid AP        = APPROVED
@@ -30,6 +30,7 @@ import {
   Loader2,
   RefreshCw,
 } from 'lucide-react';
+import { ReportBackLink } from '../../components/reports/ReportBackLink';
 
 function monthStart(iso: string): string {
   return `${iso.slice(0, 7)}-01`;
@@ -365,6 +366,7 @@ export default function ExpenseReportsPage() {
         className="mx-auto max-w-7xl p-6"
         title="Expense reports"
         description="Recognized expense hits P&L on approval; pay clears AP from Cash / Bank / MoMo / Petty. Cancelled vouchers are excluded."
+        backLink={<ReportBackLink />}
         primaryActions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={() => void generateReport()} disabled={loading} className="min-h-[var(--layout-touch-target)]">

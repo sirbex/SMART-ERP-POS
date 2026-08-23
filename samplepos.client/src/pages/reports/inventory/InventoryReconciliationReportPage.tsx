@@ -1,5 +1,5 @@
 /**
- * Inventory vs GL Reconciliation Report (SAP/Odoo-style)
+ * Inventory vs GL Reconciliation Report
  *
  * ACCOUNTING CONTROL. Summary comparison of subledger vs GL 1300, with a
  * drilldown of products whose product_inventory.quantity_on_hand disagrees
@@ -7,8 +7,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Scale, CheckCircle2, AlertTriangle, ArrowLeft, Download } from 'lucide-react';
+import { Scale, CheckCircle2, AlertTriangle, Download } from 'lucide-react';
+import { ReportBackLink } from '../../../components/reports/ReportBackLink';
 import Layout from '../../../components/Layout';
 import { ResponsiveTableWrapper } from '../../../components/ui/ResponsiveTableWrapper';
 import { formatCurrency } from '../../../utils/currency';
@@ -58,9 +58,7 @@ export default function InventoryReconciliationReportPage() {
     <Layout>
       <div className="p-3 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
         <header className="space-y-3">
-          <Link to="/reports" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors">
-            <ArrowLeft className="w-4 h-4" /> Back to Reports
-          </Link>
+          <ReportBackLink />
           <div className="flex items-center gap-3">
             <Scale className="w-6 h-6 text-purple-600" />
             <div>

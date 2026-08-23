@@ -10,6 +10,7 @@ import {
   Package,
   CreditCard,
   Landmark,
+  HandCoins,
 } from 'lucide-react';
 import Layout from '../../components/Layout';
 import { DateRangeFilter } from '../../components/ui/DateRangeFilter';
@@ -23,6 +24,8 @@ import {
   AdaptiveReportSummary,
   type AdaptiveReportMetric,
 } from '../../components/adaptive';
+import { CustomerReceiptsByDayPanel } from '../../components/reports/CustomerReceiptsByDayPanel';
+import { ReportBackLink } from '../../components/reports/ReportBackLink';
 
 // ---------------------------------------------------------------------------
 // Types matching the new ledger-based API response
@@ -78,6 +81,40 @@ interface CustomerDepositSummary {
   outstandingLiability: number;
   activeDepositCount: number;
   customersWithDeposits: number;
+  byDay?: Array<{
+    businessDate: string;
+    totalAmount: number;
+    receiptCount: number;
+    lines: Array<{
+      businessDate: string;
+      customerId: string;
+      customerNumber: string;
+      customerName: string;
+      documentNumber: string;
+      paymentMethod: string;
+      amount: number;
+    }>;
+  }>;
+}
+
+interface ArCollectionsSection {
+  totalCollected: number;
+  paymentCount: number;
+  customerCount: number;
+  byDay: Array<{
+    businessDate: string;
+    totalAmount: number;
+    receiptCount: number;
+    lines: Array<{
+      businessDate: string;
+      customerId: string;
+      customerNumber: string;
+      customerName: string;
+      documentNumber: string;
+      paymentMethod: string;
+      amount: number;
+    }>;
+  }>;
 }
 
 interface BusinessSummary {
@@ -101,6 +138,7 @@ interface BusinessPerformanceData {
   expensesByAccount: ExpenseByAccountEntry[];
   supplierPaymentsByAccount?: SupplierPaymentByAccountEntry[];
   customerDeposits?: CustomerDepositSummary;
+  arCollections?: ArCollectionsSection;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,13 +156,21 @@ const PAYMENT_METHODS = [
 const SECTION_OPTIONS = [
   { value: 'ALL', label: 'All Sections' },
   { value: 'MONEY_IN', label: '1 — Money In' },
+  { value: 'RECEIPTS', label: '1b — Collections & Deposits' },
   { value: 'REVENUE', label: '2 — Revenue by Category' },
   { value: 'COST_STOCK', label: '3 — Cost & Stock Impact' },
   { value: 'EXPENSES', label: '4 — Expenses by Account' },
   { value: 'NET_POSITION', label: '5 — Net Business Position' },
 ];
 
-type SectionKey = 'ALL' | 'MONEY_IN' | 'REVENUE' | 'COST_STOCK' | 'EXPENSES' | 'NET_POSITION';
+type SectionKey =
+  | 'ALL'
+  | 'MONEY_IN'
+  | 'RECEIPTS'
+  | 'REVENUE'
+  | 'COST_STOCK'
+  | 'EXPENSES'
+  | 'NET_POSITION';
 
 const BusinessPerformancePage: React.FC = () => {
   const initialRange = computeDateRange('THIS_MONTH')!;
@@ -211,6 +257,7 @@ const BusinessPerformancePage: React.FC = () => {
         className="p-6 max-w-7xl mx-auto"
         title="Management P&L by Category"
         description="Ledger-based report — where did money come from, and where did it go?"
+        backLink={<ReportBackLink />}
         toolbar={
           <div className="bg-white rounded-lg border shadow-sm p-4 space-y-4" data-bp-filters="true">
             <DateRangeFilter
@@ -308,7 +355,8 @@ const BusinessPerformancePage: React.FC = () => {
                     </h2>
                   </div>
                   <p className="text-sm text-gray-500 mt-1">
-                    Cash and receivables from sales, customer payments received, and opening balances (GL 1010 / 1200)
+                    Cash and receivables from sales, customer payments received (incl. Undeposited
+                    Funds 1015), and opening balances
                   </p>
                 </div>
                 <div className="overflow-x-auto">
@@ -383,6 +431,40 @@ const BusinessPerformancePage: React.FC = () => {
                 </div>
               </div>
 
+            )}
+
+            {/* ── Section 1b: AR collections by day + customer ── */}
+            {(showSection('RECEIPTS') || showSection('MONEY_IN')) &&
+              report.arCollections &&
+              (visibleSection === 'RECEIPTS' || report.arCollections.paymentCount > 0) && (
+              <CustomerReceiptsByDayPanel
+                title="Section 1b — Receivable Collections"
+                description="Money received against customer receivables (posted to Undeposited Funds 1015). Day → which customer paid."
+                accentClass="text-teal-700"
+                icon={<HandCoins className="h-5 w-5 text-teal-600" />}
+                summaryCards={[
+                  {
+                    label: 'Collected from AR',
+                    value: formatCurrency(report.arCollections.totalCollected),
+                    sub: `${report.arCollections.paymentCount} payment(s)`,
+                    tone: 'bg-teal-50',
+                  },
+                  {
+                    label: 'Customers paid',
+                    value: String(report.arCollections.customerCount),
+                    sub: 'in period',
+                    tone: 'bg-blue-50',
+                  },
+                  {
+                    label: 'Days with collections',
+                    value: String(report.arCollections.byDay.length),
+                    sub: 'business days',
+                    tone: 'bg-slate-50',
+                  },
+                ]}
+                byDay={report.arCollections.byDay}
+                emptyMessage="No receivable collections in this period"
+              />
             )}
 
             {/* ── Section 2: Revenue by Product Category ── */}
@@ -746,7 +828,55 @@ const BusinessPerformancePage: React.FC = () => {
             )}
 
             {/* ── Section 4c: Customer Deposits (Liability) ── */}
-            {report.customerDeposits && (report.customerDeposits.depositCount > 0 || report.customerDeposits.outstandingLiability > 0) && (
+            {showSection('RECEIPTS') &&
+              report.customerDeposits &&
+              (report.customerDeposits.depositCount > 0 ||
+                report.customerDeposits.outstandingLiability > 0 ||
+                (report.customerDeposits.byDay && report.customerDeposits.byDay.length > 0)) && (
+              <div className="space-y-0">
+                <CustomerReceiptsByDayPanel
+                  title="Section 4c — Customer Deposits"
+                  description="Customer prepayments received (posted to Undeposited Funds 1015 / liability 2200). Day → which customer deposited."
+                  accentClass="text-purple-700"
+                  icon={<Landmark className="h-5 w-5 text-purple-600" />}
+                  summaryCards={[
+                    {
+                      label: 'Deposits Received',
+                      value: formatCurrency(report.customerDeposits.totalDeposited),
+                      sub: `${report.customerDeposits.depositCount} deposit(s)`,
+                      tone: 'bg-purple-50',
+                    },
+                    {
+                      label: 'Clearings Applied',
+                      value: formatCurrency(report.customerDeposits.totalCleared),
+                      sub: `${report.customerDeposits.clearingCount} clearing(s)`,
+                      tone: 'bg-green-50',
+                    },
+                    {
+                      label: 'Outstanding Liability',
+                      value: formatCurrency(report.customerDeposits.outstandingLiability),
+                      sub: `${report.customerDeposits.activeDepositCount} active`,
+                      tone: 'bg-orange-50',
+                    },
+                    {
+                      label: 'Customers',
+                      value: String(report.customerDeposits.customersWithDeposits),
+                      sub: 'with deposits',
+                      tone: 'bg-blue-50',
+                    },
+                  ]}
+                  byDay={report.customerDeposits.byDay || []}
+                  emptyMessage="No deposits taken in this period (outstanding liability may still exist)"
+                />
+              </div>
+            )}
+
+            {/* Keep EXPENSES section filter showing deposits under ALL too via RECEIPTS;
+                when viewing EXPENSES-only, still show deposit summary without day table */}
+            {visibleSection === 'EXPENSES' &&
+              report.customerDeposits &&
+              (report.customerDeposits.depositCount > 0 ||
+                report.customerDeposits.outstandingLiability > 0) && (
               <div className="bg-white rounded-lg border shadow-sm">
                 <div className="px-6 py-4 border-b">
                   <div className="flex items-center gap-2">
@@ -756,29 +886,52 @@ const BusinessPerformancePage: React.FC = () => {
                     </h2>
                   </div>
                   <p className="text-sm text-gray-500 mt-1">
-                    Customer prepayments received, clearings applied, and outstanding liability (GL 2200)
+                    Customer prepayments received, clearings applied, and outstanding liability (GL
+                    2200)
                   </p>
                 </div>
                 <div className="p-4 sm:p-6">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
                     <div className="bg-purple-50 p-4 rounded-lg text-center">
-                      <p className="text-xs font-medium text-purple-600 uppercase tracking-wide mb-1">Deposits Received</p>
-                      <p className="text-lg font-bold text-purple-700">{formatCurrency(report.customerDeposits.totalDeposited)}</p>
-                      <p className="text-xs text-gray-500 mt-1">{report.customerDeposits.depositCount} deposit(s)</p>
+                      <p className="text-xs font-medium text-purple-600 uppercase tracking-wide mb-1">
+                        Deposits Received
+                      </p>
+                      <p className="text-lg font-bold text-purple-700">
+                        {formatCurrency(report.customerDeposits.totalDeposited)}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {report.customerDeposits.depositCount} deposit(s)
+                      </p>
                     </div>
                     <div className="bg-green-50 p-4 rounded-lg text-center">
-                      <p className="text-xs font-medium text-green-600 uppercase tracking-wide mb-1">Clearings Applied</p>
-                      <p className="text-lg font-bold text-green-700">{formatCurrency(report.customerDeposits.totalCleared)}</p>
-                      <p className="text-xs text-gray-500 mt-1">{report.customerDeposits.clearingCount} clearing(s)</p>
+                      <p className="text-xs font-medium text-green-600 uppercase tracking-wide mb-1">
+                        Clearings Applied
+                      </p>
+                      <p className="text-lg font-bold text-green-700">
+                        {formatCurrency(report.customerDeposits.totalCleared)}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {report.customerDeposits.clearingCount} clearing(s)
+                      </p>
                     </div>
                     <div className="bg-orange-50 p-4 rounded-lg text-center">
-                      <p className="text-xs font-medium text-orange-600 uppercase tracking-wide mb-1">Outstanding Liability</p>
-                      <p className="text-lg font-bold text-orange-700">{formatCurrency(report.customerDeposits.outstandingLiability)}</p>
-                      <p className="text-xs text-gray-500 mt-1">{report.customerDeposits.activeDepositCount} active</p>
+                      <p className="text-xs font-medium text-orange-600 uppercase tracking-wide mb-1">
+                        Outstanding Liability
+                      </p>
+                      <p className="text-lg font-bold text-orange-700">
+                        {formatCurrency(report.customerDeposits.outstandingLiability)}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {report.customerDeposits.activeDepositCount} active
+                      </p>
                     </div>
                     <div className="bg-blue-50 p-4 rounded-lg text-center">
-                      <p className="text-xs font-medium text-blue-600 uppercase tracking-wide mb-1">Customers</p>
-                      <p className="text-lg font-bold text-blue-700">{report.customerDeposits.customersWithDeposits}</p>
+                      <p className="text-xs font-medium text-blue-600 uppercase tracking-wide mb-1">
+                        Customers
+                      </p>
+                      <p className="text-lg font-bold text-blue-700">
+                        {report.customerDeposits.customersWithDeposits}
+                      </p>
                       <p className="text-xs text-gray-500 mt-1">with deposits</p>
                     </div>
                   </div>

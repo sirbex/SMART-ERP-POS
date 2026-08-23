@@ -454,17 +454,20 @@ export interface InventoryValuationRow {
     hasDrift?: boolean;
 }
 
-// ── Expiring Items ──
+// ── Expiring Items (shelf-life / expiry register) ──
 export interface ExpiringItemRow {
     batchId: string;
     productId: string;
     productName: string;
+    sku: string | null;
     batchNumber: string;
     expiryDate: string | null;
     daysUntilExpiry: number;
     quantityRemaining: number;
     unitCost: number;
     potentialLoss: number;
+    /** expired | critical | warning | watch */
+    urgency: string;
 }
 
 // ── Low Stock Items ──
@@ -626,6 +629,8 @@ export interface CustomerAgingRow {
     over90: number;
     overdueAmount: number;
     maxDaysOverdue: number;
+    /** On-account AR receipts not yet allocated (reduces net outstanding) */
+    unallocatedCredits?: number;
 }
 
 // ── Waste/Damage Report ──
@@ -721,10 +726,13 @@ export interface ReorderDashboardResponse {
 // ── Sales Comparison ──
 export interface SalesComparisonRow {
     period: string;
+    /** Aligned previous-range bucket label (ordinal PoP, not calendar join) */
+    previousPeriod: string;
     currentSales: number;
     previousSales: number;
     difference: number;
-    percentageChange: number;
+    /** null when previous baseline is 0 and current > 0 */
+    percentageChange: number | null;
     currentTransactions: number;
     previousTransactions: number;
 }
@@ -743,7 +751,7 @@ export interface CustomerPurchaseHistoryRow {
     customerName?: string;
 }
 
-// ── Void Sales Report ──
+// ── Void Sales Report (cancellation / void document register) ──
 export interface VoidSalesReportRow {
     saleNumber: string;
     saleDate: string | null;
@@ -757,10 +765,12 @@ export interface VoidSalesReportRow {
     customerName: string | null;
     paymentMethod: string;
     itemCount: number;
+    /** Aggregated REVERSAL TransactionNumber(s) for this sale */
+    accountingDocNumber: string | null;
     glReversalAmount: number | null;
 }
 
-// ── Refund Report (ERP Audit-Grade, SAP/Odoo-aligned) ──
+// ── Refund Report (credit memo / returns register) ──
 
 /** Header row: one per refund document */
 export interface RefundReportHeader {

@@ -346,6 +346,21 @@ export const SalesReportParamsSchema = z.object({
     .optional(),
   customer_id: z.string().uuid().optional(),
   session_id: z.string().optional(),
+  /** Comma-separated Sales Analysis column ids (matches UI designer). */
+  columns: z.string().optional(),
+  sort_by: z
+    .enum([
+      'netRevenue',
+      'totalSales',
+      'grossProfit',
+      'profitMargin',
+      'totalQuantitySold',
+      'transactionCount',
+      'period',
+    ])
+    .optional(),
+  sort_dir: z.enum(['asc', 'desc']).optional(),
+  top_n: z.enum(['all', '10', '20']).optional(),
   format: z.enum(['pdf', 'csv', 'json']).default('json'),
 });
 
@@ -802,10 +817,11 @@ export const SalesComparisonRequestSchema = z.object({
 
 export const SalesComparisonItemSchema = z.object({
   period: z.string(),
+  previousPeriod: z.string().optional(),
   currentSales: z.number().nonnegative(),
   previousSales: z.number().nonnegative(),
   difference: z.number(),
-  percentageChange: z.number(),
+  percentageChange: z.number().nullable(),
   currentTransactions: z.number().int().nonnegative(),
   previousTransactions: z.number().int().nonnegative(),
 }).strict();

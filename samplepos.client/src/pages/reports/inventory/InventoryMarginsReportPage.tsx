@@ -1,13 +1,13 @@
 /**
- * Price & Margin Analysis Report (SAP/Odoo-style)
+ * Price & Margin Analysis Report
  *
  * COMMERCIAL INSIGHT. Per-product margin & potential profit on current stock.
  * NOT part of valuation. NO GL. NO ABC. NO dead-stock flags.
  */
 
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { TrendingUp, AlertTriangle, ArrowLeft, Download } from 'lucide-react';
+import { TrendingUp, AlertTriangle, Download } from 'lucide-react';
+import { ReportBackLink } from '../../../components/reports/ReportBackLink';
 import Layout from '../../../components/Layout';
 import { ResponsiveTableWrapper } from '../../../components/ui/ResponsiveTableWrapper';
 import { formatCurrency } from '../../../utils/currency';
@@ -63,9 +63,7 @@ export default function InventoryMarginsReportPage() {
     <Layout>
       <div className="p-3 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
         <header className="space-y-3">
-          <Link to="/reports" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors">
-            <ArrowLeft className="w-4 h-4" /> Back to Reports
-          </Link>
+          <ReportBackLink />
           <div className="flex items-center gap-3">
             <TrendingUp className="w-6 h-6 text-indigo-600" />
             <div>

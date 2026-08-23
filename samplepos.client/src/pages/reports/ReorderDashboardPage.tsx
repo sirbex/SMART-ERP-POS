@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatCurrency } from '../../utils/currency';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
+import { ReportBackLink } from '../../components/reports/ReportBackLink';
 
 // ── Types ──
 type ReorderPriority = 'URGENT' | 'HIGH' | 'MEDIUM' | 'DEAD_STOCK' | 'HEALTHY';
@@ -300,10 +301,13 @@ export default function ReorderDashboardPage() {
     // ── Loading / Error ──
     if (loading) {
         return (
-            <div className="flex items-center justify-center min-h-[60vh]">
-                <div className="text-center">
-                    <div className="animate-spin h-10 w-10 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4" />
-                    <p className="text-gray-500">Analyzing inventory...</p>
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-4">
+                <ReportBackLink />
+                <div className="flex items-center justify-center min-h-[40vh]">
+                    <div className="text-center">
+                        <div className="animate-spin h-10 w-10 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4" />
+                        <p className="text-gray-500">Analyzing inventory...</p>
+                    </div>
                 </div>
             </div>
         );
@@ -311,11 +315,14 @@ export default function ReorderDashboardPage() {
 
     if (error) {
         return (
-            <div className="max-w-3xl mx-auto mt-12 p-6 bg-red-50 border border-red-200 rounded-xl text-center">
-                <p className="text-red-700 font-medium">{error}</p>
-                <button onClick={fetchDashboard} className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
-                    Retry
-                </button>
+            <div className="max-w-3xl mx-auto mt-12 p-6 space-y-4">
+                <ReportBackLink />
+                <div className="bg-red-50 border border-red-200 rounded-xl text-center p-6">
+                    <p className="text-red-700 font-medium">{error}</p>
+                    <button onClick={fetchDashboard} className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+                        Retry
+                    </button>
+                </div>
             </div>
         );
     }
@@ -328,16 +335,11 @@ export default function ReorderDashboardPage() {
             {/* ── Header ── */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
+                    <ReportBackLink />
                     <h1 className="text-2xl font-bold text-gray-900">Reorder Intelligence</h1>
                     <p className="text-sm text-gray-500 mt-1">Business-driven inventory decision engine</p>
                 </div>
                 <div className="flex gap-2">
-                    <button
-                        onClick={() => navigate('/reports')}
-                        className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
-                    >
-                        ← Reports
-                    </button>
                     <button
                         onClick={fetchDashboard}
                         className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"

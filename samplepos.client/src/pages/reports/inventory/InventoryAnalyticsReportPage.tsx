@@ -1,13 +1,13 @@
 /**
- * Inventory Analytics Report (SAP/Odoo-style)
+ * Inventory Analytics Report
  *
  * OPERATIONS INSIGHT. ABC classification, movement velocity, dead-stock flag.
  * NO money columns from cost layers. NO GL. NO selling price.
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Gauge, Activity, Zap, Turtle, Skull, ArrowLeft, Download } from 'lucide-react';
+import { Gauge, Activity, Zap, Turtle, Skull, Download } from 'lucide-react';
+import { ReportBackLink } from '../../../components/reports/ReportBackLink';
 import Layout from '../../../components/Layout';
 import { ResponsiveTableWrapper } from '../../../components/ui/ResponsiveTableWrapper';
 import apiClient from '../../../utils/api';
@@ -81,9 +81,7 @@ export default function InventoryAnalyticsReportPage() {
     <Layout>
       <div className="p-3 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
         <header className="space-y-3">
-          <Link to="/reports" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors">
-            <ArrowLeft className="w-4 h-4" /> Back to Reports
-          </Link>
+          <ReportBackLink />
           <div className="flex items-center gap-3">
             <Gauge className="w-6 h-6 text-emerald-600" />
             <div>

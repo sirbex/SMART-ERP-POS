@@ -213,6 +213,7 @@ export interface SupplierPaymentAllocation {
  */
 export interface CustomerAgingReport {
     customerId: string;
+    customerNumber?: string;
     customerName: string;
     current: string | Decimal;
     days30: string | Decimal;

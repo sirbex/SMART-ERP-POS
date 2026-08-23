@@ -164,6 +164,11 @@ export async function getGlobalArOpeningBalance(
          JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
          WHERE a."AccountCode" = '1200'
            AND lt."Status" = 'POSTED'
+           AND COALESCE(lt."IsReversed", false) = false
+           AND lt."Id" NOT IN (
+             SELECT "ReversedByTransactionId" FROM ledger_transactions
+             WHERE "ReversedByTransactionId" IS NOT NULL
+           )
            AND le."EntryDate"::date < $1::date`,
     [beforeDate],
   );
@@ -204,7 +209,7 @@ export async function getArLedger(
 
   const result = await pool.query(
     `SELECT
-       lt."TransactionDate" AS date,
+       le."EntryDate"::date AS date,
        lt."TransactionNumber" AS transaction_number,
        lt."ReferenceType" AS reference_type,
        lt."ReferenceNumber" AS reference_number,
@@ -216,11 +221,15 @@ export async function getArLedger(
      JOIN accounts a ON a."Id" = le."AccountId"
      WHERE a."AccountCode" = '1200'
        AND lt."Status" = 'POSTED'
-       AND lt."IsReversed" = false
-       AND lt."TransactionDate" >= $1::date
-       AND lt."TransactionDate" <= $2::date
+       AND COALESCE(lt."IsReversed", false) = false
+       AND lt."Id" NOT IN (
+         SELECT "ReversedByTransactionId" FROM ledger_transactions
+         WHERE "ReversedByTransactionId" IS NOT NULL
+       )
+       AND le."EntryDate"::date >= $1::date
+       AND le."EntryDate"::date <= $2::date
        ${customerFilter}
-     ORDER BY lt."TransactionDate" ASC, lt."CreatedAt" ASC`,
+     ORDER BY le."EntryDate" ASC, lt."CreatedAt" ASC, le."CreatedAt" ASC`,
     params,
   );
 
@@ -969,6 +978,11 @@ export async function getCustomerStatementOpeningBalance(
          WHERE a."AccountCode" = '1200'
            AND ${customerArScopeSql('le', 'lt', '$1')}
            AND lt."Status" = 'POSTED'
+           AND COALESCE(lt."IsReversed", false) = false
+           AND lt."Id" NOT IN (
+             SELECT "ReversedByTransactionId" FROM ledger_transactions
+             WHERE "ReversedByTransactionId" IS NOT NULL
+           )
            AND le."EntryDate"::date < $2::date`,
     [customerId, beforeDate],
   );
@@ -984,7 +998,7 @@ export async function getSmartCustomerStatementEntries(
 ): Promise<SmartStatementEntry[]> {
   const result = await pool.query(
     `SELECT
-         lt."TransactionDate"::date AS date,
+         le."EntryDate"::date AS date,
          lt."ReferenceType"        AS ref_type,
          COALESCE(lt."ReferenceNumber", lt."TransactionNumber", '') AS reference,
          lt."Id"                                                     AS transaction_id,
@@ -1004,16 +1018,21 @@ export async function getSmartCustomerStatementEntries(
        WHERE a."AccountCode" = '1200'
          AND ${customerArScopeSql('le', 'lt', '$1')}
          AND lt."Status" = 'POSTED'
+         AND COALESCE(lt."IsReversed", false) = false
+         AND lt."Id" NOT IN (
+           SELECT "ReversedByTransactionId" FROM ledger_transactions
+           WHERE "ReversedByTransactionId" IS NOT NULL
+         )
          AND lt."ReferenceType" NOT IN (
                'SYSTEM_CORRECTION', 'CORRECTION', 'HIST_REV', 'MANUAL_ADJUSTMENT', 'SALE_COGS'
              )
          AND le."EntryDate"::date >= $2::date
          AND le."EntryDate"::date <= $3::date
        GROUP BY
-         lt."Id", lt."TransactionDate", lt."ReferenceType",
+         lt."Id", le."EntryDate"::date, lt."ReferenceType",
          lt."ReferenceNumber", lt."TransactionNumber", lt."IsReversed"
        HAVING ABS(SUM(le."DebitAmount") - SUM(le."CreditAmount")) > 0.001
-       ORDER BY lt."TransactionDate"::date ASC, MIN(le."CreatedAt") ASC`,
+       ORDER BY le."EntryDate"::date ASC, MIN(le."CreatedAt") ASC`,
     [customerId, startDate, endDate],
   );
 
@@ -1074,10 +1093,16 @@ export async function getSmartCustomerStatementEntries(
           vchType = 'Refund';
           itemStatus = 'Applied';
           break;
+        case 'DEPOSIT_APPLICATION':
+          particulars = 'Customer deposit applied to AR';
+          vchType = 'Deposit Applied';
+          itemStatus = 'Applied';
+          break;
         default:
           particulars = referenceType.replace(/_/g, ' ').toLowerCase();
           vchType = customerVchTypeLabel(referenceType);
           itemStatus = credit > 0 ? 'Applied' : 'Unpaid';
+          break;
       }
     }
 

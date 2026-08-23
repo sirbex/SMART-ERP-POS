@@ -1,0 +1,69 @@
+{
+  "feature": "SALES_COMPARISON_POP_ORDINAL",
+  "provenAt": "2026-08-23T12:06:24.741Z",
+  "defect": "Joined current/previous buckets ON calendar period label; Aug weeks vs Jul weeks → previous=0 and % forced to 100",
+  "fix": "Bucket each range separately; align by ordinal index; % null when previous baseline is 0",
+  "gates": [
+    {
+      "id": "ROW_COUNT",
+      "ok": true,
+      "detail": "rows=3"
+    },
+    {
+      "id": "FIRST_PAIR",
+      "ok": true,
+      "detail": "first previous=500000 label=2026-07-06"
+    },
+    {
+      "id": "NOT_ZERO_PREV",
+      "ok": true,
+      "detail": "all previous sales > 0 under ordinal align"
+    },
+    {
+      "id": "PCT_FIRST",
+      "ok": true,
+      "detail": "pct=241.58"
+    },
+    {
+      "id": "PCT_NULL",
+      "ok": true,
+      "detail": "no baseline → null"
+    },
+    {
+      "id": "PCT_BOTH_ZERO",
+      "ok": true,
+      "detail": "both zero → 0"
+    },
+    {
+      "id": "PCT_NORMAL",
+      "ok": true,
+      "detail": "110 vs 100 → 10%"
+    },
+    {
+      "id": "SUMMARY_PCT_NULL",
+      "ok": true,
+      "detail": "overall=null"
+    },
+    {
+      "id": "NO_CALENDAR_JOIN",
+      "ok": true,
+      "detail": "old calendar join removed"
+    },
+    {
+      "id": "USES_ALIGN",
+      "ok": true,
+      "detail": "uses ordinal align helper"
+    },
+    {
+      "id": "NO_FAKE_100",
+      "ok": true,
+      "detail": "SQL no longer forces 100% when previous=0"
+    }
+  ],
+  "summary": {
+    "total": 11,
+    "passed": 11,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

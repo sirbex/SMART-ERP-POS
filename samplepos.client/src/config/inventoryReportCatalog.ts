@@ -13,7 +13,7 @@ export interface InventoryReportLink {
   badge?: string;
 }
 
-/** Ledger-based SAP/Odoo-style inventory suite */
+/** Ledger-based inventory report suite */
 export const INVENTORY_LEDGER_REPORTS: InventoryReportLink[] = [
   {
     id: 'valuation',

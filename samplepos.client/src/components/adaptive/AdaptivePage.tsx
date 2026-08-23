@@ -14,6 +14,8 @@ type AdaptivePageProps = {
   /** Short supporting line — hidden when disclosure is essentials unless forceDescription. */
   description?: ReactNode;
   forceDescription?: boolean;
+  /** Optional back control rendered above the title (e.g. ReportBackLink). */
+  backLink?: ReactNode;
   /** Primary CTAs (always visible). */
   primaryActions?: ReactNode;
   /** Secondary / advanced actions — collapsed behind More on essentials/balanced. */
@@ -37,6 +39,7 @@ export function AdaptivePage({
   title,
   description,
   forceDescription = false,
+  backLink,
   primaryActions,
   secondaryActions,
   toolbar,
@@ -85,6 +88,7 @@ export function AdaptivePage({
     >
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
+          {backLink ? <div data-adaptive-page-back="true">{backLink}</div> : null}
           <h1 className={titleSize}>{title}</h1>
           {showDescription ? (
             <div
