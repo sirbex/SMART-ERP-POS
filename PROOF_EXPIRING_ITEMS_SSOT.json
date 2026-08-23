@@ -1,6 +1,6 @@
 {
   "feature": "EXPIRING_ITEMS_SSOT",
-  "provenAt": "2026-08-23T13:04:59.346Z",
+  "provenAt": "2026-08-23T13:11:14.925Z",
   "contract": "shelf-life register; KPI card click filters list; card count/value === filtered rows (days-authoritative classify); ACTIVE; include expired; PDF keys match",
   "gates": [
     {

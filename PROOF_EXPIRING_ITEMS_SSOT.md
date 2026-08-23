@@ -1,7 +1,7 @@
 # PROOF — Expiring items shelf-life SSOT
 
 **Verdict:** PASS
-**Proven at:** 2026-08-23T13:04:59.346Z
+**Proven at:** 2026-08-23T13:11:14.925Z
 
 **Contract:** shelf-life register; KPI card click filters list; card count/value === filtered rows (days-authoritative classify); ACTIVE; include expired; PDF keys match
 
