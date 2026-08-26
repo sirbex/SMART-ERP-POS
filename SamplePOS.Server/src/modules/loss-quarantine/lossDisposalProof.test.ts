@@ -79,6 +79,18 @@ describe('Loss disposal posting (Phase 2C)', () => {
     expect(svc).toContain('disposeFromQuarantine');
     expect(svc).toContain('reverseDisposal');
     expect(svc).toContain('allowDisposalStatuses');
+    expect(svc).toMatch(/Prefer inventoryBatchId from the aging line/);
+    expect(svc).toMatch(/pl\.inventory_batch_id = \$1/);
+  });
+
+  it('lot selector skips expiry filter when disposing calendar-expired batches', () => {
+    const selector = readRepo(
+      'SamplePOS.Server/src/modules/inventory-lot/postgresLotSelector.ts',
+    );
+    expect(selector).toMatch(
+      /allowDisposalStatuses[\s\S]*clause:\s*'TRUE'/,
+    );
+    expect(selector).toMatch(/status::text/);
   });
 
   it('warehouse WRITE_OFF uses resolveWriteOffPosting', () => {

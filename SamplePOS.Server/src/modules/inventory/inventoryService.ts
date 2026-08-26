@@ -14,6 +14,98 @@ import type { AdjustmentReason, AdjustmentDirection } from '../../../../shared/z
 import logger from '../../utils/logger.js';
 import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 
+type QuarantineAdjustmentReason = 'DAMAGE' | 'EXPIRY';
+
+async function singleStoreQuarantineFromAdjustment(
+  pool: Pool,
+  params: {
+    batchId?: string;
+    productLotId?: string;
+    productId: string;
+    quantity: number;
+    notes: string;
+    userId: string;
+    documentId?: string;
+    reason: QuarantineAdjustmentReason;
+  },
+): Promise<Record<string, unknown>> {
+  let batchId = params.batchId;
+  if (!batchId && params.productLotId) {
+    const { productLotRepository } = await import('./warehouse/productLotRepository.js');
+    const lot = await productLotRepository.getById(pool, params.productLotId);
+    batchId = lot?.inventoryBatchId ?? undefined;
+  }
+  if (!batchId) {
+    throw new ValidationError(
+      `${params.reason} quarantine requires a batch or lot with an inventory batch (select a batch in adjustments)`,
+    );
+  }
+
+  if (!(params.quantity > 0.0001)) {
+    throw new ValidationError('Quarantine quantity must be greater than zero');
+  }
+
+  const batchRow = await pool.query<{ remaining_quantity: string }>(
+    `SELECT remaining_quantity::text FROM inventory_batches WHERE id = $1`,
+    [batchId],
+  );
+  const remaining = Number(batchRow.rows[0]?.remaining_quantity ?? 0);
+  if (remaining <= 0.0001) {
+    throw new ValidationError('Batch has no remaining quantity to quarantine');
+  }
+  if (params.quantity - remaining > 0.0001) {
+    throw new ValidationError(
+      `Cannot quarantine ${params.quantity}: only ${remaining} remaining on batch`,
+    );
+  }
+
+  let documentId = params.documentId;
+  if (!documentId) {
+    const year = getBusinessYear();
+    const seqResult = await pool.query(`SELECT nextval('adj_doc_seq') AS seq`);
+    const seq = String(seqResult.rows[0].seq).padStart(5, '0');
+    const documentNumber = `ADJ-${year}-${seq}`;
+    const docResult = await pool.query(
+      `INSERT INTO inventory_adjustment_documents (document_number, reason, notes, created_by)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id`,
+      [documentNumber, params.reason, params.notes, params.userId],
+    );
+    documentId = docResult.rows[0].id as string;
+  }
+
+  const softReason = params.reason === 'EXPIRY' ? 'EXPIRED' : 'DAMAGE';
+  const { applySoftQuarantine } = await import('../loss-quarantine/softQuarantineService.js');
+  const soft = await applySoftQuarantine(pool, {
+    inventoryBatchId: batchId,
+    reason: softReason,
+    userId: params.userId,
+    memo: `${params.reason}: ${params.notes}`,
+    referenceType: 'ADJ_DOC',
+    referenceId: documentId,
+    quantity: params.quantity,
+  });
+
+  logger.info(`Batch ${params.reason.toLowerCase()} soft-quarantined (single-store)`, {
+    documentId,
+    batchId,
+    quarantinedBatchId: soft.inventoryBatchId,
+    splitFromBatchId: soft.splitFromBatchId,
+    productId: params.productId,
+    quantityHeld: soft.quantityHeld,
+    sellableRemainingOnParent: soft.sellableRemainingOnParent,
+    movementId: soft.movementId,
+  });
+
+  return {
+    documentId,
+    ...soft,
+    batchId: soft.inventoryBatchId,
+    sourceBatchId: batchId,
+    actualQuantityChanged: soft.splitFromBatchId ? soft.quantityHeld : 0,
+  };
+}
+
 export const inventoryService = {
   /**
    * Get all batches for product with FEFO ordering (First Expiry First Out)
@@ -287,18 +379,34 @@ export const inventoryService = {
       });
     }
 
-    // Legacy single-store path (unchanged)
+    // Single-store DAMAGE/EXPIRY OUT → soft quarantine (two-step; no P&L on this action).
+    if (
+      (params.reason === 'DAMAGE' || params.reason === 'EXPIRY') &&
+      params.direction === 'OUT'
+    ) {
+      return singleStoreQuarantineFromAdjustment(pool, {
+        batchId: params.batchId,
+        productLotId: params.productLotId,
+        productId: params.productId,
+        quantity: params.quantity,
+        notes: params.notes,
+        userId: params.userId,
+        documentId: params.documentId,
+        reason: params.reason,
+      });
+    }
+
+    // Legacy single-store path (ADJUSTMENT, PHYSICAL_COUNT, WRITE_OFF, IN movements)
     // Map reason + direction to StockMovementHandler's movement type
     let movementType: StockMovementType;
     let referenceType: string = 'ADJ_DOC';
 
     switch (params.reason) {
       case 'DAMAGE':
-        movementType = 'DAMAGE';
-        break;
       case 'EXPIRY':
-        movementType = 'EXPIRY';
-        break;
+        throw new ValidationError(
+          `${params.reason} OUT must use quarantine path (already handled above)`,
+        );
       case 'PHYSICAL_COUNT':
         movementType = params.direction === 'IN' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
         referenceType = 'PHYSICAL_COUNT';

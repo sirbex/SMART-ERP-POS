@@ -6,6 +6,8 @@ import type {
   LotOpeningReceiveResult,
   LotReceiveInput,
   LotReturnInput,
+  LotSplitInput,
+  LotSplitResult,
   LotStatusTransitionInput,
   LotTransferInput,
 } from './lotEvents.js';
@@ -22,8 +24,8 @@ export interface ILotService {
   transferLot(client: unknown, input: LotTransferInput): Promise<void>;
   consumeLot(client: unknown, input: LotConsumeInput): Promise<import('./lotEvents.js').LotConsumeResult>;
   returnLot(client: unknown, input: LotReturnInput): Promise<InventoryLot>;
-  /** Reserved — batch split (ADR deferred) */
-  splitLot?(client: unknown, input: unknown): Promise<InventoryLot[]>;
+  /** Partial qty off parent → new child lot (ADR-002 §4.4); no loss GL */
+  splitLot(client: unknown, input: LotSplitInput): Promise<LotSplitResult>;
   /** Reserved — batch merge (ADR deferred) */
   mergeLot?(client: unknown, input: unknown): Promise<InventoryLot>;
 }

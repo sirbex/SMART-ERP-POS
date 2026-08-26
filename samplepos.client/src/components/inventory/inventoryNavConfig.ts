@@ -97,8 +97,8 @@ export const INVENTORY_MORE_NAV: InventoryNavItem[] = [
     path: '/inventory/quarantine',
     icon: '🚧',
     group: 'operations',
-    multistoreOnly: true,
-    description: 'DAMAGE / EXPIRED / RETURN stock aging — still on inventory until dispose',
+    description:
+      'Expired / damaged quarantine aging (soft or hard) — still on inventory until dispose',
   },
   {
     id: 'stock-movements',

@@ -66,4 +66,5 @@ export const LOT_TOUCHPOINT_REGISTRY: LotTouchpoint[] = [
   { id: 'W20', workflow: 'Supplier return deduction', entryFile: 'warehouseSupplierReturnDeductionService.ts', targetGateway: 'consumeLot', status: 'MIGRATED', proof: 'warehouseSupplierReturnDeductionService.ts' },
   { id: 'W21', workflow: 'Multistore void restore', entryFile: 'warehouseSaleVoidRestoreService.ts', targetGateway: 'returnLot', status: 'MIGRATED', proof: 'warehouseSaleVoidRestoreService.test.ts' },
   { id: 'W22', workflow: 'Manufacturing', entryFile: '—', targetGateway: 'consumeLot/receiveLot', status: 'DEFERRED', proof: 'ADR §13.5' },
+  { id: 'W23', workflow: 'Partial soft quarantine (lot split)', entryFile: 'softQuarantineService.ts / inventoryService.ts', targetGateway: 'splitLot → applySoftQuarantine', status: 'MIGRATED', proof: 'PROOF_QUARANTINE_LIFECYCLE_E2E + lotService.splitLot' },
 ];

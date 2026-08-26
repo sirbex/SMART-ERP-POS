@@ -1,0 +1,88 @@
+{
+  "feature": "SOFT_QUARANTINE_P4",
+  "provenAt": "2026-08-26T17:52:50.468Z",
+  "contract": "Policy-gated auto-dispose after aging: separate flag default off; EXPIRED only; disposeFromQuarantine (P&L); soft/hard; nightly 04:30; no second loss engine",
+  "gates": [
+    {
+      "id": "DOC_P4",
+      "ok": true,
+      "detail": "P4 documented"
+    },
+    {
+      "id": "SSOT_BUCKET",
+      "ok": true,
+      "detail": "auto-dispose EXPIRED bucket only"
+    },
+    {
+      "id": "SSOT_DEFAULTS",
+      "ok": true,
+      "detail": "default min age 30 / max 100 lines"
+    },
+    {
+      "id": "SQL_DEFAULT_OFF",
+      "ok": true,
+      "detail": "migration columns default off / 30 days"
+    },
+    {
+      "id": "ANCHOR",
+      "ok": true,
+      "detail": "migration anchor registered"
+    },
+    {
+      "id": "USES_DISPOSE",
+      "ok": true,
+      "detail": "reuses disposeFromQuarantine gateway"
+    },
+    {
+      "id": "FLAG_GATED",
+      "ok": true,
+      "detail": "process requires flag unless force"
+    },
+    {
+      "id": "EXPIRED_FILTER",
+      "ok": true,
+      "detail": "candidates filtered to EXPIRED aging"
+    },
+    {
+      "id": "SCHEDULE",
+      "ok": true,
+      "detail": "nightly 04:30 + unified calculations dispatcher"
+    },
+    {
+      "id": "ROUTES",
+      "ok": true,
+      "detail": "preview + process API routes"
+    },
+    {
+      "id": "SETTINGS",
+      "ok": true,
+      "detail": "settings DTO + repository persist flag"
+    },
+    {
+      "id": "PANEL",
+      "ok": true,
+      "detail": "auto-dispose panel exists"
+    },
+    {
+      "id": "WORKQUEUE",
+      "ok": true,
+      "detail": "workqueue hosts auto-dispose panel"
+    },
+    {
+      "id": "SETTINGS_UI",
+      "ok": true,
+      "detail": "Settings → Inventory auto-dispose controls"
+    },
+    {
+      "id": "API_CLIENT",
+      "ok": true,
+      "detail": "client API methods"
+    }
+  ],
+  "summary": {
+    "total": 15,
+    "passed": 15,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

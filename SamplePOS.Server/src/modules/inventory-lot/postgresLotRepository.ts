@@ -31,6 +31,7 @@ function rowToInventoryLot(row: Record<string, unknown>): InventoryLot {
       sourceType: (row.source_type as LotSourceType) ?? 'GOODS_RECEIPT',
       goodsReceiptId: (row.goods_receipt_id as string) ?? null,
       goodsReceiptItemId: (row.goods_receipt_item_id as string) ?? null,
+      parentLotId: (row.parent_lot_id as string) ?? null,
     },
     isBonus: Boolean(row.is_bonus),
   };
@@ -52,6 +53,36 @@ export const postgresLotRepository: ILotRepository = {
     const db = client as DbClient;
     const expiry = normalizeLotDate(data.attributes.expiryDate);
     const sourceType = data.sourceType;
+
+    // parent_lot_id only when set (migration 609); keeps receive paths working pre-migration.
+    if (data.parentLotId) {
+      const result = await db.query(
+        `INSERT INTO inventory_batches (
+           product_id, batch_number, quantity, remaining_quantity,
+           expiry_date, cost_price, goods_receipt_id, goods_receipt_item_id,
+           purchase_order_id, purchase_order_item_id,
+           is_bonus, source_type, status, parent_lot_id
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         RETURNING *`,
+        [
+          data.productId,
+          data.lotNumber,
+          data.quantity,
+          data.remainingQuantity,
+          expiry,
+          data.costPrice,
+          data.goodsReceiptId ?? null,
+          data.goodsReceiptItemId ?? null,
+          data.purchaseOrderId ?? null,
+          data.purchaseOrderItemId ?? null,
+          data.isBonus ?? false,
+          sourceType,
+          data.status,
+          data.parentLotId,
+        ],
+      );
+      return rowToInventoryLot(result.rows[0]);
+    }
 
     const result = await db.query(
       `INSERT INTO inventory_batches (

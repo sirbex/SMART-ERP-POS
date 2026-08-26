@@ -50,12 +50,14 @@ export async function loadGlobalSelectableLots(
   const minDays = options.minDaysBeforeExpiry ?? 0;
 
   if (options.specificLotId) {
-    const expiry = buildMasterExpiryClause(minDays, 3);
+    const expiry = options.allowDisposalStatuses
+      ? { clause: 'TRUE', paramCount: 0 }
+      : buildMasterExpiryClause(minDays, 3);
     const params: unknown[] = [options.specificLotId, productId];
     if (expiry.paramCount) params.push(minDays);
     const statusClause = options.allowDisposalStatuses
-      ? `status IN ('ACTIVE', 'QUARANTINED', 'EXPIRED', 'BLOCKED')`
-      : `status = 'ACTIVE'`;
+      ? `COALESCE(status::text, 'ACTIVE') IN ('ACTIVE', 'QUARANTINED', 'EXPIRED', 'BLOCKED')`
+      : `COALESCE(status::text, 'ACTIVE') = 'ACTIVE'`;
 
     const result = await client.query(
       `SELECT id, batch_number, product_id, remaining_quantity, cost_price,
@@ -101,8 +103,10 @@ export async function loadStoreSelectableLots(
   const params: unknown[] = [storeLocationId, productId];
   let paramIdx = 3;
 
-  let expiryClause = '(ib.expiry_date IS NULL OR ib.expiry_date > CURRENT_DATE)';
-  if (minDays > 0) {
+  let expiryClause = options.allowDisposalStatuses
+    ? 'TRUE'
+    : '(ib.expiry_date IS NULL OR ib.expiry_date > CURRENT_DATE)';
+  if (!options.allowDisposalStatuses && minDays > 0) {
     expiryClause = `(ib.expiry_date IS NULL OR ib.expiry_date > CURRENT_DATE + $${paramIdx} * INTERVAL '1 day')`;
     params.push(minDays);
     paramIdx += 1;
@@ -118,10 +122,10 @@ export async function loadStoreSelectableLots(
     ? `sl.store_type IN ('MAIN', 'SELLING', 'DAMAGE', 'EXPIRED', 'RETURN')`
     : `sl.store_type IN ('MAIN', 'SELLING')`;
   const lotStatusClause = options.allowDisposalStatuses
-    ? `pl.status IN ('ACTIVE', 'QUARANTINED', 'EXPIRED', 'BLOCKED')
-       AND ib.status IN ('ACTIVE', 'QUARANTINED', 'EXPIRED', 'BLOCKED')`
-    : `pl.status = 'ACTIVE'
-       AND ib.status = 'ACTIVE'`;
+    ? `COALESCE(pl.status::text, 'ACTIVE') IN ('ACTIVE', 'QUARANTINED', 'EXPIRED', 'BLOCKED')
+       AND COALESCE(ib.status::text, 'ACTIVE') IN ('ACTIVE', 'QUARANTINED', 'EXPIRED', 'BLOCKED')`
+    : `COALESCE(pl.status::text, 'ACTIVE') = 'ACTIVE'
+       AND COALESCE(ib.status::text, 'ACTIVE') = 'ACTIVE'`;
 
   const result = await client.query(
     `SELECT

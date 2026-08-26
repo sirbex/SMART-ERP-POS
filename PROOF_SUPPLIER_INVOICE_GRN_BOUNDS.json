@@ -1,0 +1,63 @@
+{
+  "feature": "SUPPLIER_INVOICE_GRN_BOUNDS",
+  "provenAt": "2026-08-26T17:52:13.370Z",
+  "contract": "GR-linked supplier invoices cannot exceed received billable value unless PRICE_VARIANCE; linked GRs must be COMPLETED with billable qty; postInvoiceToGL re-validates; manual GR-note bills blocked in UI",
+  "gates": [
+    {
+      "id": "OVER_PV",
+      "ok": true,
+      "detail": "over-GRN + PRICE_VARIANCE ok"
+    },
+    {
+      "id": "OVER_NO_DISCOUNT",
+      "ok": true,
+      "detail": "over-GRN rejects SUPPLIER_DISCOUNT"
+    },
+    {
+      "id": "UNDER_NO_PV",
+      "ok": true,
+      "detail": "under-GRN rejects PRICE_VARIANCE"
+    },
+    {
+      "id": "MODULE",
+      "ok": true,
+      "detail": "validation module enforces GR ready + direction"
+    },
+    {
+      "id": "CREATE_WIRE",
+      "ok": true,
+      "detail": "createSupplierInvoice asserts linked GRs then validates variance"
+    },
+    {
+      "id": "FROM_GRN_WIRE",
+      "ok": true,
+      "detail": "createInvoiceFromGRN validates supplierReportedTotal"
+    },
+    {
+      "id": "POST_WIRE",
+      "ok": true,
+      "detail": "postInvoiceToGL re-validates before GL"
+    },
+    {
+      "id": "ROUTES",
+      "ok": true,
+      "detail": "API accepts varianceReason on create + from-grn"
+    },
+    {
+      "id": "UI_BLOCK_MANUAL_GR",
+      "ok": true,
+      "detail": "manual bill UI blocks GR-referenced notes"
+    },
+    {
+      "id": "UI_FROM_GRN",
+      "ok": true,
+      "detail": "GR billing UI uses from-grn + variance modal"
+    }
+  ],
+  "summary": {
+    "total": 10,
+    "passed": 10,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

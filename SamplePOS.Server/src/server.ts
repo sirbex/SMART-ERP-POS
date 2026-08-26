@@ -99,9 +99,7 @@ import { sessionService } from './services/sessionService.js';
 import { authenticate } from './middleware/auth.js';
 import { requirePermission } from './rbac/middleware.js';
 import { correlationId } from './middleware/correlationId.js';
-import { initDemandForecastJobs } from './modules/reports/demandForecastJobs.js';
-import { initInventoryGLIntegrityJobs } from './services/inventoryGLIntegrityJobs.js';
-import { initExpiryAutomationJobs } from './services/expiryAutomationJobs.js';
+import { initCalculationsScheduledJobs } from './services/calculationsScheduledJobs.js';
 import healthRoutes, { incrementMetric, closeHealthRedis } from './routes/health.js';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger.js';
@@ -612,28 +610,10 @@ async function startServer() {
         }
       })();
 
-      // Initialize self-learning demand forecast jobs (requires Redis)
       try {
-        initDemandForecastJobs(pool);
+        initCalculationsScheduledJobs(pool);
       } catch (err) {
-        logger.warn('Demand forecast jobs not started (Redis may be offline)', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-
-      // Initialize SAP-style Inventory ↔ GL nightly integrity check (requires Redis)
-      try {
-        initInventoryGLIntegrityJobs(pool);
-      } catch (err) {
-        logger.warn('Inventory/GL integrity jobs not started (Redis may be offline)', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-
-      try {
-        initExpiryAutomationJobs(pool);
-      } catch (err) {
-        logger.warn('Expiry automation jobs not started (Redis may be offline)', {
+        logger.warn('Calculations scheduled jobs not started (Redis may be offline)', {
           error: err instanceof Error ? err.message : String(err),
         });
       }

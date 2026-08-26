@@ -99,6 +99,13 @@ const CreateInvoiceSchema = z.object({
         )
         .min(1, 'At least one line item is required'),
     grnIds: z.array(z.string().uuid()).optional(),
+    /**
+     * Required when bill total linked to grnIds differs from received value.
+     * PRICE_VARIANCE only when supplier billed MORE than received.
+     */
+    varianceReason: z
+        .enum(['SUPPLIER_DISCOUNT', 'ROUNDING_DIFFERENCE', 'PRICE_VARIANCE', 'EDIT_LINE_PRICES'])
+        .optional(),
 });
 const CreateInvoiceFromGRNSchema = z.object({
     grnId: z.string().uuid(),
@@ -578,6 +585,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                     notes: validated.notes,
                     lineItems: validated.lineItems,
                     grnIds: validated.grnIds,
+                    varianceReason: validated.varianceReason,
                 },
                 userId
             );

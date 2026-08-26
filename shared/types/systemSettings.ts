@@ -92,6 +92,11 @@ export interface SystemSettings {
     /** Phase 9 — nightly move of expired stock to EXPIRED store */
     expiryAutomationEnabled: boolean;
 
+    /** Soft quarantine P4 — auto-dispose aged EXPIRED quarantine (posts P&L). Default off. */
+    quarantineAutoDisposeEnabled: boolean;
+    /** Days in quarantine before auto-dispose is eligible. Default 30. */
+    quarantineAutoDisposeMinAgeDays: number;
+
     // Audit
     createdAt: string;
     updatedAt: string;
@@ -147,6 +152,8 @@ export interface SystemSettingsDbRow {
     transfer_policy_special_stores_require_approval: boolean;
     transfer_assortment_expansion_policy: string;
     expiry_automation_enabled: boolean;
+    quarantine_auto_dispose_enabled?: boolean;
+    quarantine_auto_dispose_min_age_days?: number;
     created_at: string;
     updated_at: string;
     updated_by_id?: string;
@@ -200,6 +207,8 @@ export interface UpdateSystemSettingsDto {
     transferPolicySpecialStoresRequireApproval?: boolean;
     transferAssortmentExpansionPolicy?: import('./transferAssortment.js').TransferAssortmentExpansionPolicy;
     expiryAutomationEnabled?: boolean;
+    quarantineAutoDisposeEnabled?: boolean;
+    quarantineAutoDisposeMinAgeDays?: number;
     updatedById?: string;
 }
 
@@ -263,6 +272,11 @@ export function normalizeSystemSettings(dbRow: SystemSettingsDbRow): SystemSetti
             (dbRow.transfer_assortment_expansion_policy as SystemSettings['transferAssortmentExpansionPolicy']) ??
             'PROMPT',
         expiryAutomationEnabled: dbRow.expiry_automation_enabled ?? false,
+        quarantineAutoDisposeEnabled: dbRow.quarantine_auto_dispose_enabled ?? false,
+        quarantineAutoDisposeMinAgeDays:
+            dbRow.quarantine_auto_dispose_min_age_days != null
+                ? Number(dbRow.quarantine_auto_dispose_min_age_days)
+                : 30,
         createdAt: dbRow.created_at,
         updatedAt: dbRow.updated_at,
         updatedById: dbRow.updated_by_id,

@@ -1,0 +1,83 @@
+{
+  "feature": "SOFT_QUARANTINE_P2",
+  "provenAt": "2026-08-26T17:52:50.465Z",
+  "contract": "Unified expiry automation: HARD store transfer or SOFT status quarantine; shared flag default off; quarantine-only (no P&L); LQ-INV-8 skips SOFT_QUARANTINE + EXPIRY_AUTOMATION",
+  "gates": [
+    {
+      "id": "SKIP_SOFT_REF",
+      "ok": true,
+      "detail": "SOFT_QUARANTINE skips GL repair"
+    },
+    {
+      "id": "SKIP_AUTO_REF",
+      "ok": true,
+      "detail": "EXPIRY_AUTOMATION skips GL repair"
+    },
+    {
+      "id": "DOC_P2",
+      "ok": true,
+      "detail": "P2 documented in soft quarantine ADR addendum"
+    },
+    {
+      "id": "NO_MS_ONLY_THROW",
+      "ok": true,
+      "detail": "preview/process no longer multistore-only"
+    },
+    {
+      "id": "SOFT_BRANCH",
+      "ok": true,
+      "detail": "soft path uses applySoftQuarantine"
+    },
+    {
+      "id": "HARD_BRANCH",
+      "ok": true,
+      "detail": "hard path still store-transfers"
+    },
+    {
+      "id": "FLAG_GATED",
+      "ok": true,
+      "detail": "process requires flag unless force"
+    },
+    {
+      "id": "SCHEDULE_BOTH",
+      "ok": true,
+      "detail": "unified calculations dispatcher for nightly jobs"
+    },
+    {
+      "id": "AUTO_REF_SOFT",
+      "ok": true,
+      "detail": "automation soft path tags EXPIRY_AUTOMATION"
+    },
+    {
+      "id": "REPAIR_SOFT",
+      "ok": true,
+      "detail": "glRepair SQL skips SOFT_QUARANTINE"
+    },
+    {
+      "id": "PANEL_NO_GATE",
+      "ok": true,
+      "detail": "ExpiryAutomationPanel mode-aware without MultistoreGate"
+    },
+    {
+      "id": "WQ_PANEL",
+      "ok": true,
+      "detail": "quarantine workqueue hosts automation panel"
+    },
+    {
+      "id": "SETTINGS_FLAG",
+      "ok": true,
+      "detail": "system inventory settings expose nightly flag"
+    },
+    {
+      "id": "NO_PL_COPY",
+      "ok": true,
+      "detail": "UI states quarantine is not P&L"
+    }
+  ],
+  "summary": {
+    "total": 14,
+    "passed": 14,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

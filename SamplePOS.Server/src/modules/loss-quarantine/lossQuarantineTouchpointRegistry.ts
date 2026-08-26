@@ -134,6 +134,17 @@ export const LOSS_QUARANTINE_TOUCHPOINT_REGISTRY: LossQuarantineTouchpoint[] = [
     owner: 'Inventory',
     proof: 'Phase 2B — QUARANTINED when sellable qty = 0',
   },
+  {
+    id: 'LQ13',
+    workflow: 'Single-store soft quarantine (status + workqueue + dispose parity)',
+    entryFile: 'softQuarantineService.ts / quarantineAgingService.ts / lossDisposalService.ts',
+    targetGateway: 'QUARANTINE_TRANSFER then LOSS_DISPOSAL (same gateway)',
+    status: 'CLASSIFIED',
+    owner: 'Inventory',
+    proof: 'PROOF_SOFT_QUARANTINE_P1–P4 + LQ-INV-1/6/9',
+    notes:
+      'P1 soft apply/aging/dispose; P2 unified expiry automation (flag default off); P3 Expiring Items bridge; P4 auto-dispose after aging (separate flag, EXPIRED only, default off). See LOSS_QUARANTINE_SOFT_QUARANTINE.md',
+  },
 ];
 
 export function countLossTouchpointsByStatus(

@@ -174,3 +174,24 @@ export interface LotOpeningReceiveResult {
   lot: import('./lotTypes.js').InventoryLot | null;
   skipped: boolean;
 }
+
+/**
+ * Split qty off an ACTIVE parent lot into a new child lot (same cost/expiry).
+ * Product Σ remaining unchanged; no loss GL. Used for partial soft quarantine.
+ */
+export interface LotSplitInput {
+  lotId: string;
+  quantity: number;
+  userId: string;
+  reason?: string | null;
+  referenceType?: string | null;
+  referenceId?: string | null;
+  /** Optional explicit child lot number; otherwise `{parent}-S{n}` */
+  childLotNumber?: string | null;
+}
+
+export interface LotSplitResult {
+  parent: import('./lotTypes.js').InventoryLot;
+  child: import('./lotTypes.js').InventoryLot;
+  quantitySplit: number;
+}

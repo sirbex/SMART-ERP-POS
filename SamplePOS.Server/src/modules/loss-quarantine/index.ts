@@ -16,3 +16,10 @@ export {
   reverseDisposal,
   resolveWriteOffPosting,
 } from './lossDisposalService.js';
+export { applySoftQuarantine, findSoftExpiryCandidates, quarantineFromExpiringReport } from './softQuarantineService.js';
+export {
+  previewQuarantineAutoDispose,
+  processQuarantineAutoDispose,
+  runScheduledQuarantineAutoDispose,
+  isQuarantineAutoDisposeEnabled,
+} from './quarantineAutoDisposeService.js';

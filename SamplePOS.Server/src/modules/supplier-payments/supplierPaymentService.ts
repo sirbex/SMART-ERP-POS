@@ -24,6 +24,10 @@ import { PricingEngine } from '../../utils/pricingEngine.js';
 import { assertSupplierCreditHeadroom } from '../suppliers/supplierCreditGuard.js';
 import * as whtService from '../withholding-tax/whtService.js';
 import {
+    assertLinkedGrnsReadyForBilling,
+    validateSupplierInvoiceGrnVariance,
+} from './supplierInvoiceGrnValidation.js';
+import {
     resolveSupplierPaymentCreditAccount,
     paymentMethodFromLiquidityTag,
 } from './supplierPaymentPayFrom.js';
@@ -871,6 +875,28 @@ export async function createSupplierInvoice(
             ? new Decimal(data._overrideTotalAmount)
             : subtotal.plus(taxAmount);
 
+        let grnComputedTotal = data.grnComputedTotal;
+        let varianceReason = data.varianceReason;
+
+        // GR-linked bills: verify COMPLETED GRs, then bound invoice total to received value.
+        if (data.grnIds && data.grnIds.length > 0) {
+            const linked = await assertLinkedGrnsReadyForBilling(
+                client,
+                data.grnIds,
+                data.supplierId,
+            );
+            grnComputedTotal = linked.billableTotal.toNumber();
+            const varianceCheck = validateSupplierInvoiceGrnVariance({
+                grnComputedTotal: linked.billableTotal,
+                invoiceTotal: totalAmount,
+                varianceReason: data.varianceReason,
+                grLabel: linked.receiptNumbers.join(', '),
+            });
+            if (varianceCheck.hasVariance) {
+                varianceReason = varianceCheck.normalizedReason;
+            }
+        }
+
         // Default dueDate to invoiceDate + 30 days when not provided (DueDate is NOT NULL in DB)
         const resolvedDueDate = data.dueDate || (() => {
             const d = new Date(data.invoiceDate + 'T00:00:00Z');
@@ -887,8 +913,8 @@ export async function createSupplierInvoice(
             taxAmount: taxAmount.toNumber(),
             totalAmount: totalAmount.toNumber(),
             notes: data.notes,
-            grnComputedTotal: data.grnComputedTotal,
-            varianceReason: data.varianceReason,
+            grnComputedTotal,
+            varianceReason,
         });
 
         // Persist line items into supplier_invoice_line_items
@@ -1083,40 +1109,23 @@ export async function createInvoiceFromGRN(
     );
 
     // ── Variance enforcement ────────────────────────────────────────────────
-    // If caller provided a supplier-reported total and it differs from computed:
-    //   - Block posting if no variance reason supplied
-    //   - Block posting if reason is EDIT_LINE_PRICES (instructs user to fix GRN)
-    //   - Otherwise proceed with 3-line GL entry
     let resolvedInvoiceTotal = grnComputedTotal;
     let resolvedVarianceReason: string | undefined;
 
     if (input.supplierReportedTotal !== undefined) {
         const supplierTotal = new Decimal(input.supplierReportedTotal);
-        const variance = PricingEngine.calculateVariance(grnComputedTotal, supplierTotal);
-
-        if (PricingEngine.hasVariance(grnComputedTotal, supplierTotal)) {
-            // Variance exists — must have an actionable reason
-            if (!input.varianceReason) {
-                throw new ValidationError(
-                    `Invoice total differs from received value by UGX ${variance.abs().toFixed(2)}. ` +
-                    `Select a variance reason to continue: SUPPLIER_DISCOUNT, ROUNDING_DIFFERENCE, or PRICE_VARIANCE. ` +
-                    `If costs were entered incorrectly, select EDIT_LINE_PRICES and correct the GRN first.`,
-                );
-            }
-            if (input.varianceReason === 'EDIT_LINE_PRICES') {
-                throw new ValidationError(
-                    `Variance of UGX ${variance.abs().toFixed(2)} detected. ` +
-                    `Please correct the unit costs on Goods Receipt ${gr.grNumber} and then re-create this bill.`,
-                );
-            }
-            // Variance is acknowledged and has an accounting reason
-            // Invoice TotalAmount = supplier reported total (AP credit amount)
-            // GR/IR will be debited at grnComputedTotal (3-line entry)
+        const varianceCheck = validateSupplierInvoiceGrnVariance({
+            grnComputedTotal,
+            invoiceTotal: supplierTotal,
+            varianceReason: input.varianceReason,
+            grLabel: gr.grNumber,
+        });
+        if (varianceCheck.hasVariance) {
             resolvedInvoiceTotal = supplierTotal;
-            resolvedVarianceReason = input.varianceReason;
+            resolvedVarianceReason = varianceCheck.normalizedReason;
         }
-        // else: supplier total matches computed total within tolerance — no special handling
     }
+    // else: bill = GRN computed total (line items below); createSupplierInvoice re-validates via grnIds.
 
     const invoiceDate = input.invoiceDate || normalizeToDateOnly(gr.receivedDate as unknown as string | Date);
     const grNumber = gr.grNumber;
@@ -1354,10 +1363,15 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
         }
 
         if (hasGrReference && computedTotal !== null && Number.isFinite(computedTotal)) {
-            const variance = new Decimal(computedTotal).minus(totalAmount);
-            if (variance.abs().greaterThan(0.005)) {
+            const varianceCheck = validateSupplierInvoiceGrnVariance({
+                grnComputedTotal: computedTotal,
+                invoiceTotal: totalAmount,
+                varianceReason: inv.variance_reason,
+                grLabel: linkedGrNumber ? `GR ${linkedGrNumber}` : undefined,
+            });
+            if (varianceCheck.hasVariance) {
                 grnComputedTotal = computedTotal;
-                varianceAmount = variance.toDecimalPlaces(2).toNumber();
+                varianceAmount = varianceCheck.varianceAmount;
             }
         }
 

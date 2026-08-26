@@ -1,0 +1,108 @@
+{
+  "feature": "SOFT_QUARANTINE_P1",
+  "provenAt": "2026-08-26T17:52:50.465Z",
+  "contract": "LQ13 soft quarantine single-store: status+audit only (LQ-INV-1/6); aging+dispose parity (5120/5130); no MultistoreGate; no duplicate loss gateway",
+  "gates": [
+    {
+      "id": "STATUS_EXPIRED",
+      "ok": true,
+      "detail": "EXPIRED reason → EXPIRED status"
+    },
+    {
+      "id": "STATUS_DAMAGE",
+      "ok": true,
+      "detail": "DAMAGE reason → QUARANTINED status"
+    },
+    {
+      "id": "BUCKET_EXPIRED",
+      "ok": true,
+      "detail": "EXPIRED status → EXPIRED bucket"
+    },
+    {
+      "id": "BUCKET_DAMAGE",
+      "ok": true,
+      "detail": "QUARANTINED status → DAMAGE bucket"
+    },
+    {
+      "id": "EXPENSE_EXPIRED",
+      "ok": true,
+      "detail": "soft expired dispose → 5130"
+    },
+    {
+      "id": "EXPENSE_DAMAGE",
+      "ok": true,
+      "detail": "soft damage dispose → 5120"
+    },
+    {
+      "id": "REF_TYPE",
+      "ok": true,
+      "detail": "soft quarantine reference type constant"
+    },
+    {
+      "id": "DOC",
+      "ok": true,
+      "detail": "soft quarantine doc exists"
+    },
+    {
+      "id": "LQ13",
+      "ok": true,
+      "detail": "touchpoint LQ13 registered"
+    },
+    {
+      "id": "SOFT_NO_GL",
+      "ok": true,
+      "detail": "soft quarantine tags QUARANTINE_TRANSFER posts_gl=false"
+    },
+    {
+      "id": "SOFT_PARTIAL",
+      "ok": true,
+      "detail": "partial soft quarantine via lot split documented + wired"
+    },
+    {
+      "id": "SOFT_INV1",
+      "ok": true,
+      "detail": "soft path asserts remaining unchanged"
+    },
+    {
+      "id": "SOFT_BLOCKS_MS",
+      "ok": true,
+      "detail": "soft quarantine blocked when multistore"
+    },
+    {
+      "id": "AGING_SOFT",
+      "ok": true,
+      "detail": "aging supports soft mode"
+    },
+    {
+      "id": "AGING_NO_MS_THROW",
+      "ok": true,
+      "detail": "aging no longer requires multistore-only"
+    },
+    {
+      "id": "DISPOSE_SOFT",
+      "ok": true,
+      "detail": "dispose supports soft mode"
+    },
+    {
+      "id": "ROUTES",
+      "ok": true,
+      "detail": "API routes for soft quarantine"
+    },
+    {
+      "id": "UI_NO_GATE",
+      "ok": true,
+      "detail": "workqueue available without MultistoreGate"
+    },
+    {
+      "id": "UI_CANDIDATES",
+      "ok": true,
+      "detail": "UI shows soft expiry candidates"
+    }
+  ],
+  "summary": {
+    "total": 19,
+    "passed": 19,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

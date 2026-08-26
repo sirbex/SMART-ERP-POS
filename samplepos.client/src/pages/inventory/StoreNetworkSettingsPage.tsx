@@ -28,9 +28,7 @@ export default function StoreNetworkSettingsPage() {
     queryFn: fetchSettings,
   });
 
-  const { data: expiryPreview, refetch: refetchExpiryPreview } = useExpiryAutomationPreview(
-    !!settings?.isMultistoreEnabled,
-  );
+  const { data: expiryPreview, refetch: refetchExpiryPreview } = useExpiryAutomationPreview(true);
   const runExpiry = useRunExpiryAutomation();
 
   const mutation = useMutation({
@@ -88,6 +86,10 @@ export default function StoreNetworkSettingsPage() {
 
         <ExpiryAutomationPanel
           enabled={settings.expiryAutomationEnabled ?? false}
+          quarantineMode={
+            expiryPreview?.quarantineMode ??
+            (settings.isMultistoreEnabled ? 'HARD' : 'SOFT')
+          }
           onChange={save}
           isSaving={isSaving}
           isRunning={runExpiry.isPending}
@@ -100,9 +102,14 @@ export default function StoreNetworkSettingsPage() {
           onRun={async () => {
             try {
               const res = await runExpiry.mutateAsync(false);
-              const data = res.data?.data as { linesProcessed?: number; totalQuantityMoved?: number };
+              const data = res.data?.data as {
+                linesProcessed?: number;
+                totalQuantityMoved?: number;
+                quarantineMode?: string;
+              };
+              const verb = data?.quarantineMode === 'SOFT' ? 'Soft-quarantined' : 'Moved';
               toast.success(
-                `Moved ${data?.totalQuantityMoved ?? 0} units across ${data?.linesProcessed ?? 0} lot(s)`,
+                `${verb} ${data?.totalQuantityMoved ?? 0} units across ${data?.linesProcessed ?? 0} lot(s)`,
               );
               void refetchExpiryPreview();
             } catch {

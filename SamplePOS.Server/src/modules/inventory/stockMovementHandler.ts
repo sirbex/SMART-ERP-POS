@@ -452,9 +452,10 @@ export class StockMovementHandler {
   }> {
     if (params.batchId) {
       // Validate provided batch exists — lock row to prevent concurrent modification
+      // Cast status to text so DB enums without BLOCKED still accept disposal statuses.
       const statusClause = params.allowDisposalStatuses
-        ? `status IN ('ACTIVE', 'QUARANTINED', 'EXPIRED', 'BLOCKED')`
-        : `status = 'ACTIVE'`;
+        ? `COALESCE(status::text, 'ACTIVE') IN ('ACTIVE', 'QUARANTINED', 'EXPIRED', 'BLOCKED')`
+        : `COALESCE(status::text, 'ACTIVE') = 'ACTIVE'`;
       const result = await client.query(
         `SELECT id, product_id, batch_number, remaining_quantity, cost_price 
          FROM inventory_batches 

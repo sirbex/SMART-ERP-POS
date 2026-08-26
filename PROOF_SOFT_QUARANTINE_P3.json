@@ -1,0 +1,78 @@
+{
+  "feature": "SOFT_QUARANTINE_P3",
+  "provenAt": "2026-08-26T17:52:50.291Z",
+  "contract": "Expiring Items → quarantine bridge (expired only); soft/hard mode; no P&L; deep-link to workqueue; warning SSOT preserved",
+  "gates": [
+    {
+      "id": "DOC_P3",
+      "ok": true,
+      "detail": "P3 documented"
+    },
+    {
+      "id": "FN",
+      "ok": true,
+      "detail": "quarantineFromExpiringReport exists"
+    },
+    {
+      "id": "SOFT_BRANCH",
+      "ok": true,
+      "detail": "report bridge soft path"
+    },
+    {
+      "id": "HARD_BRANCH",
+      "ok": true,
+      "detail": "report bridge hard path"
+    },
+    {
+      "id": "NO_PL",
+      "ok": true,
+      "detail": "bridge posts no GL"
+    },
+    {
+      "id": "EXPIRED_ONLY",
+      "ok": true,
+      "detail": "rejects non-expired from report"
+    },
+    {
+      "id": "ROUTES",
+      "ok": true,
+      "detail": "report quarantine API routes"
+    },
+    {
+      "id": "LINK",
+      "ok": true,
+      "detail": "deep-link to quarantine workqueue"
+    },
+    {
+      "id": "ROW_ACTION",
+      "ok": true,
+      "detail": "per-row Quarantine on expired"
+    },
+    {
+      "id": "BULK",
+      "ok": true,
+      "detail": "bulk quarantine expired in view"
+    },
+    {
+      "id": "EXPIRED_GATE",
+      "ok": true,
+      "detail": "action only for expired band"
+    },
+    {
+      "id": "SSOT_KEPT",
+      "ok": true,
+      "detail": "Expiring Items warning SSOT unchanged"
+    },
+    {
+      "id": "API_CLIENT",
+      "ok": true,
+      "detail": "client API methods"
+    }
+  ],
+  "summary": {
+    "total": 13,
+    "passed": 13,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

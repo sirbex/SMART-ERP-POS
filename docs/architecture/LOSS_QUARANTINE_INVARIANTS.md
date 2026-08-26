@@ -81,10 +81,12 @@ Posting a “repair” that CRs 1300 while batch still holds qty is a **hard fai
 
 Economic sequence:
 
-1. Optional quarantine (multistore)
+1. Optional quarantine (multistore **hard** store transfer, or single-store **soft** status — LQ13)
 2. Disposal
 
-Final state: same expense account class, same 1300 credit, same batch remaining — regardless of whether step 1 existed (single-store may dispose in one step).
+Final state: same expense account class, same 1300 credit, same batch remaining — regardless of whether step 1 existed (single-store may dispose in one step **or** soft-quarantine then dispose).
+
+See [LOSS_QUARANTINE_SOFT_QUARANTINE.md](./LOSS_QUARANTINE_SOFT_QUARANTINE.md).
 
 ### LQ-INV-10 — Immutability
 

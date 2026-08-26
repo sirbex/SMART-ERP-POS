@@ -1,0 +1,118 @@
+{
+  "feature": "QUARANTINE_LIFECYCLE_E2E",
+  "provenAt": "2026-08-26T17:52:50.627Z",
+  "contract": "DAMAGE/EXPIRY/RETURN lifecycle code contracts: two-step quarantine→dispose; mode adapters; no manual GL bypass; supplier vs customer return separation",
+  "gates": [
+    {
+      "id": "MS_DAMAGE",
+      "ok": true,
+      "detail": "multistore DAMAGE OUT → DAMAGE store quarantine"
+    },
+    {
+      "id": "SS_DAMAGE",
+      "ok": true,
+      "detail": "single-store DAMAGE OUT → soft quarantine (partial via quantity)"
+    },
+    {
+      "id": "SS_PARTIAL_SPLIT",
+      "ok": true,
+      "detail": "partial soft quarantine: splitLot then quarantine child only"
+    },
+    {
+      "id": "MANUAL_BLOCK",
+      "ok": true,
+      "detail": "manual stock movement API blocks immediate DAMAGE GL"
+    },
+    {
+      "id": "XFER_SHORTAGE",
+      "ok": true,
+      "detail": "transfer receive shortage → DAMAGE store + audit"
+    },
+    {
+      "id": "DISPOSE_5120",
+      "ok": true,
+      "detail": "dispose DAMAGE → 5120"
+    },
+    {
+      "id": "SOFT_TAG",
+      "ok": true,
+      "detail": "soft quarantine audit tags"
+    },
+    {
+      "id": "MS_EXPIRY",
+      "ok": true,
+      "detail": "multistore EXPIRY OUT → EXPIRED store quarantine"
+    },
+    {
+      "id": "SS_EXPIRY",
+      "ok": true,
+      "detail": "single-store EXPIRY OUT → soft EXPIRED status"
+    },
+    {
+      "id": "P2_AUTO",
+      "ok": true,
+      "detail": "P2 automation soft/hard without multistore-only gate"
+    },
+    {
+      "id": "P3_BRIDGE",
+      "ok": true,
+      "detail": "P3 expiring report bridge (expired only)"
+    },
+    {
+      "id": "P4_EXPIRED_ONLY",
+      "ok": true,
+      "detail": "P4 auto-dispose EXPIRED bucket only"
+    },
+    {
+      "id": "REPORT_SSOT",
+      "ok": true,
+      "detail": "expiring report warning + expired quarantine action"
+    },
+    {
+      "id": "ADJ_UI",
+      "ok": true,
+      "detail": "adjustments UI: partial quarantine + lot split messaging"
+    },
+    {
+      "id": "HARD_RETURN_AGING",
+      "ok": true,
+      "detail": "hard aging includes RETURN store"
+    },
+    {
+      "id": "SOFT_RETURN_EMPTY",
+      "ok": true,
+      "detail": "soft mode: no RETURN bucket (customer returns stay sellable)"
+    },
+    {
+      "id": "RETURN_DISPOSE_5110",
+      "ok": true,
+      "detail": "RETURN dispose → 5110 shrinkage"
+    },
+    {
+      "id": "CUSTOMER_RETURN_MS",
+      "ok": true,
+      "detail": "multistore customer refund → RETURN store path exists"
+    },
+    {
+      "id": "SUPPLIER_NOT_QUARANTINE",
+      "ok": true,
+      "detail": "supplier RETURN_GRN is AP/stock-out — not customer RETURN quarantine"
+    },
+    {
+      "id": "UI_RETURN_FILTER",
+      "ok": true,
+      "detail": "workqueue RETURN filter + soft-mode reset"
+    },
+    {
+      "id": "SUPPLIER_PAGE",
+      "ok": true,
+      "detail": "supplier returns page exists (separate workflow)"
+    }
+  ],
+  "summary": {
+    "total": 21,
+    "passed": 21,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

@@ -412,6 +412,8 @@ async function repairStockMovements(pool: pg.Pool): Promise<RepairTypeResult> {
         sm.posts_gl IS FALSE
         OR sm.economic_event = 'QUARANTINE_TRANSFER'
         OR UPPER(COALESCE(sm.reference_type, '')) = 'EXPIRY_AUTOMATION'
+        OR UPPER(COALESCE(sm.reference_type, '')) = 'SOFT_QUARANTINE'
+        OR UPPER(COALESCE(sm.reference_type, '')) = 'LOT_SPLIT'
         OR LOWER(COALESCE(sm.notes, '')) LIKE '%internal quarantine transfer%'
       )
       AND NOT EXISTS (
@@ -735,6 +737,8 @@ export async function runGLIntegrityCheck(dbPool?: pg.Pool): Promise<GLIntegrity
            sm.posts_gl IS FALSE
            OR sm.economic_event = 'QUARANTINE_TRANSFER'
            OR UPPER(COALESCE(sm.reference_type, '')) = 'EXPIRY_AUTOMATION'
+           OR UPPER(COALESCE(sm.reference_type, '')) = 'SOFT_QUARANTINE'
+           OR UPPER(COALESCE(sm.reference_type, '')) = 'LOT_SPLIT'
            OR LOWER(COALESCE(sm.notes, '')) LIKE '%internal quarantine transfer%'
          )
          AND NOT EXISTS (

@@ -28,6 +28,8 @@
     "test:return-grn": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js src/modules/return-grn/returnGrnQuantity.test.ts src/modules/return-grn/returnGrnValidation.test.ts src/modules/return-grn/returnGrnService.returnFlow.test.ts src/modules/return-grn/returnGrnService.costLayers.test.ts src/modules/return-grn/returnGrnScnBilling.test.ts src/modules/return-grn/rgrnClearingAccount.test.ts",
     "proof:gr-billing-rgrn-scn": "node scripts/proof-gr-billing-rgrn-scn.mjs",
     "proof:po-sibling-bill": "node scripts/proof-po-sibling-bill.mjs",
+    "proof:supplier-invoice-grn-bounds": "npx vitest run src/modules/supplier-payments/supplierInvoiceGrnValidation.test.ts src/modules/supplier-payments/supplierInvoiceGrnIntegrity.evidence.test.ts",
+    "proof:supplier-invoice-grn-bounds:live": "npx tsx scripts/proof-supplier-invoice-grn-bounds-live.ts",
     "proof:warehouse-layer-coupling": "node scripts/proof-warehouse-layer-coupling.mjs",
     "proof:inventory-lot-foundation": "node scripts/proof-inventory-lot-foundation.mjs",
     "proof:kitchen-production-foundation": "node scripts/proof-kitchen-production-foundation.mjs",

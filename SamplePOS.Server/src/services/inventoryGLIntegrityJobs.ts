@@ -23,29 +23,25 @@ const JOB_ID = 'inventory-gl-integrity-check';
 const JOB_TYPE = 'inventory-gl-integrity-check';
 const CRON_PATTERN = '30 2 * * *'; // every day at 02:30 server time
 
-export function initInventoryGLIntegrityJobs(pool: Pool): void {
+export function registerInventoryGLIntegrityCalculationsHandlers(pool: Pool): void {
+    jobQueue.registerCalculationsHandler(JOB_TYPE, async () => {
+        try {
+            return await runInventoryGLIntegrityCheck(pool);
+        } catch (err: unknown) {
+            logger.error('[InventoryGLIntegrity] Scheduled check failed', {
+                error: err instanceof Error ? err.message : String(err),
+            });
+            throw err;
+        }
+    });
+}
+
+export function scheduleInventoryGLIntegrityJobs(): void {
     const calculationsQueue = jobQueue.getQueue('calculations');
     if (!calculationsQueue) {
         logger.warn('[InventoryGLIntegrity] Calculations queue not available — skipping scheduled jobs (Redis may be offline)');
         return;
     }
-
-    // Processor: detect our job type, run the check, swallow errors
-    // (bull's default retry policy will handle transient failures).
-    jobQueue.processQueue('calculations', async (job) => {
-        if (job.data.type !== JOB_TYPE) {
-            return null; // another processor owns this job
-        }
-        try {
-            const result = await runInventoryGLIntegrityCheck(pool);
-            return result;
-        } catch (err: unknown) {
-            logger.error('[InventoryGLIntegrity] Scheduled check failed', {
-                error: err instanceof Error ? err.message : String(err),
-            });
-            throw err; // let Bull record as failed
-        }
-    });
 
     calculationsQueue
         .add(
@@ -70,4 +66,9 @@ export function initInventoryGLIntegrityJobs(pool: Pool): void {
                 error: err instanceof Error ? err.message : String(err),
             });
         });
+}
+
+export function initInventoryGLIntegrityJobs(pool: Pool): void {
+    registerInventoryGLIntegrityCalculationsHandlers(pool);
+    scheduleInventoryGLIntegrityJobs();
 }

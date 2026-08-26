@@ -64,6 +64,8 @@ interface SystemSettings {
     transferPolicySpecialStoresRequireApproval?: boolean;
     transferAssortmentExpansionPolicy?: 'PROMPT' | 'ALWAYS_EXPAND' | 'TRANSFER_ONLY';
     expiryAutomationEnabled?: boolean;
+    quarantineAutoDisposeEnabled?: boolean;
+    quarantineAutoDisposeMinAgeDays?: number;
     /** ADR-003 — Treasury Document domain (cash/bank liquidity documents) */
     treasuryDocumentEnabled?: boolean;
     /** Restaurant FOH module (tables, KOT, SambaPOS-style ordering) */
@@ -1068,6 +1070,77 @@ function InventorySettings({
                 onChange={patchPolicy}
                 isSaving={isSaving}
             />
+
+            <div className="border-t border-gray-200 pt-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-1">Expiry automation</h3>
+                <p className="text-sm text-gray-500 mb-4">
+                    Nightly quarantine of calendar-expired stock (soft status or hard EXPIRED store).
+                    Default off. Does not post P&amp;L — dispose from Quarantine workqueue.
+                </p>
+                <label className="flex items-start gap-2 text-sm">
+                    <input
+                        type="checkbox"
+                        checked={Boolean(settings.expiryAutomationEnabled)}
+                        disabled={isSaving}
+                        onChange={(e) => {
+                            onSave({ expiryAutomationEnabled: e.target.checked });
+                        }}
+                        className="mt-0.5 h-4 w-4 text-blue-600 border-gray-300 rounded"
+                    />
+                    <span>
+                        <span className="font-medium text-gray-900">Enable nightly expiry processing</span>
+                        <span className="block text-gray-500">
+                            Runs at 04:00. Preview / run now: Inventory → Quarantine or Store Network settings.
+                        </span>
+                    </span>
+                </label>
+            </div>
+
+            <div className="border-t border-gray-200 pt-6" data-settings-quarantine-auto-dispose="true">
+                <h3 className="text-lg font-semibold text-gray-900 mb-1">Quarantine auto-dispose</h3>
+                <p className="text-sm text-gray-500 mb-4">
+                    After EXPIRED stock has aged in quarantine, optionally write it off automatically
+                    (same dispose gateway — posts P&amp;L). Separate from expiry quarantine. Default off.
+                </p>
+                <label className="flex items-start gap-2 text-sm mb-4">
+                    <input
+                        type="checkbox"
+                        checked={Boolean(settings.quarantineAutoDisposeEnabled)}
+                        disabled={isSaving}
+                        onChange={(e) => {
+                            onSave({ quarantineAutoDisposeEnabled: e.target.checked });
+                        }}
+                        className="mt-0.5 h-4 w-4 text-blue-600 border-gray-300 rounded"
+                    />
+                    <span>
+                        <span className="font-medium text-gray-900">Enable nightly auto-dispose</span>
+                        <span className="block text-gray-500">
+                            Runs at 04:30 for EXPIRED lines older than the age below. DAMAGE/RETURN stay manual.
+                        </span>
+                    </span>
+                </label>
+                <label className="block text-sm max-w-xs">
+                    <span className="block text-gray-600 mb-1">Minimum age (days)</span>
+                    <input
+                        type="number"
+                        min={0}
+                        max={3650}
+                        value={settings.quarantineAutoDisposeMinAgeDays ?? 30}
+                        disabled={isSaving}
+                        onChange={(e) => {
+                            const n = Number(e.target.value);
+                            if (!Number.isFinite(n)) return;
+                            onSave({
+                                quarantineAutoDisposeMinAgeDays: Math.min(
+                                    3650,
+                                    Math.max(0, Math.trunc(n)),
+                                ),
+                            });
+                        }}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2"
+                    />
+                </label>
+            </div>
 
             <div className="flex justify-end">
                 <button

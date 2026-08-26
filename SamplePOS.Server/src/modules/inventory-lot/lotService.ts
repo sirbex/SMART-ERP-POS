@@ -9,6 +9,8 @@ import type {
   LotOpeningReceiveResult,
   LotReceiveInput,
   LotReturnInput,
+  LotSplitInput,
+  LotSplitResult,
   LotStatusTransitionInput,
   LotTransferInput,
 } from '@shared/inventory-lot/lotEvents.js';
@@ -276,6 +278,94 @@ async function deductBalancesAcrossStores(
   if (remaining > 0.0001) {
     throw new ValidationError(
       `Insufficient warehouse stock for deduction. Short by ${remaining} base unit(s).`,
+    );
+  }
+}
+
+async function allocateUniqueSplitLotNumber(
+  db: DbClient,
+  productId: string,
+  parentLotNumber: string,
+  preferred?: string | null,
+): Promise<string> {
+  if (preferred?.trim()) {
+    const exists = await db.query(
+      `SELECT 1 FROM inventory_batches WHERE product_id = $1 AND batch_number = $2 LIMIT 1`,
+      [productId, preferred.trim()],
+    );
+    if (exists.rows.length > 0) {
+      throw new ValidationError(`Child lot number ${preferred.trim()} already exists for this product`);
+    }
+    return preferred.trim().slice(0, 100);
+  }
+
+  const base = parentLotNumber.slice(0, 90);
+  for (let n = 1; n <= 9999; n++) {
+    const candidate = `${base}-S${n}`;
+    const exists = await db.query(
+      `SELECT 1 FROM inventory_batches WHERE product_id = $1 AND batch_number = $2 LIMIT 1`,
+      [productId, candidate],
+    );
+    if (exists.rows.length === 0) return candidate;
+  }
+  throw new ValidationError('Unable to allocate unique split lot number');
+}
+
+/**
+ * Move warehouse balances from parent product_lot to child (when balances exist).
+ * Keeps Σ on_hand aligned with master remaining after split.
+ */
+async function transferBalancesForSplit(
+  db: DbClient,
+  params: {
+    productId: string;
+    parentProductLotId: string;
+    childProductLotId: string;
+    quantity: number;
+  },
+): Promise<void> {
+  const balanceRes = await db.query<{
+    store_location_id: string;
+    available: string;
+  }>(
+    `SELECT store_location_id,
+            GREATEST(quantity_on_hand - quantity_reserved - quantity_committed, 0)::text AS available
+     FROM inventory_balances
+     WHERE product_lot_id = $1
+       AND GREATEST(quantity_on_hand - quantity_reserved - quantity_committed, 0) > 0
+     ORDER BY available DESC
+     FOR UPDATE`,
+    [params.parentProductLotId],
+  );
+
+  if (balanceRes.rows.length === 0) return;
+
+  let left = params.quantity;
+  for (const row of balanceRes.rows) {
+    if (left <= 0.0001) break;
+    const available = Number(row.available);
+    const take = Math.min(left, available);
+    if (take <= 0.0001) continue;
+
+    await warehouseInventoryRepository.adjustSellableQuantity(db, {
+      storeLocationId: row.store_location_id,
+      productLotId: params.parentProductLotId,
+      productId: params.productId,
+      quantity: take,
+      direction: 'OUT',
+    });
+    await warehouseInventoryRepository.incrementBalanceAtStore(db, {
+      storeLocationId: row.store_location_id,
+      productId: params.productId,
+      productLotId: params.childProductLotId,
+      quantity: take,
+    });
+    left -= take;
+  }
+
+  if (left > 0.0001) {
+    throw new ValidationError(
+      `Cannot split ${params.quantity}: only ${params.quantity - left} available in warehouse balances (reserved/committed may block).`,
     );
   }
 }
@@ -603,6 +693,145 @@ export const lotService: ILotService = {
     }
 
     return lot;
+  },
+
+  async splitLot(client: unknown, input: LotSplitInput): Promise<LotSplitResult> {
+    const db = client as DbClient;
+    const qty = Number(input.quantity);
+
+    if (!(qty > 0.0001)) {
+      throw new ValidationError('Split quantity must be greater than zero');
+    }
+
+    await db.query('SELECT id FROM inventory_batches WHERE id = $1 FOR UPDATE', [input.lotId]);
+    const parentBefore = await getLotByIdWithClient(db, input.lotId);
+    if (!parentBefore) {
+      throw new ValidationError('Lot not found');
+    }
+
+    const status = String(parentBefore.status || 'ACTIVE').toUpperCase();
+    if (status !== 'ACTIVE' && status !== 'BLOCKED') {
+      throw new ValidationError(
+        `Cannot split lot in status ${status} — only ACTIVE/BLOCKED sellable lots can be split`,
+      );
+    }
+
+    if (qty - parentBefore.remainingQuantity > 0.0001) {
+      throw new ValidationError(
+        `Cannot split ${qty}: only ${parentBefore.remainingQuantity} remaining on lot ${parentBefore.lotNumber}`,
+      );
+    }
+
+    // Full remaining is not a split — caller should soft-quarantine the parent directly.
+    if (Math.abs(qty - parentBefore.remainingQuantity) <= 0.0001) {
+      throw new ValidationError(
+        'Split quantity must be less than lot remaining; use full-lot quarantine for the entire batch',
+      );
+    }
+
+    const childLotNumber = await allocateUniqueSplitLotNumber(
+      db,
+      parentBefore.productId,
+      parentBefore.lotNumber,
+      input.childLotNumber,
+    );
+
+    const parentAfter = await postgresLotRepository.decrementMasterRemainingQuantity(
+      db,
+      input.lotId,
+      qty,
+    );
+
+    // Keep original quantity (receipt) on parent; child carries split slice only.
+    const child = await postgresLotRepository.upsertMaster(db, {
+      productId: parentBefore.productId,
+      lotNumber: childLotNumber,
+      attributes: {
+        expiryDate: parentBefore.attributes.expiryDate,
+        manufacturingDate: parentBefore.attributes.manufacturingDate,
+        receivedDate: parentBefore.attributes.receivedDate,
+      },
+      quantity: qty,
+      remainingQuantity: qty,
+      costPrice: parentBefore.costPrice,
+      status: 'ACTIVE',
+      sourceType: 'SPLIT',
+      goodsReceiptId: parentBefore.genealogy.goodsReceiptId ?? null,
+      goodsReceiptItemId: parentBefore.genealogy.goodsReceiptItemId ?? null,
+      isBonus: parentBefore.isBonus,
+      parentLotId: parentBefore.id,
+    });
+
+    // Projection: always upsert child so dispose/FEFO joins stay consistent.
+    await postgresLotRepository.upsertProjection(db, {
+      inventoryBatchId: child.id,
+      productId: child.productId,
+      lotNumber: child.lotNumber,
+      expiryDate: child.attributes.expiryDate,
+      costPrice: child.costPrice,
+      goodsReceiptId: child.genealogy.goodsReceiptId,
+      isBonus: child.isBonus,
+      status: 'ACTIVE',
+    });
+
+    const parentProductLotId = await getProductLotIdByBatchId(db, parentBefore.id);
+    const childProductLotId = await getProductLotIdByBatchId(db, child.id);
+    if (parentProductLotId && childProductLotId) {
+      await transferBalancesForSplit(db, {
+        productId: parentBefore.productId,
+        parentProductLotId,
+        childProductLotId,
+        quantity: qty,
+      });
+    }
+
+    const memo =
+      input.reason?.trim() ||
+      `Lot split: ${qty} from ${parentBefore.lotNumber} → ${child.lotNumber}`;
+
+    await recordMovement(db, {
+      productId: parentBefore.productId,
+      batchId: parentBefore.id,
+      movementType: 'ADJUSTMENT_OUT',
+      quantity: qty,
+      unitCost: parentBefore.costPrice,
+      referenceType: input.referenceType || 'LOT_SPLIT',
+      referenceId: input.referenceId ?? child.id,
+      notes: memo,
+      createdBy: input.userId,
+      economicEvent: 'OTHER',
+      postsGl: false,
+    });
+
+    await recordMovement(db, {
+      productId: child.productId,
+      batchId: child.id,
+      movementType: 'ADJUSTMENT_IN',
+      quantity: qty,
+      unitCost: child.costPrice,
+      referenceType: input.referenceType || 'LOT_SPLIT',
+      referenceId: input.referenceId ?? parentBefore.id,
+      notes: memo,
+      createdBy: input.userId,
+      economicEvent: 'OTHER',
+      postsGl: false,
+    });
+
+    // Product on-hand Σ unchanged; sync keeps denormalized products.quantity consistent.
+    await syncProductQuantity(db, parentBefore.productId);
+
+    const totalAfter = parentAfter.remainingQuantity + child.remainingQuantity;
+    if (Math.abs(totalAfter - parentBefore.remainingQuantity) > 0.0001) {
+      throw new ValidationError(
+        'Lot split invariant failed: parent+child remaining must equal original remaining',
+      );
+    }
+
+    return {
+      parent: parentAfter,
+      child,
+      quantitySplit: qty,
+    };
   },
 };
 

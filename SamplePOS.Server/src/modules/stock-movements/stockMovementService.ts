@@ -27,6 +27,14 @@ export async function recordMovement(
     createdBy: string;
   }
 ) {
+  // DAMAGE/EXPIRY must use quarantine gateways (Adjustments or loss-quarantine) — never immediate GL here.
+  if (data.movementType === 'DAMAGE' || data.movementType === 'EXPIRY') {
+    throw new Error(
+      `${data.movementType} cannot be recorded as a manual stock movement. ` +
+        'Use Inventory → Adjustments or the Quarantine workqueue (quarantine first, dispose for P&L).',
+    );
+  }
+
   // Validate movement type for manual recording
   if (!MANUAL_MOVEMENT_TYPES.includes(data.movementType)) {
     throw new Error(`Movement type ${data.movementType} cannot be created manually`);

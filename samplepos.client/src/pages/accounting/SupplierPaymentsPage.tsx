@@ -866,6 +866,16 @@ const SupplierPaymentsPage: React.FC = () => {
                 return;
             }
 
+            const grnRef = billFormData.notes?.match(/GR-\d{4}-\d+/i)?.[0];
+            if (grnRef) {
+                toast.error(
+                    `This looks like a goods receipt bill (${grnRef}). ` +
+                        'Use Inventory → Goods Receipts → Create Supplier Bill so amounts match received stock.',
+                    { duration: 8000 },
+                );
+                return;
+            }
+
             const validLineItems = billFormData.lineItems.filter(item =>
                 item.productName && item.quantity && item.unitPrice
             );

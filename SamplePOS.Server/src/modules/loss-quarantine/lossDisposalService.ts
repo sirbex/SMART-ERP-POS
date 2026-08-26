@@ -28,14 +28,17 @@ import {
 import { isQuarantineStoreType } from './quarantineLotStatus.js';
 
 export interface DisposeInput {
-  storeLocationId: string;
+  storeLocationId?: string | null;
   productId: string;
-  productLotId: string;
+  productLotId?: string | null;
+  inventoryBatchId?: string | null;
   quantity: number;
   reason?: LossExpenseReason;
   memo?: string;
   unitCost?: number;
   userId: string;
+  /** Soft quarantine dispose (single-store). Inferred when storeLocationId is absent. */
+  quarantineMode?: 'HARD' | 'SOFT';
 }
 
 export interface DisposeResult {
@@ -68,17 +71,37 @@ export async function disposeFromQuarantine(
   conn: DbConnection,
   input: DisposeInput,
 ): Promise<DisposeResult> {
-  if (!(await isMultistoreEnabled(conn))) {
-    throw new ValidationError('Dispose from quarantine requires multi-store mode');
-  }
   if (input.quantity <= 0) {
     throw new ValidationError('Disposal quantity must be greater than zero');
   }
 
+  const multistore = await isMultistoreEnabled(conn);
+  const softMode =
+    input.quarantineMode === 'SOFT' ||
+    (!input.storeLocationId && !multistore);
+
+  if (softMode && multistore) {
+    throw new ValidationError(
+      'Soft dispose is for single-store mode. Dispose from DAMAGE/EXPIRED/RETURN stores in multistore.',
+    );
+  }
+  if (!softMode && !multistore) {
+    throw new ValidationError(
+      'Hard dispose requires multi-store quarantine stores. Use soft dispose (no storeLocationId) in single-store mode.',
+    );
+  }
+  if (!softMode && !input.storeLocationId) {
+    throw new ValidationError('storeLocationId is required for multistore quarantine disposal');
+  }
+
   const pool = UnitOfWork.isPool(conn) ? conn : defaultPool;
 
+  if (softMode) {
+    return disposeSoftQuarantine(pool, conn, input);
+  }
+
   return UnitOfWork.runOrJoin(conn, async (client) => {
-    const store = await storeLocationRepository.getById(client, input.storeLocationId);
+    const store = await storeLocationRepository.getById(client, input.storeLocationId!);
     if (!store?.isActive) {
       throw new ValidationError('Store is not active');
     }
@@ -87,6 +110,10 @@ export async function disposeFromQuarantine(
         `Dispose-from-quarantine requires DAMAGE/EXPIRED/RETURN store; got ${store.storeType}. ` +
           `Use inventory adjustments for sellable-store write-offs.`,
       );
+    }
+
+    if (!input.productLotId) {
+      throw new ValidationError('productLotId is required for multistore quarantine disposal');
     }
 
     const lot = await productLotRepository.getById(client, input.productLotId);
@@ -145,7 +172,7 @@ export async function disposeFromQuarantine(
 
     // Reduce quarantine store balance first (same pattern as WRITE_OFF)
     await warehouseInventoryRepository.adjustSellableQuantity(client, {
-      storeLocationId: input.storeLocationId,
+      storeLocationId: input.storeLocationId!,
       productLotId: input.productLotId,
       productId: input.productId,
       quantity: input.quantity,
@@ -207,6 +234,197 @@ export async function disposeFromQuarantine(
     }
 
     // Resolve journal id from ledger_transactions by reference
+    const journal = await client.query<{ id: string }>(
+      `SELECT "Id"::text AS id FROM ledger_transactions
+       WHERE "ReferenceType" = 'STOCK_MOVEMENT'
+         AND "ReferenceId"::text = $1
+       ORDER BY "CreatedAt" DESC
+       LIMIT 1`,
+      [result.movementId],
+    );
+    const journalEntryId = journal.rows[0]?.id ?? null;
+
+    await client.query(
+      `UPDATE loss_disposal_documents
+       SET total_amount = $2,
+           stock_movement_id = $3,
+           journal_entry_id = $4::uuid,
+           row_version = row_version + 1
+       WHERE id = $1`,
+      [documentId, totalAmount, result.movementId, journalEntryId],
+    );
+
+    return {
+      documentId,
+      documentNumber,
+      expenseAccountCode,
+      movementId: result.movementId,
+      movementNumber: result.movementNumber,
+      batchId: result.batchId,
+      quantity: input.quantity,
+      totalAmount,
+      journalEntryId,
+    };
+  });
+}
+
+/** Single-store soft quarantine dispose — same GL map, no quarantine store required. */
+async function disposeSoftQuarantine(
+  pool: Pool,
+  conn: DbConnection,
+  input: DisposeInput,
+): Promise<DisposeResult> {
+  return UnitOfWork.runOrJoin(conn, async (client) => {
+    // Prefer inventoryBatchId from the aging line — productLotId may be a sibling lot after split.
+    let batchId = input.inventoryBatchId ?? null;
+    let productLotId: string | null = null;
+
+    if (!batchId && input.productLotId) {
+      const lot = await productLotRepository.getById(client, input.productLotId);
+      if (!lot || lot.productId !== input.productId) {
+        throw new NotFoundError('Product lot not found for this product');
+      }
+      batchId = lot.inventoryBatchId ?? null;
+    }
+
+    if (!batchId) {
+      throw new ValidationError('inventoryBatchId or productLotId is required for soft dispose');
+    }
+
+    const batch = await client.query<{
+      id: string;
+      product_id: string;
+      remaining_quantity: string;
+      status: string;
+      cost_price: string;
+    }>(
+      `SELECT id, product_id, remaining_quantity::text,
+              COALESCE(status::text, 'ACTIVE') AS status,
+              COALESCE(cost_price, 0)::text AS cost_price
+       FROM inventory_batches WHERE id = $1 FOR UPDATE`,
+      [batchId],
+    );
+    const row = batch.rows[0];
+    if (!row || row.product_id !== input.productId) {
+      throw new NotFoundError('Inventory batch not found for this product');
+    }
+
+    const status = String(row.status || '').toUpperCase();
+    if (status !== 'EXPIRED' && status !== 'QUARANTINED') {
+      throw new ValidationError(
+        `Soft dispose requires EXPIRED or QUARANTINED lot status; got ${status}. Soft-quarantine first.`,
+      );
+    }
+
+    const available = Number(row.remaining_quantity);
+    if (input.quantity - available > 0.0001) {
+      throw new ValidationError(
+        `Cannot dispose ${input.quantity}: only ${available} remaining on soft-quarantined batch`,
+      );
+    }
+
+    // Always resolve productLot from the dispose batch (ignore stale sibling productLotId).
+    const lotLookup = await client.query<{ id: string }>(
+      `SELECT id FROM product_lots WHERE inventory_batch_id = $1 ORDER BY created_at ASC NULLS LAST LIMIT 1`,
+      [batchId],
+    );
+    productLotId = lotLookup.rows[0]?.id ?? null;
+
+    const fromStoreType = status === 'EXPIRED' ? 'EXPIRED' : 'DAMAGE';
+    const reason: LossExpenseReason =
+      input.reason ?? (fromStoreType === 'EXPIRED' ? 'EXPIRY' : 'DAMAGE');
+    const expenseAccountCode = expenseAccountForDisposal({ reason, fromStoreType });
+    const movementType = movementTypeForDisposal({ reason, fromStoreType });
+
+    let unitCost = input.unitCost;
+    if (!unitCost || unitCost <= 0) {
+      unitCost = Number(row.cost_price);
+    }
+
+    // Reduce store balances for every product_lot on this batch (single-store may still have MAIN rows).
+    const bals = await client.query<{
+      store_location_id: string;
+      product_lot_id: string;
+      qty: string;
+    }>(
+      `SELECT b.store_location_id,
+              b.product_lot_id,
+              GREATEST(b.quantity_on_hand - b.quantity_reserved - b.quantity_committed, 0)::text AS qty
+       FROM inventory_balances b
+       INNER JOIN product_lots pl ON pl.id = b.product_lot_id
+       WHERE pl.inventory_batch_id = $1
+       FOR UPDATE OF b`,
+      [batchId],
+    );
+    let left = input.quantity;
+    for (const b of bals.rows) {
+      if (left <= 0.0001) break;
+      const avail = Number(b.qty);
+      if (avail <= 0.0001) continue;
+      const take = Math.min(left, avail);
+      await warehouseInventoryRepository.adjustSellableQuantity(client, {
+        storeLocationId: b.store_location_id,
+        productLotId: b.product_lot_id,
+        productId: input.productId,
+        quantity: take,
+        direction: 'OUT',
+      });
+      left -= take;
+    }
+
+    const documentNumber = await nextDocumentNumber(client);
+    const docIns = await client.query<{ id: string }>(
+      `INSERT INTO loss_disposal_documents (
+         document_number, status, reason, store_location_id, store_type,
+         expense_account_code, product_id, product_lot_id, inventory_batch_id,
+         quantity, unit_cost, total_amount, memo, created_by, posted_at
+       ) VALUES (
+         $1, 'POSTED', $2, NULL, $3, $4, $5, $6, $7, $8, $9, 0, $10, $11, NOW()
+       ) RETURNING id`,
+      [
+        documentNumber,
+        reason,
+        fromStoreType,
+        expenseAccountCode,
+        input.productId,
+        productLotId,
+        batchId,
+        input.quantity,
+        unitCost,
+        input.memo ?? `Soft quarantine dispose (${fromStoreType})`,
+        input.userId,
+      ],
+    );
+    const documentId = docIns.rows[0].id;
+
+    const handler = new StockMovementHandler(pool);
+    const result = await handler.processMovement(
+      {
+        productId: input.productId,
+        batchId,
+        movementType,
+        quantity: input.quantity,
+        unitCost,
+        referenceType: 'LOSS_DISPOSAL',
+        referenceId: documentId,
+        reason: `${reason}: ${input.memo ?? 'soft quarantine disposal'} [SOFT/${fromStoreType}]`,
+        userId: input.userId,
+        expenseAccountCode,
+        allowDisposalStatuses: true,
+      },
+      client,
+    );
+
+    const totalAmount = roundMoney(Number(unitCost) * input.quantity);
+    try {
+      assertDisposalCouplesSubledger({
+        glAmount: totalAmount,
+        batchConsumptionValue: totalAmount,
+      });
+    } catch (err) {
+      rethrowInvariant(err);
+    }
+
     const journal = await client.query<{ id: string }>(
       `SELECT "Id"::text AS id FROM ledger_transactions
        WHERE "ReferenceType" = 'STOCK_MOVEMENT'

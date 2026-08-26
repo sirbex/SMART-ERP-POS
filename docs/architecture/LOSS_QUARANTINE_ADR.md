@@ -3,7 +3,7 @@
 **Status:** Accepted / Certified (Phase 2 scope Gates A–E)  
 **Date:** 2026-07-12  
 **Program priority:** #2 after Treasury (ADR-003 Phase 1 CERTIFIED)  
-**Related:** [INVENTORY_LOT_DOMAIN_ADR.md](./INVENTORY_LOT_DOMAIN_ADR.md), [postingGovernanceService.ts](../../SamplePOS.Server/src/services/postingGovernanceService.ts), [warehouseAdjustmentService.ts](../../SamplePOS.Server/src/modules/inventory/warehouse/warehouseAdjustmentService.ts), [TREASURY_DOCUMENT_ADR.md](./TREASURY_DOCUMENT_ADR.md)  
+**Related:** [INVENTORY_LOT_DOMAIN_ADR.md](./INVENTORY_LOT_DOMAIN_ADR.md), [LOSS_QUARANTINE_SOFT_QUARANTINE.md](./LOSS_QUARANTINE_SOFT_QUARANTINE.md), [postingGovernanceService.ts](../../SamplePOS.Server/src/services/postingGovernanceService.ts), [warehouseAdjustmentService.ts](../../SamplePOS.Server/src/modules/inventory/warehouse/warehouseAdjustmentService.ts), [TREASURY_DOCUMENT_ADR.md](./TREASURY_DOCUMENT_ADR.md)  
 **Invariants:** [LOSS_QUARANTINE_INVARIANTS.md](./LOSS_QUARANTINE_INVARIANTS.md)  
 **Roadmap:** [LOSS_QUARANTINE_PHASE2_ROADMAP.md](./LOSS_QUARANTINE_PHASE2_ROADMAP.md)  
 **Proof charter:** [PROOF_LOSS_QUARANTINE_CHARTER.md](../../PROOF_LOSS_QUARANTINE_CHARTER.md)  

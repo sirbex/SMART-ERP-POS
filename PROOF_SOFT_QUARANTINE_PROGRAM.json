@@ -1,0 +1,104 @@
+{
+  "feature": "SOFT_QUARANTINE_PROGRAM",
+  "provenAt": "2026-08-26T17:54:02.368Z",
+  "strict": false,
+  "contract": "P0–P4 soft quarantine program: mode adapter, expiry automation, Expiring Items bridge, auto-dispose; unified job dispatch; LQ fitness + architecture proof",
+  "gates": [
+    {
+      "id": "P0_DOC",
+      "ok": true,
+      "detail": "P0 policy + mode adapter documented"
+    },
+    {
+      "id": "P1_SOFT",
+      "ok": true,
+      "detail": "P1 soft quarantine + aging + dispose parity"
+    },
+    {
+      "id": "DAMAGE_FLOW",
+      "ok": true,
+      "detail": "single-store DAMAGE → soft quarantine; aging maps QUARANTINED → DAMAGE band"
+    },
+    {
+      "id": "P2_AUTO",
+      "ok": true,
+      "detail": "P2 unified expiry automation (flag default off)"
+    },
+    {
+      "id": "P3_BRIDGE",
+      "ok": true,
+      "detail": "P3 Expiring Items → quarantine bridge"
+    },
+    {
+      "id": "P4_DISPOSE",
+      "ok": true,
+      "detail": "P4 auto-dispose separate flag, EXPIRED only, dispose gateway"
+    },
+    {
+      "id": "JOBS_DISPATCH",
+      "ok": true,
+      "detail": "Unified calculations dispatcher (no competing Bull processors)"
+    },
+    {
+      "id": "LQ13",
+      "ok": true,
+      "detail": "LQ13 touchpoint covers P1–P4"
+    },
+    {
+      "id": "FITNESS",
+      "ok": true,
+      "detail": "ci:loss-quarantine-fitness PASS"
+    },
+    {
+      "id": "VITEST_EVIDENCE",
+      "ok": true,
+      "detail": "P1–P4 + lifecycle E2E vitest PASS"
+    },
+    {
+      "id": "TSC_SERVER",
+      "ok": true,
+      "detail": "Server TypeScript compile PASS"
+    },
+    {
+      "id": "LQ_ARCH",
+      "ok": true,
+      "detail": "lossQuarantineArchitectureProof (Gate A) PASS"
+    },
+    {
+      "id": "ARTIFACT_P1",
+      "ok": true,
+      "detail": "PROOF_SOFT_QUARANTINE_P1 = PASS"
+    },
+    {
+      "id": "ARTIFACT_P2",
+      "ok": true,
+      "detail": "PROOF_SOFT_QUARANTINE_P2 = PASS"
+    },
+    {
+      "id": "ARTIFACT_P3",
+      "ok": true,
+      "detail": "PROOF_SOFT_QUARANTINE_P3 = PASS"
+    },
+    {
+      "id": "ARTIFACT_P4",
+      "ok": true,
+      "detail": "PROOF_SOFT_QUARANTINE_P4 = PASS"
+    },
+    {
+      "id": "ARTIFACT_DAMAGE",
+      "ok": true,
+      "detail": "PROOF_QUARANTINE_DAMAGE_VISIBILITY = PASS"
+    },
+    {
+      "id": "ARTIFACT_LIFECYCLE",
+      "ok": true,
+      "detail": "PROOF_QUARANTINE_LIFECYCLE_E2E = PASS"
+    }
+  ],
+  "summary": {
+    "total": 18,
+    "passed": 18,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

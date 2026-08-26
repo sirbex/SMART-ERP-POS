@@ -84,11 +84,17 @@ export function classifyStockMovement(input: {
   const notes = (input.notes ?? '').toLowerCase();
   const type = (input.movementType ?? '').toUpperCase();
 
+  if (ref === 'LOT_SPLIT') {
+    return { economicEvent: 'OTHER', postsGl: false, inferred: true };
+  }
+
   const isQuarantineHeuristic =
     ref === 'EXPIRY_AUTOMATION' ||
+    ref === 'SOFT_QUARANTINE' ||
     notes.includes('internal quarantine transfer') ||
+    notes.includes('soft quarantine') ||
     (type === 'DAMAGE' && notes.includes('quarantine')) ||
-    (type === 'EXPIRY' && ref === 'EXPIRY_AUTOMATION');
+    (type === 'EXPIRY' && (ref === 'EXPIRY_AUTOMATION' || ref === 'SOFT_QUARANTINE'));
 
   if (isQuarantineHeuristic) {
     return { economicEvent: 'QUARANTINE_TRANSFER', postsGl: false, inferred: true };

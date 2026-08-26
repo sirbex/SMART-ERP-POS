@@ -64,6 +64,18 @@ async function ensureDamageStore(client: PoolClient) {
     return store;
 }
 
+async function ensureExpiredStore(client: PoolClient) {
+    let store = await storeLocationRepository.getStoreByType(client, 'EXPIRED');
+    if (!store) {
+        store = await storeLocationRepository.upsertByCode(client, {
+            code: 'EXPIRED',
+            name: 'Expired Quarantine',
+            storeType: 'EXPIRED',
+        });
+    }
+    return store;
+}
+
 async function resolveDefaultStoreId(conn: PoolClient): Promise<string> {
     const main = await storeLocationRepository.getDefaultReceivingStore(conn);
     if (!main) {
@@ -366,6 +378,62 @@ export const warehouseAdjustmentService = {
                     storeLocationId: params.storeLocationId,
                     productLotId,
                     quarantineStoreId: damageStore.id,
+                    movementId: movement.id,
+                    movementNumber: movement.movementNumber,
+                    batchId: batchId ?? null,
+                    actualQuantityChanged: params.quantity,
+                };
+            }
+
+            // EXPIRY quarantine = internal transfer to EXPIRED store (no P&L until dispose).
+            if (params.reason === 'EXPIRY' && params.direction === 'OUT') {
+                const expiredStore = await ensureExpiredStore(client);
+                await warehouseInventoryRepository.moveLotQuantityBetweenStores(client, {
+                    fromStoreId: params.storeLocationId,
+                    toStoreId: expiredStore.id,
+                    productId: params.productId,
+                    productLotId,
+                    quantity: params.quantity,
+                });
+
+                const resolvedUnitCost =
+                    params.unitCost && params.unitCost > 0
+                        ? params.unitCost
+                        : await resolveBatchUnitCost(client, batchId);
+
+                const storeTag = `[store:${store.code}→${expiredStore.code}]`;
+                const movement = await recordMovement(client, {
+                    productId: params.productId,
+                    batchId: batchId ?? null,
+                    movementType: 'EXPIRY',
+                    quantity: params.quantity,
+                    unitCost: resolvedUnitCost ?? null,
+                    referenceType: 'ADJ_DOC',
+                    referenceId: documentId,
+                    notes: `${params.reason}: ${params.notes} ${storeTag} (internal quarantine transfer)`,
+                    createdBy: params.userId,
+                    economicEvent: 'QUARANTINE_TRANSFER',
+                    postsGl: false,
+                });
+
+                await syncLotStatusAfterQuarantine(client, {
+                    inventoryBatchId: batchId ?? lot.inventoryBatchId,
+                    productLotId,
+                    quarantineKind: 'EXPIRED',
+                    userId: params.userId,
+                });
+
+                await assertWarehouseLayerConsistent(
+                    client,
+                    'expiryQuarantineTransfer',
+                    params.productId,
+                );
+
+                return {
+                    documentId,
+                    storeLocationId: params.storeLocationId,
+                    productLotId,
+                    quarantineStoreId: expiredStore.id,
                     movementId: movement.id,
                     movementNumber: movement.movementNumber,
                     batchId: batchId ?? null,

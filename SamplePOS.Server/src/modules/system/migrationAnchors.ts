@@ -199,6 +199,15 @@ export const MIGRATION_COLUMN_ANCHORS: Readonly<
         payroll_entries: ['AmountPaid'],
         payroll_periods: ['Status'],
     },
+    '608_quarantine_auto_dispose.sql': {
+        system_settings: [
+            'quarantine_auto_dispose_enabled',
+            'quarantine_auto_dispose_min_age_days',
+        ],
+    },
+    '609_lot_split_parent.sql': {
+        inventory_batches: ['parent_lot_id'],
+    },
 };
 
 export type TableColumnMap = ReadonlyMap<string, ReadonlySet<string>>;

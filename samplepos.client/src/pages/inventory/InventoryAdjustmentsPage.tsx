@@ -653,11 +653,20 @@ export default function InventoryAdjustmentsPage() {
 
       await adjustBatchMutation.mutateAsync(validatedData);
 
+      const isPartialQuarantine =
+        (reason === 'DAMAGE' || reason === 'EXPIRY') &&
+        qty > 0 &&
+        qty < Number(selectedBatch.remaining_quantity) - 0.0001;
+
       const typeLabel =
         reason === 'DAMAGE'
-          ? 'Damage recorded'
+          ? isPartialQuarantine
+            ? `Partial damage quarantined (${qty} units; remainder stays sellable). Dispose from Inventory → Quarantine (DAMAGE band).`
+            : 'Damage quarantined (no P&L yet). Dispose from Inventory → Quarantine (DAMAGE band).'
           : reason === 'EXPIRY'
-            ? 'Expiry write-off recorded'
+            ? isPartialQuarantine
+              ? `Partial expiry quarantined (${qty} units; remainder stays sellable). Dispose from Inventory → Quarantine (EXPIRED band).`
+              : 'Expiry quarantined (no P&L yet). Dispose from Inventory → Quarantine (EXPIRED band).'
             : direction === 'IN'
               ? 'Stock increased'
               : 'Stock decreased';
@@ -745,9 +754,14 @@ export default function InventoryAdjustmentsPage() {
     const current = new Decimal(selectedBatch.remaining_quantity);
     const adjustment = new Decimal(adjustmentQuantity || 0);
 
-    // DAMAGE and EXPIRY always decrease stock
+    // DAMAGE/EXPIRY quarantine:
+    // - full batch: remaining unchanged until dispose (LQ-INV-1)
+    // - partial: lot split — this batch keeps (current − qty) sellable
     if (movementCategory === 'DAMAGE' || movementCategory === 'EXPIRY') {
-      return current.minus(adjustment).toNumber();
+      if (adjustment.gt(0) && adjustment.lt(current)) {
+        return current.minus(adjustment).toNumber();
+      }
+      return current.toNumber();
     }
 
     const newQty =
@@ -755,6 +769,23 @@ export default function InventoryAdjustmentsPage() {
 
     return newQty.toNumber();
   }, [selectedBatch, adjustmentQuantity, adjustmentType, movementCategory]);
+
+  const quarantinePreviewHint = useMemo(() => {
+    if (
+      (movementCategory !== 'DAMAGE' && movementCategory !== 'EXPIRY') ||
+      !selectedBatch ||
+      !adjustmentQuantity
+    ) {
+      return null;
+    }
+    const current = Number(selectedBatch.remaining_quantity);
+    const qty = Number(adjustmentQuantity);
+    if (!(qty > 0) || qty > current + 0.0001) return null;
+    if (Math.abs(qty - current) <= 0.0001) {
+      return 'Full batch will be quarantined (non-sellable). No P&L until Dispose.';
+    }
+    return `Partial: ${qty} quarantined; ${(current - qty).toFixed(2)} stays sellable on this batch (lot split). No P&L until Dispose.`;
+  }, [movementCategory, selectedBatch, adjustmentQuantity]);
 
   // Real-time form validation
   const formValidation = useMemo(() => {
@@ -825,7 +856,7 @@ export default function InventoryAdjustmentsPage() {
               <ul className="space-y-1">
                 <li>• <strong>Adjustment:</strong> Increase or decrease stock for corrections</li>
                 <li>• <strong>Damage:</strong> Record stock lost due to physical damage</li>
-                <li>• <strong>Expiry:</strong> Write off expired stock</li>
+                <li>• <strong>Damage / Expiry:</strong> Quarantine first (no P&L) — dispose from Quarantine workqueue</li>
                 <li>• <strong>Physical Count:</strong> Compare physical stock vs system, auto-create adjustments for discrepancies</li>
                 <li>• All records create immutable stock movement entries for full audit trail</li>
                 <li>• View <strong>Movement History</strong> for the complete audit trail</li>
@@ -836,7 +867,7 @@ export default function InventoryAdjustmentsPage() {
             </WorkflowHelpTrigger>
           </div>
           <p className="text-gray-600 mt-1">
-            Record stock adjustments, damages, expiry write-offs, and physical counts
+            Record stock adjustments, damages, expiry quarantine, and physical counts
           </p>
           {isMultistoreEnabled && adjustmentStores.length > 0 && (
             <div className="mt-4 max-w-sm">
@@ -1107,7 +1138,7 @@ export default function InventoryAdjustmentsPage() {
             movementCategory === 'DAMAGE'
               ? 'Record Damage'
               : movementCategory === 'EXPIRY'
-                ? 'Record Expiry Write-Off'
+                ? 'Quarantine Expired Stock'
                 : 'Adjust Inventory'
           }
           subtitle={`${selectedBatch.product_name} — ${selectedBatch.batch_number}`}
@@ -1139,7 +1170,7 @@ export default function InventoryAdjustmentsPage() {
                   : movementCategory === 'DAMAGE'
                     ? 'Record Damage'
                     : movementCategory === 'EXPIRY'
-                      ? 'Record Expiry'
+                      ? 'Quarantine expired'
                       : 'Save Adjustment (Enter)'}
               </button>
             </div>
@@ -1278,11 +1309,22 @@ export default function InventoryAdjustmentsPage() {
                     className={`text-sm ${previewNewQuantity < 0 ? 'text-red-800' : 'text-blue-800'
                       }`}
                   >
-                    <strong>New Quantity:</strong> {previewNewQuantity.toFixed(2)}
+                    <strong>
+                      {(movementCategory === 'DAMAGE' || movementCategory === 'EXPIRY') &&
+                      selectedBatch &&
+                      Number(adjustmentQuantity) > 0 &&
+                      Number(adjustmentQuantity) < Number(selectedBatch.remaining_quantity)
+                        ? 'Sellable left on this batch:'
+                        : 'New Quantity:'}
+                    </strong>{' '}
+                    {previewNewQuantity.toFixed(2)}
                     {previewNewQuantity < 0 && (
                       <span className="ml-2">⚠️ Negative quantity not allowed</span>
                     )}
                   </div>
+                  {quarantinePreviewHint && (
+                    <p className="text-xs text-blue-700 mt-1">{quarantinePreviewHint}</p>
+                  )}
                 </div>
               )}
 

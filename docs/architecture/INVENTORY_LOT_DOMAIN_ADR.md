@@ -363,7 +363,7 @@ Generalize `batch_expiry_audit` → `lot_events` (expiry corrections remain quer
 | Sale void / refund | `salesService` | `returnLot` | 🟡 verify |
 | Return GRN | `returnGrnService` | `returnLot` | 🟡 |
 | Manufacturing | — | `consumeLot` / `receiveLot` | ⚪ not built |
-| Batch split / merge | — | `splitLot` / `mergeLot` | ⚪ not built |
+| Batch split / merge | — | `splitLot` / `mergeLot` | 🟢 `splitLot` delivered (partial soft quarantine); merge ⚪ |
 | API / mobile | various routes | thin → `LotService` | 🟡 |
 | Background jobs | `expiryAutomationJobs` | `transitionLotStatus` | 🟡 |
 

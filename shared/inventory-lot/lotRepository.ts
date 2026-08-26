@@ -16,6 +16,8 @@ export interface LotMasterWrite {
   purchaseOrderId?: string | null;
   purchaseOrderItemId?: string | null;
   isBonus?: boolean;
+  /** Genealogy — set for SPLIT children when column exists */
+  parentLotId?: string | null;
 }
 
 export interface LotProjectionWrite {

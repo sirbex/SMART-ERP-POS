@@ -1,0 +1,58 @@
+{
+  "feature": "QUARANTINE_DAMAGE_VISIBILITY",
+  "provenAt": "2026-08-26T17:52:50.466Z",
+  "contract": "Damaged stock always visible in quarantine workqueue: multistore DAMAGE store transfer or single-store QUARANTINED soft status; no immediate P&L on quarantine",
+  "gates": [
+    {
+      "id": "REASON_STATUS",
+      "ok": true,
+      "detail": "DAMAGE → QUARANTINED lot status"
+    },
+    {
+      "id": "STATUS_BUCKET",
+      "ok": true,
+      "detail": "QUARANTINED → DAMAGE workqueue band"
+    },
+    {
+      "id": "MS_DAMAGE_TRANSFER",
+      "ok": true,
+      "detail": "multistore DAMAGE OUT → DAMAGE store quarantine"
+    },
+    {
+      "id": "MS_AGING_STORE",
+      "ok": true,
+      "detail": "hard aging includes DAMAGE store type"
+    },
+    {
+      "id": "SS_DAMAGE_ROUTE",
+      "ok": true,
+      "detail": "single-store DAMAGE OUT → soft quarantine helper"
+    },
+    {
+      "id": "SS_AGING_FILTER",
+      "ok": true,
+      "detail": "soft aging DAMAGE filter matches QUARANTINED status"
+    },
+    {
+      "id": "UI_DAMAGE_BAND",
+      "ok": true,
+      "detail": "workqueue DAMAGE band + dispose reason + adjustments link"
+    },
+    {
+      "id": "UI_ADJ_MSG",
+      "ok": true,
+      "detail": "adjustments UI directs to quarantine after damage"
+    },
+    {
+      "id": "SOFT_NO_GL",
+      "ok": true,
+      "detail": "soft damage quarantine audit without P&L"
+    }
+  ],
+  "summary": {
+    "total": 9,
+    "passed": 9,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

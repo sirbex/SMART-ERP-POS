@@ -36,6 +36,8 @@ import { TRANSFER_PERMISSION_KEYS } from '../../../../../shared/types/transferWo
 
 import { transferAssortmentService } from './transferAssortmentService.js';
 import { assertWarehouseLayerConsistentForProducts } from '../../../services/warehouseInventoryCoupling.js';
+import { recordMovement } from '../../stock-movements/stockMovementRepository.js';
+import { syncLotStatusAfterQuarantine } from '../../loss-quarantine/quarantineLotStatus.js';
 import {
     deriveStatusAfterApproval,
     deriveStatusAfterDispatch,
@@ -1336,6 +1338,29 @@ export const storeTransferService = {
                         quantity: shortageDelta,
 
                     });
+
+                    const lot = await productLotRepository.getById(client, line.productLotId);
+                    const batchId = lot?.inventoryBatchId ?? null;
+                    await recordMovement(client, {
+                        productId: line.productId,
+                        batchId,
+                        movementType: 'DAMAGE',
+                        quantity: shortageDelta,
+                        referenceType: 'STORE_TRANSFER',
+                        referenceId: transfer.id,
+                        notes: `Transfer receive shortage → ${damageStore.code} (quarantine)`,
+                        createdBy: actor.userId ?? transfer.createdById ?? transfer.id,
+                        economicEvent: 'QUARANTINE_TRANSFER',
+                        postsGl: false,
+                    });
+                    if (batchId) {
+                        await syncLotStatusAfterQuarantine(client, {
+                            inventoryBatchId: batchId,
+                            productLotId: line.productLotId,
+                            quarantineKind: 'DAMAGE',
+                            userId: actor.userId ?? transfer.createdById ?? transfer.id,
+                        });
+                    }
 
                 }
 

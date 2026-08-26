@@ -222,6 +222,14 @@ export const systemSettingsRepository = {
             setClauses.push(`expiry_automation_enabled = $${paramIndex++}`);
             values.push(updates.expiryAutomationEnabled);
         }
+        if (updates.quarantineAutoDisposeEnabled !== undefined) {
+            setClauses.push(`quarantine_auto_dispose_enabled = $${paramIndex++}`);
+            values.push(updates.quarantineAutoDisposeEnabled);
+        }
+        if (updates.quarantineAutoDisposeMinAgeDays !== undefined) {
+            setClauses.push(`quarantine_auto_dispose_min_age_days = $${paramIndex++}`);
+            values.push(updates.quarantineAutoDisposeMinAgeDays);
+        }
         if (updates.updatedById !== undefined) {
             setClauses.push(`updated_by_id = $${paramIndex++}`);
             values.push(updates.updatedById);

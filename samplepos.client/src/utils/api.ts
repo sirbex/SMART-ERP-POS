@@ -684,14 +684,45 @@ export const api = {
           lines?: unknown[];
         }>
       >('inventory/loss-quarantine/quarantine-aging', { params }),
+    softQuarantineCandidates: () =>
+      apiClient.get<ApiResponse<{ candidates?: unknown[]; totalQuantity?: number }>>(
+        'inventory/loss-quarantine/soft-quarantine/candidates',
+      ),
+    applySoftQuarantine: (data: {
+      inventoryBatchId: string;
+      reason: 'EXPIRED' | 'DAMAGE';
+      memo?: string;
+    }) =>
+      apiClient.post<ApiResponse<{ statusApplied?: string; movementNumber?: string }>>(
+        'inventory/loss-quarantine/soft-quarantine',
+        data,
+      ),
+    quarantineFromExpiringReport: (data: { inventoryBatchId: string; memo?: string }) =>
+      apiClient.post<
+        ApiResponse<{
+          quarantineMode?: 'HARD' | 'SOFT';
+          quantityMoved?: number;
+          movementNumber?: string;
+          statusApplied?: string | null;
+        }>
+      >('inventory/loss-quarantine/from-expiring-report', data),
+    quarantineFromExpiringReportBulk: (data: {
+      inventoryBatchIds: string[];
+      memo?: string;
+    }) =>
+      apiClient.post<
+        ApiResponse<{ okCount?: number; failCount?: number; results?: unknown[] }>
+      >('inventory/loss-quarantine/from-expiring-report/bulk', data),
     disposeFromQuarantine: (data: {
-      storeLocationId: string;
+      storeLocationId?: string | null;
       productId: string;
-      productLotId: string;
+      productLotId?: string | null;
+      inventoryBatchId?: string | null;
       quantity: number;
       reason?: 'DAMAGE' | 'EXPIRY' | 'SHRINKAGE' | 'WRITE_OFF' | 'PHYSICAL_COUNT';
       memo?: string;
       unitCost?: number;
+      quarantineMode?: 'HARD' | 'SOFT';
     }) =>
       apiClient.post<ApiResponse<{ documentNumber?: string; expenseAccountCode?: string }>>(
         'inventory/loss-quarantine/dispose',
@@ -699,6 +730,35 @@ export const api = {
       ),
     reverseDisposal: (id: string, data?: { reason?: string }) =>
       apiClient.post<ApiResponse>(`inventory/loss-quarantine/dispose/${id}/reverse`, data ?? {}),
+    quarantineAutoDisposePreview: () =>
+      apiClient.get<
+        ApiResponse<{
+          quarantineMode?: 'HARD' | 'SOFT';
+          enabled?: boolean;
+          minAgeDays?: number;
+          candidates?: Array<{
+            productName: string;
+            lotNumber: string;
+            quantity: number;
+            inventoryValue: number;
+            ageDays: number;
+          }>;
+          totalQuantity?: number;
+          totalValue?: number;
+        }>
+      >('inventory/loss-quarantine/auto-dispose/preview'),
+    quarantineAutoDisposeProcess: (data?: { force?: boolean; dryRun?: boolean }) =>
+      apiClient.post<
+        ApiResponse<{
+          quarantineMode?: string;
+          minAgeDays?: number;
+          linesProcessed?: number;
+          linesFailed?: number;
+          totalQuantityDisposed?: number;
+          totalAmount?: number;
+          dryRun?: boolean;
+        }>
+      >('inventory/loss-quarantine/auto-dispose/process', data ?? {}),
   },
 
   warehouse: {

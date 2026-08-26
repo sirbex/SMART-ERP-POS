@@ -1,0 +1,324 @@
+{
+  "feature": "SOFT_QUARANTINE_PARTIAL_DAMAGE_LIVE",
+  "provenAt": "2026-08-25T23:52:29.351Z",
+  "startedAt": "2026-08-25T23:52:27.977Z",
+  "stamp": "20260825235227",
+  "sku": "SQPD-20260825235227",
+  "database": "postgresql://postgres:****@localhost:5432/pos_system",
+  "contract": "Functional LIVE: partial soft quarantine splits lot; parent stays sellable; child quarantined without GL; dispose posts 5120; calendar-expired EXPIRED dispose posts 5130; full-batch path still status-only",
+  "fixture": {
+    "productId": "3f1e3960-f50c-402e-8d76-642bb9ca4569",
+    "parentBatchId": "2510ca8a-58b8-4593-865c-416367658b80",
+    "childBatchId": "09ccbb99-7bf8-464f-9109-1154ed4ba760",
+    "fullBatchId": "caf53ed7-f1da-44c7-82a1-a73b611fd1a6",
+    "expiredBatchId": "b9af9d53-d695-4a3c-bd9f-afbbdeda7e2d",
+    "parentQty": 100,
+    "partialQty": 12,
+    "fullQty": 5,
+    "expiredQty": 20,
+    "expiryPast": "2026-08-24",
+    "unitCost": 1000
+  },
+  "gates": [
+    {
+      "id": "MIG_609",
+      "ok": true,
+      "detail": "inventory_batches.parent_lot_id present"
+    },
+    {
+      "id": "MODE_SINGLE_STORE",
+      "ok": true,
+      "detail": "is_multistore_enabled=false (soft quarantine mode)"
+    },
+    {
+      "id": "USER",
+      "ok": true,
+      "detail": "userId=7aa55a55-db98-4a9d-a743-d877c7d8dd21"
+    },
+    {
+      "id": "GL_ACCOUNTS",
+      "ok": true,
+      "detail": "accounts present: 1300,5120"
+    },
+    {
+      "id": "SEED_PRODUCT",
+      "ok": true,
+      "detail": "productId=3f1e3960-f50c-402e-8d76-642bb9ca4569 sku=SQPD-20260825235227"
+    },
+    {
+      "id": "SEED_BATCHES",
+      "ok": true,
+      "detail": "seeded parent=100 full=5 expired=20 expiry=2026-08-24",
+      "measured": {
+        "rows": [
+          {
+            "id": "2510ca8a-58b8-4593-865c-416367658b80",
+            "batch_number": "SQPD-20260825235227-P",
+            "remaining_quantity": "100.0000",
+            "status": "ACTIVE",
+            "expiry_date": null
+          },
+          {
+            "id": "caf53ed7-f1da-44c7-82a1-a73b611fd1a6",
+            "batch_number": "SQPD-20260825235227-F",
+            "remaining_quantity": "5.0000",
+            "status": "ACTIVE",
+            "expiry_date": null
+          },
+          {
+            "id": "b9af9d53-d695-4a3c-bd9f-afbbdeda7e2d",
+            "batch_number": "SQPD-20260825235227-E",
+            "remaining_quantity": "20.0000",
+            "status": "ACTIVE",
+            "expiry_date": "2026-08-24"
+          }
+        ],
+        "productId": "3f1e3960-f50c-402e-8d76-642bb9ca4569",
+        "parentBatchId": "2510ca8a-58b8-4593-865c-416367658b80",
+        "fullBatchId": "caf53ed7-f1da-44c7-82a1-a73b611fd1a6",
+        "expiredBatchId": "b9af9d53-d695-4a3c-bd9f-afbbdeda7e2d"
+      }
+    },
+    {
+      "id": "SVC_PARTIAL_SPLIT",
+      "ok": true,
+      "detail": "splitFrom=2510ca8a-58b8-4593-865c-416367658b80 child=09ccbb99-7bf8-464f-9109-1154ed4ba760 held=12",
+      "measured": {
+        "soft": {
+          "inventoryBatchId": "09ccbb99-7bf8-464f-9109-1154ed4ba760",
+          "productLotId": "2248161b-065d-4e07-82e7-e43d60061dc0",
+          "productId": "3f1e3960-f50c-402e-8d76-642bb9ca4569",
+          "statusApplied": "QUARANTINED",
+          "quantityHeld": 12,
+          "remainingUnchanged": 12,
+          "movementId": "7ab71142-50f3-4529-8907-c2db919773f4",
+          "movementNumber": "MOV-2026-0260",
+          "quarantineMode": "SOFT",
+          "splitFromBatchId": "2510ca8a-58b8-4593-865c-416367658b80",
+          "sellableRemainingOnParent": 88
+        }
+      }
+    },
+    {
+      "id": "SVC_QTY_HELD",
+      "ok": true,
+      "detail": "quantityHeld=12 expected=12"
+    },
+    {
+      "id": "SVC_NO_GL_FLAG",
+      "ok": true,
+      "detail": "mode=SOFT status=QUARANTINED"
+    },
+    {
+      "id": "PARENT_ACTIVE_SELLABLE",
+      "ok": true,
+      "detail": "parent status=ACTIVE remaining=88 (expected 88)",
+      "measured": {
+        "before": {
+          "remaining": "100.0000",
+          "status": "ACTIVE"
+        },
+        "after": {
+          "remaining": "88.0000",
+          "status": "ACTIVE",
+          "batch_number": "SQPD-20260825235227-P"
+        }
+      }
+    },
+    {
+      "id": "CHILD_QUARANTINED",
+      "ok": true,
+      "detail": "child status=QUARANTINED remaining=12 lot=SQPD-20260825235227-P-S1",
+      "measured": {
+        "child": {
+          "remaining": "12.0000",
+          "status": "QUARANTINED",
+          "batch_number": "SQPD-20260825235227-P-S1",
+          "parent_lot_id": "2510ca8a-58b8-4593-865c-416367658b80",
+          "source_type": "SPLIT"
+        }
+      }
+    },
+    {
+      "id": "CONSERVATION",
+      "ok": true,
+      "detail": "parent+child remaining 88+12=100 (was 100)"
+    },
+    {
+      "id": "GENEALOGY",
+      "ok": true,
+      "detail": "parent_lot_id=2510ca8a-58b8-4593-865c-416367658b80 source_type=SPLIT"
+    },
+    {
+      "id": "MOV_SPLIT_NO_GL",
+      "ok": true,
+      "detail": "LOT_SPLIT movements=2 all posts_gl=false types=ADJUSTMENT_OUT,ADJUSTMENT_IN",
+      "measured": {
+        "splitMoves": [
+          {
+            "movement_type": "ADJUSTMENT_OUT",
+            "reference_type": "LOT_SPLIT",
+            "economic_event": "OTHER",
+            "posts_gl": false,
+            "quantity": "12.0000",
+            "batch_id": "2510ca8a-58b8-4593-865c-416367658b80"
+          },
+          {
+            "movement_type": "ADJUSTMENT_IN",
+            "reference_type": "LOT_SPLIT",
+            "economic_event": "OTHER",
+            "posts_gl": false,
+            "quantity": "12.0000",
+            "batch_id": "09ccbb99-7bf8-464f-9109-1154ed4ba760"
+          }
+        ]
+      }
+    },
+    {
+      "id": "MOV_QUARANTINE_NO_GL",
+      "ok": true,
+      "detail": "quarantine QUARANTINE_TRANSFER+posts_gl=false count=1",
+      "measured": {
+        "qMoves": [
+          {
+            "movement_type": "DAMAGE",
+            "reference_type": "SOFT_Q_LIVE_PROOF",
+            "economic_event": "QUARANTINE_TRANSFER",
+            "posts_gl": false,
+            "quantity": "12.0000",
+            "batch_id": "09ccbb99-7bf8-464f-9109-1154ed4ba760"
+          }
+        ]
+      }
+    },
+    {
+      "id": "NO_GL_AFTER_QUARANTINE",
+      "ok": true,
+      "detail": "ledger rows linked to proof movements before dispose=0"
+    },
+    {
+      "id": "FEFO_PARENT_ONLY",
+      "ok": true,
+      "detail": "ACTIVE selectable lots among pair=2510ca8a-58b8-4593-865c-416367658b80",
+      "measured": {
+        "selectable": [
+          {
+            "id": "2510ca8a-58b8-4593-865c-416367658b80",
+            "status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "id": "DISPOSE_5120",
+      "ok": true,
+      "detail": "dispose doc=LDISP-2026-00013 expense=5120 qty=12",
+      "measured": {
+        "dispose": {
+          "documentId": "0faea6cc-3a02-48f5-994a-3d6e9fa996c0",
+          "documentNumber": "LDISP-2026-00013",
+          "expenseAccountCode": "5120",
+          "movementId": "0ae34c82-3cb2-4c81-8f82-71266e04b1f4",
+          "movementNumber": "MOV-2026-0261",
+          "batchId": "09ccbb99-7bf8-464f-9109-1154ed4ba760",
+          "quantity": 12,
+          "totalAmount": 12000,
+          "journalEntryId": "9b437f38-63cf-4ced-a280-23e1da90763e"
+        }
+      }
+    },
+    {
+      "id": "CHILD_CONSUMED",
+      "ok": true,
+      "detail": "child remaining after dispose=0.0000",
+      "measured": {
+        "childDisposed": {
+          "remaining": "0.0000",
+          "status": "DEPLETED"
+        }
+      }
+    },
+    {
+      "id": "PARENT_UNTOUCHED_BY_DISPOSE",
+      "ok": true,
+      "detail": "parent still ACTIVE remaining=88.0000"
+    },
+    {
+      "id": "GL_DISPOSE_SHAPE",
+      "ok": true,
+      "detail": "DR5120=12000 expected=12000; lines=2; refs=STOCK_MOVEMENT",
+      "measured": {
+        "glDispose": [
+          {
+            "txn": "TXN-000074",
+            "account": "1300",
+            "debit": "0.000000",
+            "credit": "12000.000000",
+            "ref_type": "STOCK_MOVEMENT"
+          },
+          {
+            "txn": "TXN-000074",
+            "account": "5120",
+            "debit": "12000.000000",
+            "credit": "0.000000",
+            "ref_type": "STOCK_MOVEMENT"
+          }
+        ]
+      }
+    },
+    {
+      "id": "FULL_NO_SPLIT",
+      "ok": true,
+      "detail": "full path child=parent id=caf53ed7-f1da-44c7-82a1-a73b611fd1a6 splitFrom=null"
+    },
+    {
+      "id": "FULL_STATUS_QTY",
+      "ok": true,
+      "detail": "full batch status=QUARANTINED remaining=5.0000 (unchanged qty)"
+    },
+    {
+      "id": "EXPIRED_SOFT",
+      "ok": true,
+      "detail": "EXPIRED soft qty=20"
+    },
+    {
+      "id": "EXPIRED_DISPOSE_5130",
+      "ok": true,
+      "detail": "expired dispose doc=LDISP-2026-00014 expense=5130",
+      "measured": {
+        "disposeExpired": {
+          "documentId": "d89b380b-e3bd-41ef-ac77-ffb70d6c99f5",
+          "documentNumber": "LDISP-2026-00014",
+          "expenseAccountCode": "5130",
+          "movementId": "5b8d7570-7b8e-4de6-ae8a-90c51d160b56",
+          "movementNumber": "MOV-2026-0264",
+          "batchId": "b9af9d53-d695-4a3c-bd9f-afbbdeda7e2d",
+          "quantity": 20,
+          "totalAmount": 20000,
+          "journalEntryId": "c5dfd99a-f8b5-4ebf-958e-8b94c60b096b"
+        }
+      }
+    },
+    {
+      "id": "EXPIRED_STALE_LOT_IGNORED",
+      "ok": true,
+      "detail": "dispose consumed batch=b9af9d53-d695-4a3c-bd9f-afbbdeda7e2d (stale productLotId was 2248161b-065d-4e07-82e7-e43d60061dc0)"
+    },
+    {
+      "id": "EXPIRED_CONSUMED",
+      "ok": true,
+      "detail": "expired batch remaining=0.0000"
+    },
+    {
+      "id": "CLEANUP",
+      "ok": true,
+      "detail": "left fixtures for audit sku=SQPD-20260825235227 productId=3f1e3960-f50c-402e-8d76-642bb9ca4569"
+    }
+  ],
+  "summary": {
+    "total": 28,
+    "passed": 28,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

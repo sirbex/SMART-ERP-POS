@@ -127,12 +127,14 @@ export function useExpiryAutomationPreview(enabled = true) {
     queryFn: async () => {
       const res = await api.warehouse.expiryAutomation.preview();
       return res.data?.data as {
+        quarantineMode?: 'HARD' | 'SOFT';
         candidates: Array<{
           productName: string;
           lotNumber: string;
           storeCode: string;
           availableQty: number;
           expiryDate: string;
+          quarantineMode?: 'HARD' | 'SOFT';
         }>;
         totalQuantity: number;
       };

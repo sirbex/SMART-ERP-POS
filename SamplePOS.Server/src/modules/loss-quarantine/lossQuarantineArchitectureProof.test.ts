@@ -26,10 +26,10 @@ describe('Loss & Quarantine architecture proof (Gate A)', () => {
 
   it('A-02 registry lists quarantine and disposal touchpoints', () => {
     const ids = new Set(LOSS_QUARANTINE_TOUCHPOINT_REGISTRY.map((t) => t.id));
-    for (const id of ['LQ01', 'LQ02', 'LQ03', 'LQ05', 'LQ08', 'LQ09', 'LQ11', 'LQ12']) {
+    for (const id of ['LQ01', 'LQ02', 'LQ03', 'LQ05', 'LQ08', 'LQ09', 'LQ11', 'LQ12', 'LQ13']) {
       expect(ids.has(id)).toBe(true);
     }
-    expect(LOSS_QUARANTINE_TOUCHPOINT_REGISTRY.length).toBeGreaterThanOrEqual(12);
+    expect(LOSS_QUARANTINE_TOUCHPOINT_REGISTRY.length).toBeGreaterThanOrEqual(13);
     expect(countLossTouchpointsByStatus('NOT_STARTED')).toBe(0);
   });
 
@@ -59,6 +59,12 @@ describe('Loss & Quarantine architecture proof (Gate A)', () => {
       'SamplePOS.Server/src/modules/inventory/warehouse/expiryAutomationService.ts',
     );
     expect(exp).toMatch(/economicEvent:\s*'QUARANTINE_TRANSFER'/);
+
+    const soft = readRepo(
+      'SamplePOS.Server/src/modules/loss-quarantine/softQuarantineService.ts',
+    );
+    expect(soft).toMatch(/economicEvent:\s*'QUARANTINE_TRANSFER'/);
+    expect(soft).toMatch(/postsGl:\s*false/);
   });
 
   it('A-04 handler tags GL-bearing OUT as LOSS_DISPOSAL', () => {

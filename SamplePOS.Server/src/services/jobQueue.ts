@@ -20,6 +20,9 @@ interface JobData {
 class JobQueueService {
     private queues: Map<string, Queue> = new Map();
     private readonly REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+    /** Single dispatcher — Bull drops jobs when multiple process() compete on one queue. */
+    private calculationsHandlers = new Map<string, (job: Job<JobData>) => Promise<unknown>>();
+    private calculationsProcessorStarted = false;
 
     constructor() {
         this.initializeQueues();
@@ -165,6 +168,40 @@ class JobQueueService {
         logger.info(`Job ${job.id} added to queue ${queueName}`, { type: jobType });
 
         return job;
+    }
+
+    /**
+     * Register a handler for the shared `calculations` queue (one Bull processor dispatches all types).
+     */
+    registerCalculationsHandler(
+        jobType: string,
+        handler: (job: Job<JobData>) => Promise<unknown>,
+    ): void {
+        this.calculationsHandlers.set(jobType, handler);
+    }
+
+    /**
+     * Start the calculations queue processor after all handlers are registered.
+     */
+    startCalculationsProcessor(concurrency: number = 1): void {
+        if (this.calculationsProcessorStarted) {
+            return;
+        }
+        const queue = this.getQueue('calculations');
+        if (!queue) {
+            throw new Error('Queue calculations not found');
+        }
+        this.calculationsProcessorStarted = true;
+        queue.process(concurrency, async (job) => {
+            logger.info(`Processing job ${job.id} in queue calculations`, { type: job.data.type });
+            const handler = this.calculationsHandlers.get(job.data.type);
+            if (!handler) {
+                const msg = `No calculations handler registered for job type: ${job.data.type}`;
+                logger.error(msg);
+                throw new Error(msg);
+            }
+            return handler(job);
+        });
     }
 
     /**

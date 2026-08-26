@@ -199,6 +199,13 @@ describe('EVIDENCE — Expiring items shelf-life SSOT', () => {
       'KPI cards click-filter register',
     );
     gate(
+      'P3_QUARANTINE_BRIDGE',
+      page.includes('data-expiring-quarantine-row') &&
+        page.includes('/inventory/quarantine') &&
+        page.includes('quarantineFromExpiringReport'),
+      'Expiring Items quarantine action + workqueue link',
+    );
+    gate(
       'UI_MAPS_FILTERED',
       page.includes('filteredRows.map') && page.includes('expiringBandFilter'),
       'table maps filteredRows only',
