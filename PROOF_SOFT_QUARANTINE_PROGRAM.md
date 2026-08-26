@@ -1,7 +1,7 @@
 # PROOF — Soft quarantine program (P0–P4 master)
 
 **Verdict:** PASS
-**Proven at:** 2026-08-26T17:54:02.368Z
+**Proven at:** 2026-08-26T18:03:27.424Z
 **Strict:** false
 
 **Contract:** P0–P4 soft quarantine program: mode adapter, expiry automation, Expiring Items bridge, auto-dispose; unified job dispatch; LQ fitness + architecture proof

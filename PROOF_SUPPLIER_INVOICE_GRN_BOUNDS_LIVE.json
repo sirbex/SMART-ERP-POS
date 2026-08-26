@@ -1,18 +1,18 @@
 {
   "feature": "SUPPLIER_INVOICE_GRN_BOUNDS_LIVE",
-  "provenAt": "2026-08-26T17:52:16.461Z",
-  "startedAt": "2026-08-26T17:52:15.587Z",
-  "stamp": "20260826175215",
-  "sku": "SIGB-20260826175215",
+  "provenAt": "2026-08-26T18:02:51.811Z",
+  "startedAt": "2026-08-26T18:02:50.934Z",
+  "stamp": "20260826180250",
+  "sku": "SIGB-20260826180250",
   "contract": "LIVE: over-GRN bill rejected without reason and with wrong reason; accepted only with PRICE_VARIANCE; manual grnIds inflate rejected; fake GR rejected; exact match accepted",
   "fixture": {
-    "productId": "3c74eee1-3756-4eca-8ffc-207a98e9f233",
-    "grnId": "40e00df1-4e77-43ad-bb68-0fe6eed3ae93",
-    "grNumber": "GR-SIGB-P-20260826175215",
+    "productId": "0507a3e8-bdc1-414e-85fc-638e6c8dfad0",
+    "grnId": "817c66b4-b4fb-45c2-bd4a-04b096d5f33f",
+    "grNumber": "GR-SIGB-P-20260826180250",
     "supplierId": "9d31cfaa-7cbf-40c3-bc54-a352660891e5",
     "GRN_TOTAL": 10000,
     "OVER_TOTAL": 12500,
-    "invoiceId": "118e444a-36e8-4ca8-905a-ff90593597f7"
+    "invoiceId": "1e5cb81a-af24-4681-8d7b-cea84236c44f"
   },
   "gates": [
     {
@@ -28,12 +28,12 @@
     {
       "id": "SEED_PRODUCT",
       "ok": true,
-      "detail": "productId=3c74eee1-3756-4eca-8ffc-207a98e9f233 sku=SIGB-20260826175215"
+      "detail": "productId=0507a3e8-bdc1-414e-85fc-638e6c8dfad0 sku=SIGB-20260826180250"
     },
     {
       "id": "SEED_GR",
       "ok": true,
-      "detail": "grn=GR-SIGB-P-20260826175215 billable=10000"
+      "detail": "grn=GR-SIGB-P-20260826180250 billable=10000"
     },
     {
       "id": "ASSERT_READY",
@@ -43,27 +43,27 @@
     {
       "id": "FAKE_GRN_REJECT",
       "ok": true,
-      "detail": "Cannot bill: goods receipt not found (4b3e3ba8-0e6b-44ed-8edc-26a1b032ad7f)"
+      "detail": "Cannot bill: goods receipt not found (9dab5261-61eb-4242-b534-17970975396c)"
     },
     {
       "id": "REJECT_OVER_NO_REASON",
       "ok": true,
-      "detail": "Supplier bill total differs from goods received value for GR-SIGB-P-20260826175215 by UGX 2500.00. Select a variance reason (PRICE_VARIANCE if the supplier bill"
+      "detail": "Supplier bill total differs from goods received value for GR-SIGB-P-20260826180250 by UGX 2500.00. Select a variance reason (PRICE_VARIANCE if the supplier bill"
     },
     {
       "id": "REJECT_OVER_DISCOUNT",
       "ok": true,
-      "detail": "Supplier bill (12500.00) exceeds goods received value (10000.00) for GR-SIGB-P-20260826175215. Use PRICE_VARIANCE only when the supplier legitimately billed mor"
+      "detail": "Supplier bill (12500.00) exceeds goods received value (10000.00) for GR-SIGB-P-20260826180250. Use PRICE_VARIANCE only when the supplier legitimately billed mor"
     },
     {
       "id": "ACCEPT_OVER_PV",
       "ok": true,
-      "detail": "invoice=SBILL-2026-0006 AP=12500 grnStored=10000 reason=PRICE_VARIANCE posted=true"
+      "detail": "invoice=SBILL-2026-0008 AP=12500 grnStored=10000 reason=PRICE_VARIANCE posted=true"
     },
     {
       "id": "REJECT_MANUAL_OVER",
       "ok": true,
-      "detail": "Supplier bill total differs from goods received value for GR-SIGB-M-20260826175215 by UGX 2500.00. Select a variance reason (PRICE_VARIANCE if the supplier bill"
+      "detail": "Supplier bill total differs from goods received value for GR-SIGB-M-20260826180250 by UGX 2500.00. Select a variance reason (PRICE_VARIANCE if the supplier bill"
     },
     {
       "id": "ACCEPT_EXACT",
@@ -73,7 +73,7 @@
     {
       "id": "CLEANUP",
       "ok": true,
-      "detail": "left fixtures sku=SIGB-20260826175215"
+      "detail": "left fixtures sku=SIGB-20260826180250"
     }
   ],
   "summary": {

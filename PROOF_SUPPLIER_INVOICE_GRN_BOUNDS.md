@@ -1,7 +1,7 @@
 # PROOF — Supplier invoice ≤ GRN received value
 
 **Verdict:** PASS
-**Proven at:** 2026-08-26T17:52:13.370Z
+**Proven at:** 2026-08-26T18:02:48.808Z
 
 **Contract:** GR-linked supplier invoices cannot exceed received billable value unless PRICE_VARIANCE; linked GRs must be COMPLETED with billable qty; postInvoiceToGL re-validates; manual GR-note bills blocked in UI
 

@@ -1,7 +1,7 @@
 # PROOF — Damage visible in quarantine
 
 **Verdict:** PASS
-**Proven at:** 2026-08-26T17:52:50.466Z
+**Proven at:** 2026-08-26T18:02:56.288Z
 
 **Contract:** Damaged stock always visible in quarantine workqueue: multistore DAMAGE store transfer or single-store QUARANTINED soft status; no immediate P&L on quarantine
 

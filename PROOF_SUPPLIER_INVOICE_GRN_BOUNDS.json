@@ -1,6 +1,6 @@
 {
   "feature": "SUPPLIER_INVOICE_GRN_BOUNDS",
-  "provenAt": "2026-08-26T17:52:13.370Z",
+  "provenAt": "2026-08-26T18:02:48.808Z",
   "contract": "GR-linked supplier invoices cannot exceed received billable value unless PRICE_VARIANCE; linked GRs must be COMPLETED with billable qty; postInvoiceToGL re-validates; manual GR-note bills blocked in UI",
   "gates": [
     {

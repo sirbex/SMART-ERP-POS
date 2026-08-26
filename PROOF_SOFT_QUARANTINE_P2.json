@@ -1,6 +1,6 @@
 {
   "feature": "SOFT_QUARANTINE_P2",
-  "provenAt": "2026-08-26T17:52:50.465Z",
+  "provenAt": "2026-08-26T18:02:56.300Z",
   "contract": "Unified expiry automation: HARD store transfer or SOFT status quarantine; shared flag default off; quarantine-only (no P&L); LQ-INV-8 skips SOFT_QUARANTINE + EXPIRY_AUTOMATION",
   "gates": [
     {

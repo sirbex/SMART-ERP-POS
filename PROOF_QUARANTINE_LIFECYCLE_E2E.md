@@ -1,7 +1,7 @@
 # PROOF — Quarantine lifecycle E2E (damage / expiry / return)
 
 **Verdict:** PASS
-**Proven at:** 2026-08-26T17:52:50.627Z
+**Proven at:** 2026-08-26T18:02:56.305Z
 
 **Contract:** DAMAGE/EXPIRY/RETURN lifecycle code contracts: two-step quarantine→dispose; mode adapters; no manual GL bypass; supplier vs customer return separation
 

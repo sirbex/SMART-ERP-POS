@@ -1,7 +1,7 @@
 # PROOF — Soft quarantine P2 (expiry automation)
 
 **Verdict:** PASS
-**Proven at:** 2026-08-26T17:52:50.465Z
+**Proven at:** 2026-08-26T18:02:56.300Z
 
 **Contract:** Unified expiry automation: HARD store transfer or SOFT status quarantine; shared flag default off; quarantine-only (no P&L); LQ-INV-8 skips SOFT_QUARANTINE + EXPIRY_AUTOMATION
 

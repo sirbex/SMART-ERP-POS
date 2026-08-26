@@ -1,6 +1,6 @@
 {
   "feature": "SOFT_QUARANTINE_P1",
-  "provenAt": "2026-08-26T17:52:50.465Z",
+  "provenAt": "2026-08-26T18:02:56.286Z",
   "contract": "LQ13 soft quarantine single-store: status+audit only (LQ-INV-1/6); aging+dispose parity (5120/5130); no MultistoreGate; no duplicate loss gateway",
   "gates": [
     {

@@ -1,7 +1,7 @@
 # PROOF — Soft quarantine P4 (auto-dispose after aging)
 
 **Verdict:** PASS
-**Proven at:** 2026-08-26T17:52:50.468Z
+**Proven at:** 2026-08-26T18:02:56.305Z
 
 **Contract:** Policy-gated auto-dispose after aging: separate flag default off; EXPIRED only; disposeFromQuarantine (P&L); soft/hard; nightly 04:30; no second loss engine
 

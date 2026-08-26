@@ -1,6 +1,6 @@
 {
   "feature": "QUARANTINE_DAMAGE_VISIBILITY",
-  "provenAt": "2026-08-26T17:52:50.466Z",
+  "provenAt": "2026-08-26T18:02:56.288Z",
   "contract": "Damaged stock always visible in quarantine workqueue: multistore DAMAGE store transfer or single-store QUARANTINED soft status; no immediate P&L on quarantine",
   "gates": [
     {

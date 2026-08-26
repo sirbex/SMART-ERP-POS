@@ -1,6 +1,6 @@
 {
   "feature": "QUARANTINE_LIFECYCLE_E2E",
-  "provenAt": "2026-08-26T17:52:50.627Z",
+  "provenAt": "2026-08-26T18:02:56.305Z",
   "contract": "DAMAGE/EXPIRY/RETURN lifecycle code contracts: two-step quarantine→dispose; mode adapters; no manual GL bypass; supplier vs customer return separation",
   "gates": [
     {

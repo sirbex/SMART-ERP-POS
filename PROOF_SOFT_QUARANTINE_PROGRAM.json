@@ -1,6 +1,6 @@
 {
   "feature": "SOFT_QUARANTINE_PROGRAM",
-  "provenAt": "2026-08-26T17:54:02.368Z",
+  "provenAt": "2026-08-26T18:03:27.424Z",
   "strict": false,
   "contract": "P0–P4 soft quarantine program: mode adapter, expiry automation, Expiring Items bridge, auto-dispose; unified job dispatch; LQ fitness + architecture proof",
   "gates": [

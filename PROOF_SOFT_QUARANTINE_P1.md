@@ -1,7 +1,7 @@
 # PROOF — Soft quarantine P1 (LQ13)
 
 **Verdict:** PASS
-**Proven at:** 2026-08-26T17:52:50.465Z
+**Proven at:** 2026-08-26T18:02:56.286Z
 
 **Contract:** LQ13 soft quarantine single-store: status+audit only (LQ-INV-1/6); aging+dispose parity (5120/5130); no MultistoreGate; no duplicate loss gateway
 

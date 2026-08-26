@@ -1,7 +1,7 @@
 # PROOF — Soft quarantine P3 (Expiring Items bridge)
 
 **Verdict:** PASS
-**Proven at:** 2026-08-26T17:52:50.291Z
+**Proven at:** 2026-08-26T18:02:56.071Z
 
 **Contract:** Expiring Items → quarantine bridge (expired only); soft/hard mode; no P&L; deep-link to workqueue; warning SSOT preserved
 

@@ -1,6 +1,6 @@
 {
   "feature": "SOFT_QUARANTINE_P4",
-  "provenAt": "2026-08-26T17:52:50.468Z",
+  "provenAt": "2026-08-26T18:02:56.305Z",
   "contract": "Policy-gated auto-dispose after aging: separate flag default off; EXPIRED only; disposeFromQuarantine (P&L); soft/hard; nightly 04:30; no second loss engine",
   "gates": [
     {
