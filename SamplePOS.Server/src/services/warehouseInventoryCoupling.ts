@@ -10,6 +10,7 @@
 import type { PoolClient } from 'pg';
 import { BusinessError } from '../middleware/errorHandler.js';
 import { isMultistoreEnabled } from '../modules/inventory/warehouse/multistoreSettings.js';
+import { assertPosSellableProjectionConsistent } from '../modules/inventory/warehouse/posSellableCoverage.js';
 import logger from '../utils/logger.js';
 
 export const WAREHOUSE_LAYER_TOLERANCE = 0.001;
@@ -131,6 +132,7 @@ export async function assertWarehouseLayerConsistent(
 
     const mismatches = await findWarehouseLayerMismatches(client, productId);
     if (mismatches.length === 0) {
+        await assertPosSellableProjectionConsistent(client, context, productId);
         return;
     }
 

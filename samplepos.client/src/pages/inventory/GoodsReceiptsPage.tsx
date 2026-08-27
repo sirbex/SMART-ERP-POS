@@ -402,9 +402,12 @@ export default function GoodsReceiptsPage() {
     isMultistoreEnabled || getCachedMultistoreEnabled() === true;
   const { data: grStoreLocations = [] } = useStoreLocations(showMultistoreGrUi && showDetailsModal);
   const defaultReceivingStoreId = useMemo(() => {
-    const mainStore = grStoreLocations.find((s) => s.storeType === 'MAIN');
+    // INV-POS: GR without an override must land where POS sells (not MAIN-only).
+    const sellingStore =
+      grStoreLocations.find((s) => s.storeType === 'SELLING' || s.isPosSelling);
     const defaultReceiving = grStoreLocations.find((s) => s.isDefaultReceiving);
-    return (mainStore ?? defaultReceiving)?.id ?? '';
+    const mainStore = grStoreLocations.find((s) => s.storeType === 'MAIN');
+    return (sellingStore ?? defaultReceiving ?? mainStore)?.id ?? '';
   }, [grStoreLocations]);
   const grDestinationStores = useMemo(
     () =>

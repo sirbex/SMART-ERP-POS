@@ -5,12 +5,20 @@ import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { storeLocationRepository } from '../inventory/warehouse/storeLocationRepository.js';
 import { clearMultistoreSettingsCache } from '../inventory/warehouse/multistoreSettings.js';
+import { multistoreSellableBackfillService } from '../inventory/warehouse/multistoreSellableBackfillService.js';
 
 export interface MultistoreToggleResult {
     settings: SystemSettings;
     multistoreBootstrap?: {
         enabled: boolean;
         storesEnsured: boolean;
+        posSellableBackfill?: {
+            lotsCreated: number;
+            balancesSeeded: number;
+            unitsMovedMainToSelling: number;
+            unitsSeededOnSelling: number;
+            batchesProcessed: number;
+        };
     };
 }
 
@@ -61,9 +69,16 @@ export const systemSettingsService = {
                 clearMultistoreSettingsCache();
                 if (updates.isMultistoreEnabled) {
                     await storeLocationRepository.ensureDefaultNetworkStores(client);
-                    multistoreBootstrap = { enabled: true, storesEnsured: true };
-                    logger.info('Multistore enabled — default store network ensured', {
+                    const posSellableBackfill =
+                        await multistoreSellableBackfillService.ensurePosSellableFromBatches(client);
+                    multistoreBootstrap = {
+                        enabled: true,
+                        storesEnsured: true,
+                        posSellableBackfill,
+                    };
+                    logger.info('Multistore enabled — store network + POS sellable backfill', {
                         updatedBy: userId,
+                        posSellableBackfill,
                     });
                 } else {
                     multistoreBootstrap = { enabled: false, storesEnsured: false };

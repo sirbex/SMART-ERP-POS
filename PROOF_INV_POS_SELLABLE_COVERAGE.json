@@ -1,0 +1,49 @@
+{
+  "feature": "INV_POS_SELLABLE_COVERAGE",
+  "verdict": "PASS",
+  "passed": 8,
+  "total": 8,
+  "gates": [
+    {
+      "id": "RESOLVE_DEFAULT_SELLING",
+      "ok": true,
+      "detail": "Implicit GR allocate prefers POS SELLING via shared resolver"
+    },
+    {
+      "id": "OPENING_ALLOCATES",
+      "ok": true,
+      "detail": "Opening balance allocates to store balances under multistore"
+    },
+    {
+      "id": "ENABLE_BACKFILL",
+      "ok": true,
+      "detail": "Enabling multistore runs POS sellable backfill"
+    },
+    {
+      "id": "BACKFILL_MOVES_MAIN",
+      "ok": true,
+      "detail": "Backfill moves MAIN→SELLING and asserts INV-POS"
+    },
+    {
+      "id": "COVERAGE_REASONS",
+      "ok": true,
+      "detail": "INV-POS gap detector + projection assert exist"
+    },
+    {
+      "id": "COUPLING_WIRES_POS",
+      "ok": true,
+      "detail": "Warehouse coupling asserts POS projection gaps"
+    },
+    {
+      "id": "UI_STOCK_DEFAULT_SELLING",
+      "ok": true,
+      "detail": "Stock Levels by-store defaults to SELLING"
+    },
+    {
+      "id": "UI_GR_DEFAULT_SELLING",
+      "ok": true,
+      "detail": "Goods Receipt default destination is SELLING"
+    }
+  ],
+  "generatedAt": "2026-08-27T21:51:41.046Z"
+}

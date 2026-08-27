@@ -118,9 +118,11 @@ export default function StockLevelsPage() {
 
   useEffect(() => {
     if (!useMultistoreStock || storeFilterId || storeLocations.length === 0) return;
+    // Default to SELLING (same store POS sells from). MAIN is receiving-only —
+    // defaulting there made inventory show stock while POS showed 0.
     const defaultStore =
+      storeLocations.find((s) => s.storeType === 'SELLING' || s.isPosSelling) ||
       storeLocations.find((s) => s.isDefaultReceiving) ||
-      storeLocations.find((s) => s.storeType === 'MAIN') ||
       storeLocations[0];
     if (defaultStore) setStoreFilterId(defaultStore.id);
   }, [useMultistoreStock, storeFilterId, storeLocations]);

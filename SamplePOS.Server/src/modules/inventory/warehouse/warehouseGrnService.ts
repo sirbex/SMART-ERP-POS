@@ -1,8 +1,7 @@
 import type { PoolClient } from 'pg';
 import { isMultistoreEnabled } from './multistoreSettings.js';
-import { storeLocationRepository } from './storeLocationRepository.js';
+import { resolveMultistoreReceiptStoreId } from './multistoreReceiptStore.js';
 import { warehouseInventoryRepository } from './warehouseInventoryRepository.js';
-import { ValidationError } from '../../../middleware/errorHandler.js';
 
 export interface PostGrnReceiptSegmentParams {
     productId: string;
@@ -33,23 +32,10 @@ export const warehouseGrnService = {
             return;
         }
 
-        await storeLocationRepository.ensureDefaultNetworkStores(client);
-
-        let targetStoreId = params.targetStoreLocationId ?? null;
-        if (targetStoreId) {
-            const store = await storeLocationRepository.getById(client, targetStoreId);
-            if (!store || !store.isActive) {
-                throw new ValidationError(`Target store ${targetStoreId} is not active`);
-            }
-        } else {
-            const mainStore = await storeLocationRepository.getDefaultReceivingStore(client);
-            if (!mainStore) {
-                throw new ValidationError(
-                    'Multistore GRN requires a MAIN receiving store. Run store network setup.',
-                );
-            }
-            targetStoreId = mainStore.id;
-        }
+        const targetStoreId = await resolveMultistoreReceiptStoreId(
+            client,
+            params.targetStoreLocationId ?? null,
+        );
 
         await warehouseInventoryRepository.upsertLotAndIncrementBalance(client, {
             storeLocationId: targetStoreId,

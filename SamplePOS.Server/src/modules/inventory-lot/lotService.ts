@@ -34,6 +34,7 @@ import type { MovementType } from '../stock-movements/types.js';
 import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
 import { storeLocationRepository } from '../inventory/warehouse/storeLocationRepository.js';
 import { warehouseInventoryRepository } from '../inventory/warehouse/warehouseInventoryRepository.js';
+import { resolveMultistoreReceiptStoreId } from '../inventory/warehouse/multistoreReceiptStore.js';
 import {
   appendLotExpiryAudit,
   getLotByIdWithClient,
@@ -70,23 +71,10 @@ async function allocateReceivedLotToStore(
 ): Promise<void> {
   if (input.quantity <= 0) return;
 
-  await storeLocationRepository.ensureDefaultNetworkStores(db);
-
-  let targetStoreId = input.targetStoreLocationId ?? null;
-  if (targetStoreId) {
-    const store = await storeLocationRepository.getById(db, targetStoreId);
-    if (!store || !store.isActive) {
-      throw new ValidationError(`Target store ${targetStoreId} is not active`);
-    }
-  } else {
-    const mainStore = await storeLocationRepository.getDefaultReceivingStore(db);
-    if (!mainStore) {
-      throw new ValidationError(
-        'Multistore GRN requires a MAIN receiving store. Run store network setup.',
-      );
-    }
-    targetStoreId = mainStore.id;
-  }
+  const targetStoreId = await resolveMultistoreReceiptStoreId(
+    db,
+    input.targetStoreLocationId ?? null,
+  );
 
   const productLotId = await getProductLotIdByBatchId(db, inventoryBatchId);
   if (!productLotId) {
@@ -470,6 +458,22 @@ export const lotService: ILotService = {
         isBonus: input.isBonus,
         status: 'ACTIVE',
       });
+      // Opening stock must be POS-visible (same INV-POS rule as GR receive).
+      await allocateReceivedLotToStore(
+        db,
+        {
+          productId: input.productId,
+          lotNumber: input.lotNumber,
+          quantity: input.quantity,
+          costPrice: input.costPrice,
+          attributes: input.attributes,
+          goodsReceiptId: input.goodsReceiptId,
+          goodsReceiptItemId: input.goodsReceiptItemId,
+          isBonus: input.isBonus,
+          targetStoreLocationId: input.targetStoreLocationId ?? null,
+        } as LotReceiveInput,
+        lot.id,
+      );
     }
 
     return { lot, skipped: false };

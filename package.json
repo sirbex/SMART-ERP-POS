@@ -90,6 +90,8 @@
     "proof:supplier-invoice-grn-bounds:live": "cd SamplePOS.Server && npx tsx scripts/proof-supplier-invoice-grn-bounds-live.ts",
     "proof:supplier-bill-cancel": "cd SamplePOS.Server && npx vitest run src/modules/supplier-payments/supplierBillCancelEligibility.test.ts src/modules/supplier-payments/supplierInvoiceCancel.evidence.test.ts",
     "proof:supplier-bill-cancel:live": "cd SamplePOS.Server && npx tsx scripts/proof-supplier-bill-cancel-live.ts",
+    "proof:inv-pos-sellable-coverage": "cd SamplePOS.Server && npx vitest run src/modules/inventory/warehouse/posSellableCoverage.evidence.test.ts",
+    "repair:pos-sellable-coverage": "cd SamplePOS.Server && npx tsx scripts/repair-pos-sellable-coverage-all-tenants.ts",
     "proof:loss-quarantine-foundation": "node SamplePOS.Server/scripts/proof-loss-quarantine-foundation.mjs",
     "proof:loss-quarantine-certification": "node SamplePOS.Server/scripts/proof-loss-quarantine-foundation.mjs --strict",
     "ci:vat-remittance-fitness": "node scripts/ci-vat-remittance-fitness.mjs",
