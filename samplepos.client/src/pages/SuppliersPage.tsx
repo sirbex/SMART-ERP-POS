@@ -14,6 +14,7 @@ import { supplierInvoiceService } from '../services/comprehensive-accounting';
 import { formatCurrency } from '../utils/currency';
 import { api } from '../services/api';
 import { handleApiError } from '../utils/errorHandler';
+import { isSupplierBillCancellable } from '@shared/utils/supplierBillCancelEligibility';
 import { downloadFile } from '../utils/download';
 import { useCanAccess } from '../components/auth/ProtectedRoute';
 import SupplierPOItemsInline from '../components/suppliers/SupplierPOItemsInline';
@@ -310,6 +311,7 @@ export default function SuppliersPage() {
   const canManageOpeningBalance = useCanAccess([], ['accounting.opening_balance']);
   const canUpdateSupplier = useCanAccess([], ['suppliers.update']);
   const canDeleteSupplier = useCanAccess([], ['suppliers.delete']);
+  const canCancelBill = useCanAccess([], ['purchasing.cancel_bill']);
 
   // Invoice summary stats for top cards
   const [invoiceSummary, setInvoiceSummary] = useState<{
@@ -1178,6 +1180,7 @@ function SupplierDetailModal({
   const [invoiceDetails, setInvoiceDetails] = useState<InvoiceDetails | null>(null);
   const [loadingInvoiceDetails, setLoadingInvoiceDetails] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null);
+  const [cancellingInvoiceId, setCancellingInvoiceId] = useState<string | null>(null);
   const [loadingTab, setLoadingTab] = useState<string | null>(null);
   const [expandedPOId, setExpandedPOId] = useState<string | null>(null);
 
@@ -1496,6 +1499,28 @@ function SupplierDetailModal({
       console.error('Failed to load invoice details:', error);
     } finally {
       setLoadingInvoiceDetails(false);
+    }
+  };
+
+  const handleCancelInvoice = async (inv: SupplierInvoiceSummary) => {
+    const reason = window.prompt(
+      `Cancel bill ${inv.invoiceNumber}? This reverses the GL entry and lets you rebill from the goods receipt.\n\nReason (required):`,
+    );
+    if (reason === null) return;
+    if (!reason.trim() || reason.trim().length < 3) {
+      window.alert('Cancellation reason is required (min 3 characters)');
+      return;
+    }
+    try {
+      setCancellingInvoiceId(inv.id);
+      await supplierInvoiceService.cancelSupplierInvoice(inv.id, { reason: reason.trim() });
+      setSelectedInvoice(null);
+      setInvoiceDetails(null);
+      await loadInvoices();
+    } catch (error) {
+      handleApiError(error, { fallback: 'Failed to cancel bill' });
+    } finally {
+      setCancellingInvoiceId(null);
     }
   };
 
@@ -2265,6 +2290,7 @@ function SupplierDetailModal({
                                 {invoiceDetails.invoice.dueDate && ` | Due: ${formatDisplayDate(invoiceDetails.invoice.dueDate)}`}
                               </p>
                             </div>
+                            <div className="flex flex-wrap items-center gap-2">
                             <button
                               type="button"
                               onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)}
@@ -2273,6 +2299,23 @@ function SupplierDetailModal({
                             >
                               {downloadingPdf === inv.id ? '⏳ Generating...' : '📄 Export PDF'}
                             </button>
+                            {canCancelBill && isSupplierBillCancellable({
+                              status: inv.status,
+                              documentType: inv.documentType,
+                              invoiceNumber: inv.invoiceNumber,
+                              amountPaid: inv.amountPaid,
+                              creditsApplied: inv.creditsApplied,
+                            }) && (
+                              <button
+                                type="button"
+                                onClick={() => void handleCancelInvoice(inv)}
+                                disabled={cancellingInvoiceId === inv.id}
+                                className="px-3 py-1.5 text-xs bg-white text-red-700 border border-red-300 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50 min-h-[var(--layout-touch-target)]"
+                              >
+                                {cancellingInvoiceId === inv.id ? 'Cancelling…' : 'Cancel bill'}
+                              </button>
+                            )}
+                            </div>
                           </div>
                           <div className="p-4 space-y-4">
                             {invoiceDetails.lineItems && invoiceDetails.lineItems.length > 0 ? (

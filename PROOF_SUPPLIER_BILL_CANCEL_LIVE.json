@@ -1,0 +1,62 @@
+{
+  "feature": "SUPPLIER_BILL_CANCEL",
+  "verdict": "PASS",
+  "startedAt": "2026-08-27T05:57:08.036Z",
+  "finishedAt": "2026-08-27T05:57:08.737Z",
+  "stamp": "20260827055708",
+  "passed": 9,
+  "failed": 0,
+  "gates": [
+    {
+      "id": "USER",
+      "ok": true,
+      "detail": "userId=2201cbde-f130-460a-97f2-d163080c5798"
+    },
+    {
+      "id": "SUPPLIER",
+      "ok": true,
+      "detail": "supplier=VERIFY-OB-TEST-SUP"
+    },
+    {
+      "id": "SEED_PRODUCT",
+      "ok": true,
+      "detail": "sku=SBC-20260827055708"
+    },
+    {
+      "id": "SEED_GR",
+      "ok": true,
+      "detail": "GR-SBC-20260827055708 total=10000"
+    },
+    {
+      "id": "BILL_POSTED",
+      "ok": true,
+      "detail": "invoice=SBILL-2026-0013 total=10000.000000 openGl=1"
+    },
+    {
+      "id": "REJECT_PAID",
+      "ok": true,
+      "detail": "Reverse supplier payments on this bill before cancelling."
+    },
+    {
+      "id": "CANCEL_OK",
+      "ok": true,
+      "detail": "glReversed=true status=Cancelled openGl=0"
+    },
+    {
+      "id": "REBILL_GR",
+      "ok": true,
+      "detail": "rebill=SBILL-2026-0014"
+    },
+    {
+      "id": "REJECT_ALREADY_CANCELLED",
+      "ok": true,
+      "detail": "This bill is already cancelled."
+    }
+  ],
+  "fixtures": {
+    "sku": "SBC-20260827055708",
+    "grNumber": "GR-SBC-20260827055708",
+    "invoiceId": "66a8af07-75ad-4b7d-a81b-e0c8ed11497f",
+    "rebillId": "ff6006b6-feed-4ee0-aa24-7c0a2227a1f7"
+  }
+}

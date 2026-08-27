@@ -617,6 +617,35 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
         })
     );
 
+    const CancelSupplierInvoiceSchema = z.object({
+        reason: z.string().trim().min(3, 'Cancellation reason is required (min 3 characters)'),
+    });
+
+    // Cancel unpaid supplier bill (reverse GL + mark Cancelled — GR can be rebilled)
+    router.post(
+        '/invoices/:id/cancel',
+        requirePermission('purchasing.cancel_bill'),
+        asyncHandler(async (req, res) => {
+            const { id } = UuidParamSchema.parse(req.params);
+            const validated = CancelSupplierInvoiceSchema.parse(req.body);
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({ success: false, error: 'Authentication required' });
+            }
+            const result = await supplierPaymentService.cancelSupplierInvoice(
+                p(req),
+                id,
+                userId,
+                validated.reason,
+            );
+            res.json({
+                success: true,
+                message: `Bill ${result.invoiceNumber} cancelled${result.glReversed ? ' (GL reversed)' : ''}`,
+                data: result,
+            });
+        }),
+    );
+
     // Delete supplier invoice
     router.delete(
         '/invoices/:id',

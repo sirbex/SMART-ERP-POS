@@ -101,6 +101,27 @@ describe('EVIDENCE — Supplier invoice ≤ GRN integrity', () => {
       'API accepts varianceReason on create + from-grn',
     );
     gate(
+      'ROUTES_CANCEL',
+      routes.includes('/invoices/:id/cancel') &&
+        routes.includes("requirePermission('purchasing.cancel_bill')") &&
+        svc.includes('cancelSupplierInvoice'),
+      'cancel unpaid bill route + service wired',
+    );
+    gate(
+      'UI_CANCEL_BILL',
+      ui.includes('purchasing.cancel_bill') &&
+        ui.includes('Cancel bill') &&
+        ui.includes('cancelSupplierInvoice'),
+      'Supplier Payments cancel bill button gated',
+    );
+    gate(
+      'CANCEL_SSOT',
+      svc.includes('supplierBillCancelBlockReason') &&
+        svc.includes('findInvoiceCancelContext') &&
+        read('shared/utils/supplierBillCancelEligibility.ts').includes('creditsApplied'),
+      'Cancel eligibility shared SSOT + server pre-checks',
+    );
+    gate(
       'UI_BLOCK_MANUAL_GR',
       ui.includes('looks like a goods receipt bill') &&
         ui.includes('Goods Receipts → Create Supplier Bill'),

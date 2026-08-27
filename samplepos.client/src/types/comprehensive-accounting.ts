@@ -130,6 +130,8 @@ export interface SupplierInvoice {
     taxAmount: string | Decimal;
     totalAmount: string | Decimal;
     amountPaid: string | Decimal;
+    /** Applied supplier credit notes (SCN) — blocks cancel until unapplied. */
+    creditsApplied?: string | Decimal | number;
     outstandingBalance: string | Decimal;
     status: 'PENDING' | 'APPROVED' | 'PARTIALLY_PAID' | 'PAID' | 'CANCELLED';
     /** SUPPLIER_INVOICE | OPENING_BALANCE | SUPPLIER_DEBIT_NOTE | … */

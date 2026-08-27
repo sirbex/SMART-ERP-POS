@@ -88,6 +88,8 @@
     "proof:soft-quarantine-partial-damage:live": "cd SamplePOS.Server && npx tsx scripts/proof-soft-quarantine-partial-damage-live.ts",
     "proof:supplier-invoice-grn-bounds": "cd SamplePOS.Server && npx vitest run src/modules/supplier-payments/supplierInvoiceGrnValidation.test.ts src/modules/supplier-payments/supplierInvoiceGrnIntegrity.evidence.test.ts",
     "proof:supplier-invoice-grn-bounds:live": "cd SamplePOS.Server && npx tsx scripts/proof-supplier-invoice-grn-bounds-live.ts",
+    "proof:supplier-bill-cancel": "cd SamplePOS.Server && npx vitest run src/modules/supplier-payments/supplierBillCancelEligibility.test.ts src/modules/supplier-payments/supplierInvoiceCancel.evidence.test.ts",
+    "proof:supplier-bill-cancel:live": "cd SamplePOS.Server && npx tsx scripts/proof-supplier-bill-cancel-live.ts",
     "proof:loss-quarantine-foundation": "node SamplePOS.Server/scripts/proof-loss-quarantine-foundation.mjs",
     "proof:loss-quarantine-certification": "node SamplePOS.Server/scripts/proof-loss-quarantine-foundation.mjs --strict",
     "ci:vat-remittance-fitness": "node scripts/ci-vat-remittance-fitness.mjs",

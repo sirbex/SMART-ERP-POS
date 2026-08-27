@@ -309,7 +309,16 @@ export const supplierInvoiceService = {
     async deleteSupplierInvoice(id: string): Promise<ApiResponse<SupplierInvoice>> {
         const response = await supplierApi.delete(`/invoices/${id}`);
         return response.data;
-    }
+    },
+
+    /** Cancel unpaid bill — reverse GL and mark Cancelled so GR can be rebilled. */
+    async cancelSupplierInvoice(
+        id: string,
+        data: { reason: string },
+    ): Promise<ApiResponse<{ invoiceId: string; invoiceNumber: string; glReversed: boolean }>> {
+        const response = await supplierApi.post(`/invoices/${id}/cancel`, data);
+        return response.data;
+    },
 };
 
 /**

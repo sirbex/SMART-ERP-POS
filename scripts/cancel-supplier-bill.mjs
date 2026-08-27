@@ -2,6 +2,7 @@
 /**
  * Cancel a posted supplier bill (reverse GL + mark Cancelled).
  * Uses server cancelSupplierInvoiceForCorrection — safe for duplicate bills.
+ * UI: Accounting → Supplier Payments → Cancel bill (purchasing.cancel_bill).
  *
  * Usage:
  *   node scripts/cancel-supplier-bill.mjs SBILL-2026-0243 [--execute]

@@ -969,6 +969,57 @@ export async function deleteInvoice(client: PoolClient, id: string): Promise<boo
     return result.rowCount !== null && result.rowCount > 0;
 }
 
+/** Cancel-button eligibility context (payments, credits, document type). */
+export async function findInvoiceCancelContext(
+    client: PoolClient,
+    invoiceId: string,
+): Promise<{
+    invoiceNumber: string;
+    status: string;
+    documentType: string | null;
+    amountPaid: number;
+    creditsApplied: number;
+} | null> {
+    const result = await client.query<{
+        invoiceNumber: string;
+        status: string;
+        document_type: string | null;
+        amountPaid: string | number;
+        creditsApplied: string | number;
+    }>(
+        `SELECT si."SupplierInvoiceNumber" AS "invoiceNumber",
+                si."Status" AS status,
+                si.document_type,
+                COALESCE(si."AmountPaid", 0) AS "amountPaid",
+                ${CREDITS_APPLIED_SQL} AS "creditsApplied"
+           FROM supplier_invoices si
+          WHERE si."Id" = $1 AND si.deleted_at IS NULL`,
+        [invoiceId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+        invoiceNumber: row.invoiceNumber,
+        status: row.status,
+        documentType: row.document_type,
+        amountPaid: Number(row.amountPaid) || 0,
+        creditsApplied: Number(row.creditsApplied) || 0,
+    };
+}
+
+export async function countActivePaymentAllocations(
+    client: PoolClient,
+    invoiceId: string,
+): Promise<number> {
+    const result = await client.query<{ count: string }>(
+        `SELECT COUNT(*)::int AS count
+           FROM supplier_payment_allocations
+          WHERE "SupplierInvoiceId" = $1 AND deleted_at IS NULL`,
+        [invoiceId],
+    );
+    return Number(result.rows[0]?.count ?? 0);
+}
+
 // ============================================================
 // PAYMENT ALLOCATION QUERIES
 // ============================================================

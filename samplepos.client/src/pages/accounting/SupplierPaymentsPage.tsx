@@ -55,6 +55,7 @@ import { BUSINESS_TIMEZONE } from '../../utils/businessDate';
 import { toast } from 'react-hot-toast';
 import { SUPPLIER_PAYMENT_METHODS as PAYMENT_METHODS } from '../../constants/paymentMethods';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
+import { isSupplierBillCancellable } from '@shared/utils/supplierBillCancelEligibility';
 // SINGLE SOURCE OF TRUTH: Use the same useSuppliers hook as SuppliersPage
 import { useSuppliers } from '../../hooks/useSuppliers';
 import { useBankAccounts } from '../../hooks/useBanking';
@@ -135,6 +136,7 @@ const SupplierPaymentsPage: React.FC = () => {
         );
     }, [whtTypesRaw]);
     const canCreateBill = useCanAccess([], ['purchasing.create']);
+    const canCancelBill = useCanAccess([], ['purchasing.cancel_bill']);
     const canManageOpeningBalance = useCanAccess([], ['accounting.opening_balance']);
     const { data: bankAccounts = [] } = useBankAccounts();
     const payFromAccounts = useMemo(() => filterPayFromAccounts(bankAccounts), [bankAccounts]);
@@ -183,6 +185,7 @@ const SupplierPaymentsPage: React.FC = () => {
     const [correctReason, setCorrectReason] = useState('');
     const [correctingPayment, setCorrectingPayment] = useState(false);
     const [reversingPaymentId, setReversingPaymentId] = useState<string | null>(null);
+    const [cancellingBillId, setCancellingBillId] = useState<string | null>(null);
     const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
     const [adjustInvoice, setAdjustInvoice] = useState<{ id: string; invoiceNumber: string } | null>(null);
 
@@ -1009,6 +1012,49 @@ const SupplierPaymentsPage: React.FC = () => {
         }
     };
 
+    const handleCancelBill = async (bill: SupplierInvoice) => {
+        const reason = window.prompt(
+            `Cancel bill ${bill.invoiceNumber}? This reverses the GL entry and lets you rebill from the goods receipt.\n\nReason (required):`,
+        );
+        if (reason === null) return;
+        if (!reason.trim() || reason.trim().length < 3) {
+            toast.error('Cancellation reason is required (min 3 characters)');
+            return;
+        }
+        try {
+            setCancellingBillId(bill.id);
+            const response = await supplierInvoiceService.cancelSupplierInvoice(bill.id, {
+                reason: reason.trim(),
+            });
+            toast.success(
+                (response as { message?: string }).message ||
+                    `Cancelled ${bill.invoiceNumber}. Rebill from Goods Receipts when ready.`,
+            );
+            await loadBills();
+            try {
+                setInvoiceSummary(await supplierInvoiceService.getInvoiceSummary());
+            } catch (summaryError: unknown) {
+                const summaryMsg =
+                    summaryError instanceof AxiosError
+                        ? (summaryError.response?.data as { error?: string })?.error
+                        : summaryError instanceof Error
+                          ? summaryError.message
+                          : 'Summary refresh failed';
+                toast.error(`Bill cancelled, but summary refresh failed: ${summaryMsg}`);
+            }
+        } catch (error: unknown) {
+            const errMsg =
+                error instanceof AxiosError
+                    ? (error.response?.data as { error?: string })?.error
+                    : error instanceof Error
+                      ? error.message
+                      : undefined;
+            toast.error(errMsg || 'Failed to cancel bill');
+        } finally {
+            setCancellingBillId(null);
+        }
+    };
+
     const handleAutoAllocate = async () => {
         if (!selectedPayment) return;
 
@@ -1659,6 +1705,23 @@ const SupplierPaymentsPage: React.FC = () => {
                                                         onClick={() => setAdjustInvoice({ id: bill.id, invoiceNumber: bill.invoiceNumber ?? '' })}
                                                     >
                                                         Adjust
+                                                    </Button>
+                                                )}
+                                                {canCancelBill && isSupplierBillCancellable({
+                                                    status: bill.status,
+                                                    documentType: bill.documentType,
+                                                    invoiceNumber: bill.invoiceNumber,
+                                                    amountPaid: bill.amountPaid,
+                                                    creditsApplied: bill.creditsApplied,
+                                                }) && (
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        disabled={cancellingBillId === bill.id}
+                                                        onClick={() => void handleCancelBill(bill)}
+                                                        className="text-red-700 border-red-300 hover:bg-red-50"
+                                                    >
+                                                        {cancellingBillId === bill.id ? 'Cancelling…' : 'Cancel bill'}
                                                     </Button>
                                                 )}
                                             </div>

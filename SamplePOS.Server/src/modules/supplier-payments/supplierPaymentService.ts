@@ -28,6 +28,10 @@ import {
     validateSupplierInvoiceGrnVariance,
 } from './supplierInvoiceGrnValidation.js';
 import {
+    isSupplierBillCancellable,
+    supplierBillCancelBlockReason,
+} from '../../../../shared/utils/supplierBillCancelEligibility.js';
+import {
     resolveSupplierPaymentCreditAccount,
     paymentMethodFromLiquidityTag,
 } from './supplierPaymentPayFrom.js';
@@ -2175,7 +2179,62 @@ export type CancelSupplierInvoiceForCorrectionOptions = {
     grnId?: string;
     /** SAP/Odoo: unapply payment allocations before reversing the bill (reassignment wizard). */
     unallocatePaymentsFirst?: boolean;
+    /** GL audit tag — USER_CANCEL for UI cancel; default REASSIGN GR for wizard. */
+    glReasonTag?: 'USER_CANCEL' | 'REASSIGN GR';
 };
+
+/**
+ * Cancel an unpaid supplier bill from the UI (admin/manager).
+ * Reverses posted GL and marks Cancelled so linked GRNs can be rebilled.
+ */
+export async function cancelSupplierInvoice(
+    pool: Pool,
+    invoiceId: string,
+    userId: string,
+    reason: string,
+): Promise<{ invoiceId: string; invoiceNumber: string; glReversed: boolean }> {
+    const trimmed = reason?.trim() ?? '';
+    if (trimmed.length < 3) {
+        throw new ValidationError('Cancellation reason is required (min 3 characters)');
+    }
+
+    return UnitOfWork.run(pool, async (client) => {
+        const row = await supplierPaymentRepository.findInvoiceCancelContext(client, invoiceId);
+        if (!row) {
+            throw new ValidationError('Supplier invoice not found');
+        }
+
+        const blockReason = supplierBillCancelBlockReason({
+            status: row.status,
+            documentType: row.documentType,
+            invoiceNumber: row.invoiceNumber,
+            amountPaid: row.amountPaid,
+            creditsApplied: row.creditsApplied,
+        });
+        if (blockReason) {
+            throw new ValidationError(blockReason);
+        }
+
+        if (!isSupplierBillCancellable(row)) {
+            throw new ValidationError('This bill cannot be cancelled.');
+        }
+
+        const allocCount = await supplierPaymentRepository.countActivePaymentAllocations(
+            client,
+            invoiceId,
+        );
+        if (allocCount > 0) {
+            throw new ValidationError(
+                'Remove payment allocations on this bill before cancelling (reverse the payment first).',
+            );
+        }
+
+        return cancelSupplierInvoiceForCorrection(pool, invoiceId, userId, trimmed, {
+            client,
+            glReasonTag: 'USER_CANCEL',
+        });
+    });
+}
 
 /**
  * Cancel an unpaid supplier invoice for correction workflows (SAP/Odoo: reverse vendor bill).
@@ -2259,12 +2318,13 @@ export async function cancelSupplierInvoiceForCorrection(
 
             if (glTxn.rows[0]) {
                 const suffix = options?.grnId ? `-${options.grnId}` : '';
+                const tag = options?.glReasonTag ?? 'REASSIGN GR';
                 try {
                     await AccountingCore.reverseTransaction(
                         {
                             originalTransactionId: glTxn.rows[0].Id,
                             reversalDate: getBusinessDate(),
-                            reason: `REASSIGN GR: cancel ${inv.SupplierInvoiceNumber}: ${reason.trim()}`,
+                            reason: `${tag}: cancel ${inv.SupplierInvoiceNumber}: ${reason.trim()}`,
                             userId,
                             idempotencyKey: `SUPPLIER_INV_CANCEL-${invoiceId}${suffix}`,
                         },
@@ -2279,6 +2339,25 @@ export async function cancelSupplierInvoiceForCorrection(
                         throw error;
                     }
                 }
+            }
+
+            const openGl = await client.query<{ n: string }>(
+                `SELECT COUNT(*)::int AS n
+                   FROM ledger_transactions
+                  WHERE "ReferenceType" = 'SUPPLIER_INVOICE'
+                    AND "ReferenceId" = $1
+                    AND "IsReversed" = FALSE
+                    AND "Status" = 'POSTED'`,
+                [invoiceId],
+            );
+            const openCount = Number(openGl.rows[0]?.n ?? 0);
+            if (openCount > 0) {
+                throw new ValidationError(
+                    `Cannot cancel ${inv.SupplierInvoiceNumber}: ${openCount} open GL posting(s) remain — reversal incomplete.`,
+                );
+            }
+            if (inv.is_posted_to_gl) {
+                glReversed = true;
             }
         }
 

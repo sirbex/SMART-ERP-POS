@@ -1,0 +1,84 @@
+{
+  "feature": "SUPPLIER_BILL_CANCEL",
+  "verdict": "PASS",
+  "gateCount": 14,
+  "passed": 14,
+  "failed": 0,
+  "gates": [
+    {
+      "id": "SSOT_OPEN",
+      "ok": true,
+      "detail": "unpaid bill cancellable"
+    },
+    {
+      "id": "SSOT_PAID",
+      "ok": true,
+      "detail": "paid bill blocked with message"
+    },
+    {
+      "id": "SSOT_CREDITS",
+      "ok": true,
+      "detail": "credits block cancel"
+    },
+    {
+      "id": "API_ROUTE",
+      "ok": true,
+      "detail": "POST cancel route + permission"
+    },
+    {
+      "id": "SERVICE_PRECHECK",
+      "ok": true,
+      "detail": "server pre-checks before GL reverse"
+    },
+    {
+      "id": "GL_NO_DISCREPANCY",
+      "ok": true,
+      "detail": "throws if open SUPPLIER_INVOICE GL remains after cancel attempt"
+    },
+    {
+      "id": "REPO_CREDITS",
+      "ok": true,
+      "detail": "cancel context includes applied SCN credits"
+    },
+    {
+      "id": "UI_PAYMENTS",
+      "ok": true,
+      "detail": "Supplier Payments cancel button + shared SSOT"
+    },
+    {
+      "id": "UI_SUPPLIERS",
+      "ok": true,
+      "detail": "Suppliers invoice detail cancel"
+    },
+    {
+      "id": "NO_SWALLOW_SUMMARY",
+      "ok": true,
+      "detail": "no silent catch on post-cancel summary refresh"
+    },
+    {
+      "id": "CANCEL_ERRORS_SURFACE",
+      "ok": true,
+      "detail": "cancel + summary errors surfaced to user"
+    },
+    {
+      "id": "SHARED_SSOT",
+      "ok": true,
+      "detail": "shared eligibility includes credits"
+    },
+    {
+      "id": "ARTIFACT_WRITTEN",
+      "ok": true,
+      "detail": "preparing PROOF_SUPPLIER_BILL_CANCEL.json"
+    },
+    {
+      "id": "LIVE_PROOF_PASS",
+      "ok": true,
+      "detail": "live verdict=PASS"
+    }
+  ],
+  "liveProof": {
+    "ran": true,
+    "verdict": "PASS"
+  },
+  "generatedAt": "2026-08-27T05:56:49.002Z"
+}

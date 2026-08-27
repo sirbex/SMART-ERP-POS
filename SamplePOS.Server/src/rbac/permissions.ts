@@ -76,6 +76,12 @@ export const PERMISSIONS: Record<string, Permission> = {
   PURCHASING_DELETE: p('purchasing.delete', 'purchasing', 'delete', 'Delete purchase orders'),
   PURCHASING_APPROVE: p('purchasing.approve', 'purchasing', 'approve', 'Approve purchase orders'),
   PURCHASING_POST: p('purchasing.post', 'purchasing', 'post', 'Post goods receipts'),
+  PURCHASING_CANCEL_BILL: p(
+    'purchasing.cancel_bill',
+    'purchasing',
+    'cancel',
+    'Cancel unpaid supplier bills (reverse GL so GR can be rebilled)',
+  ),
 
   CUSTOMERS_READ: p('customers.read', 'customers', 'read', 'View customers'),
   CUSTOMERS_CREATE: p('customers.create', 'customers', 'create', 'Create customers'),

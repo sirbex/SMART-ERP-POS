@@ -50,6 +50,7 @@ const BACKEND_TO_LEGACY: Record<string, Permission> = {
     'purchasing.create': Permission.CREATE_PURCHASE_ORDERS,
     'purchasing.update': Permission.EDIT_PURCHASE_ORDERS,
     'purchasing.approve': Permission.APPROVE_PURCHASE_ORDERS,
+    'purchasing.cancel_bill': Permission.EDIT_PURCHASE_ORDERS,
     'purchasing.post': Permission.RECEIVE_GOODS,
     // Customers (granular: create ≠ update/delete)
     'customers.read': Permission.VIEW_CUSTOMERS,
