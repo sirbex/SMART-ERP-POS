@@ -8,6 +8,7 @@ import POSModal from '../../components/pos/POSModal';
 import { AdaptiveAppShell, AdaptiveScanner, useAdaptiveWorkspaceOptional } from '../../components/adaptive';
 import { useLayoutTier } from '../../hooks/useLayoutTier';
 import { shouldShowCoach } from '../../lib/adaptiveChrome';
+import { registerSessionResume } from '../../lib/sessionResumeCoordinator';
 import { POS_ADAPTIVE_CLASSES, POS_CART_COL_WIDTHS_COMPACT, POS_CART_COL_WIDTHS_FULL } from '../../lib/posAdaptiveLayout';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { PosCartCompactLine } from '../../components/pos/PosCartCompactLine';
@@ -760,9 +761,9 @@ export default function POSPage() {
         console.warn('[POSPage] system-settings taxInclusive load failed', err);
       });
 
-    // Refresh when returning to POS so Custom Receipt Note / accounts / auto-print stay current
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') {
+    // Refresh when returning to POS — deferred via resume coordinator (after auth refresh).
+    const unregisterResume = registerSessionResume(
+      () => {
         fetchInvoiceSettings();
         loadPrintConfig();
         void refreshTaxSnapshot().then(() => setTaxSnapshotRev((n) => n + 1));
@@ -775,10 +776,10 @@ export default function POSPage() {
             }
           })
           .catch(() => undefined);
-      }
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
+      },
+      { phase: 'after', delayMs: 900 },
+    );
+    return () => unregisterResume();
   }, []);
 
   // Re-sync catalog when coming back online

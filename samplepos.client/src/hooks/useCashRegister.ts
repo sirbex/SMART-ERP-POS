@@ -182,10 +182,10 @@ export function useCurrentSession() {
         },
         // Poll every 15s online; stop polling offline (localStorage is used)
         refetchInterval: isOnline ? 15_000 : false,
-        // Always refetch on mount/focus — never treat cached data as fresh
-        staleTime: 0,
+        staleTime: 30_000,
         refetchOnMount: 'always',
-        refetchOnWindowFocus: 'always',
+        // Resume coordinator + interval polling — avoid focus refetch storms after idle.
+        refetchOnWindowFocus: false,
         // On network errors, keep showing the last successful data
         retry: 2,
         retryDelay: 2000,

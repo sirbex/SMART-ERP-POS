@@ -1,0 +1,203 @@
+{
+  "invariantId": "INVARIANT_SESSION_RESUME_INTEGRITY_v1",
+  "at": "2026-08-28T05:57:58.389Z",
+  "purpose": "Permanent guarantee: tab resume after idle must not freeze UI, ignore first click, or storm APIs",
+  "summary": {
+    "pass": 37,
+    "fail": 0,
+    "total": 37,
+    "verdict": "PASS"
+  },
+  "gates": [
+    {
+      "id": "TOKEN_src_lib_sessionResumeCoordinator_ts",
+      "ok": true,
+      "detail": "src/lib/sessionResumeCoordinator.ts embeds INVARIANT_SESSION_RESUME_INTEGRITY_v1"
+    },
+    {
+      "id": "TOKEN_src_contexts_AuthContext_tsx",
+      "ok": true,
+      "detail": "src/contexts/AuthContext.tsx embeds INVARIANT_SESSION_RESUME_INTEGRITY_v1"
+    },
+    {
+      "id": "TOKEN_src_lib_offlineRequestQueue_ts",
+      "ok": true,
+      "detail": "src/lib/offlineRequestQueue.ts embeds INVARIANT_SESSION_RESUME_INTEGRITY_v1"
+    },
+    {
+      "id": "REQ_sessionResumeCoordinator.ts_INVARIANT_SESSION_RESUME",
+      "ok": true,
+      "detail": "src/lib/sessionResumeCoordinator.ts contains \"INVARIANT_SESSION_RESUME_INTEGRITY_v1\""
+    },
+    {
+      "id": "REQ_sessionResumeCoordinator.ts_export_function_register",
+      "ok": true,
+      "detail": "src/lib/sessionResumeCoordinator.ts contains \"export function registerSessionResume\""
+    },
+    {
+      "id": "REQ_sessionResumeCoordinator.ts_export_async_function_ru",
+      "ok": true,
+      "detail": "src/lib/sessionResumeCoordinator.ts contains \"export async function runSessionResume\""
+    },
+    {
+      "id": "REQ_sessionResumeCoordinator.ts_export_function_setupSes",
+      "ok": true,
+      "detail": "src/lib/sessionResumeCoordinator.ts contains \"export function setupSessionResumeAuth\""
+    },
+    {
+      "id": "REQ_sessionResumeCoordinator.ts_phase_auth_",
+      "ok": true,
+      "detail": "src/lib/sessionResumeCoordinator.ts contains \"phase: 'auth'\""
+    },
+    {
+      "id": "REQ_AuthContext.tsx_INVARIANT_SESSION_RESUME",
+      "ok": true,
+      "detail": "src/contexts/AuthContext.tsx contains \"INVARIANT_SESSION_RESUME_INTEGRITY_v1\""
+    },
+    {
+      "id": "REQ_AuthContext.tsx_setupSessionResumeAuth",
+      "ok": true,
+      "detail": "src/contexts/AuthContext.tsx contains \"setupSessionResumeAuth\""
+    },
+    {
+      "id": "REQ_AuthContext.tsx_event_type_TOKEN_RE",
+      "ok": true,
+      "detail": "src/contexts/AuthContext.tsx contains \"event.type === 'TOKEN_REFRESH'\""
+    },
+    {
+      "id": "REQ_AuthContext.tsx_resetAuthState_",
+      "ok": true,
+      "detail": "src/contexts/AuthContext.tsx contains \"resetAuthState()\""
+    },
+    {
+      "id": "REQ_AuthContext.tsx_isAuthenticatedRef",
+      "ok": true,
+      "detail": "src/contexts/AuthContext.tsx contains \"isAuthenticatedRef\""
+    },
+    {
+      "id": "REQ_AuthContext.tsx_event_key_auth_toke",
+      "ok": true,
+      "detail": "src/contexts/AuthContext.tsx contains \"event.key === 'auth_token'\""
+    },
+    {
+      "id": "REQ_AuthContext.tsx_resetAuthState_",
+      "ok": true,
+      "detail": "src/contexts/AuthContext.tsx contains \"resetAuthState();\""
+    },
+    {
+      "id": "REQ_offlineRequestQueue.ts_registerSessionResume",
+      "ok": true,
+      "detail": "src/lib/offlineRequestQueue.ts contains \"registerSessionResume\""
+    },
+    {
+      "id": "REQ_offlineRequestQueue.ts_phase_after_",
+      "ok": true,
+      "detail": "src/lib/offlineRequestQueue.ts contains \"phase: 'after'\""
+    },
+    {
+      "id": "REQ_POSPage.tsx_registerSessionResume",
+      "ok": true,
+      "detail": "src/pages/pos/POSPage.tsx contains \"registerSessionResume\""
+    },
+    {
+      "id": "REQ_POSPage.tsx_phase_after_",
+      "ok": true,
+      "detail": "src/pages/pos/POSPage.tsx contains \"phase: 'after'\""
+    },
+    {
+      "id": "REQ_OfflineContext.tsx_registerSessionResume",
+      "ok": true,
+      "detail": "src/contexts/OfflineContext.tsx contains \"registerSessionResume\""
+    },
+    {
+      "id": "REQ_OfflineContext.tsx_phase_after_",
+      "ok": true,
+      "detail": "src/contexts/OfflineContext.tsx contains \"phase: 'after'\""
+    },
+    {
+      "id": "REQ_useSessionKeepalive.ts_registerSessionResume",
+      "ok": true,
+      "detail": "src/hooks/useSessionKeepalive.ts contains \"registerSessionResume\""
+    },
+    {
+      "id": "REQ_useCashRegister.ts_refetchOnWindowFocus_fa",
+      "ok": true,
+      "detail": "src/hooks/useCashRegister.ts contains \"refetchOnWindowFocus: false\""
+    },
+    {
+      "id": "REQ_useMultistore.ts_refetchOnWindowFocus_fa",
+      "ok": true,
+      "detail": "src/hooks/useMultistore.ts contains \"refetchOnWindowFocus: false\""
+    },
+    {
+      "id": "VISIBILITY_SSOT_NO_OFFENDERS",
+      "ok": true,
+      "detail": "only src/lib/sessionResumeCoordinator.ts, src/hooks/useIdleTimeout.ts may listen"
+    },
+    {
+      "id": "VISIBILITY_SSOT_sessionResumeCoordinator.ts",
+      "ok": true,
+      "detail": "src/lib/sessionResumeCoordinator.ts registers visibilitychange"
+    },
+    {
+      "id": "VISIBILITY_SSOT_useIdleTimeout.ts",
+      "ok": true,
+      "detail": "src/hooks/useIdleTimeout.ts registers visibilitychange"
+    },
+    {
+      "id": "AUTHCTX_STORAGE_USER_ONLY_INIT",
+      "ok": true,
+      "detail": "user key triggers initAuth"
+    },
+    {
+      "id": "AUTHCTX_STORAGE_TOKEN_NARROW",
+      "ok": true,
+      "detail": "auth_token rotation resets state without full initAuth when already authenticated"
+    },
+    {
+      "id": "AUTHCTX_TOKEN_REFRESH_BROADCAST",
+      "ok": true,
+      "detail": "peer TOKEN_REFRESH unblocks waiters"
+    },
+    {
+      "id": "FORBIDDEN_refetchOnWindowFocus_always_",
+      "ok": true,
+      "detail": "must not contain \"refetchOnWindowFocus: 'always'\""
+    },
+    {
+      "id": "FORBIDDEN_refetchOnWindowFocus_true",
+      "ok": true,
+      "detail": "must not contain \"refetchOnWindowFocus: true\""
+    },
+    {
+      "id": "FORBIDDEN_document_addEventListener_visibilit",
+      "ok": true,
+      "detail": "must not contain \"document.addEventListener('visibilitychange'\""
+    },
+    {
+      "id": "FORBIDDEN_document_removeEventListener_visibi",
+      "ok": true,
+      "detail": "must not contain \"document.removeEventListener('visibilitychange'\""
+    },
+    {
+      "id": "LOCK_MODULE_PRESENT",
+      "ok": true,
+      "detail": "sessionResumeIntegrityInvariant.ts present"
+    },
+    {
+      "id": "PROOF_TEST_PRESENT",
+      "ok": true,
+      "detail": "behavioral proof test present"
+    },
+    {
+      "id": "COORDINATOR_MODULE_PRESENT",
+      "ok": true,
+      "detail": "sessionResumeCoordinator.ts present"
+    }
+  ],
+  "enforcement": {
+    "npm": "npm run proof:session-resume-integrity --prefix samplepos.client",
+    "rootRunner": "node scripts/proof-session-resume-integrity.mjs",
+    "hardFail": true
+  }
+}

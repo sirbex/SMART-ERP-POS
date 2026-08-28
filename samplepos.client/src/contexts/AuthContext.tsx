@@ -7,6 +7,8 @@ import { useSessionKeepalive } from '../hooks/useSessionKeepalive';
 import { useGlobalSessionActivity } from '../hooks/useGlobalSessionActivity';
 import { setupAuthBroadcastListener, onAuthBroadcast, broadcastAuthEvent } from '../lib/authBroadcast';
 import { setupOfflineQueueAutoFlush } from '../lib/offlineRequestQueue';
+import { setupSessionResumeAuth } from '../lib/sessionResumeCoordinator';
+// INVARIANT_SESSION_RESUME_INTEGRITY_v1 — proactive tab-resume auth + TOKEN_REFRESH peer sync
 import { isUserActiveOrGuarded, isTransactionGuardActive } from '../lib/sessionActivity';
 import {
   shouldPerformIdleLogout,
@@ -112,12 +114,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [permissionKeys, setPermissionKeys] = useState<string[]>([]);
   const [rbacRoleNames, setRbacRoleNames] = useState<string[]>([]);
   const pendingIdleLogoutRef = useRef(false);
+  const isAuthenticatedRef = useRef(false);
   // Idle auto-logout: 60 minutes with no deliberate keyboard/mouse/touch (SSOT).
   // SHARED vs PERSONAL share the same window; walk-up security is actor-lock + cold-start PIN.
   const IDLE_TIMEOUT_MS = idleTimeoutMsForMode(getDeviceSessionMode());
 
   // Global activity — all modules/tabs (enterprise SSOT; independent of idle/guard)
   useGlobalSessionActivity(isAuthenticated);
+
+  useEffect(() => {
+    isAuthenticatedRef.current = isAuthenticated;
+  }, [isAuthenticated]);
 
   // Proactive token refresh during long data-entry sessions (any module)
   useSessionKeepalive(isAuthenticated);
@@ -280,7 +287,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Re-running initAuth on same-tab `auth-changed` re-applied SHARED cold-start
     // and bounced fresh logins to /quick-login (login → instant logout).
     const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === 'auth_token' || event.key === 'user') {
+      if (event.key === 'user') {
+        void initAuth();
+        return;
+      }
+      if (event.key === 'auth_token') {
+        // Peer tab token rotation — skip heavy profile re-init (was freezing UI).
+        if (event.newValue && isAuthenticatedRef.current) {
+          resetAuthState();
+          return;
+        }
         void initAuth();
       }
     };
@@ -316,8 +332,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (!isAuthRecoveryPath(window.location.pathname)) {
           window.location.replace(`${window.location.origin}/login`);
         }
+        return;
+      }
+      if (event.type === 'TOKEN_REFRESH') {
+        // Peer refreshed — localStorage already has fresh tokens; unblock waiters.
+        resetAuthState();
       }
     });
+
+    const cleanupSessionResume = setupSessionResumeAuth(); // INVARIANT_SESSION_RESUME_INTEGRITY_v1
 
     // ── Offline queue: auto-flush pending mutations when connectivity returns ──
     const cleanupOfflineQueue = setupOfflineQueueAutoFlush(apiClient);
@@ -327,6 +350,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       cleanupBroadcastListener();
       unsubscribeBroadcast();
       cleanupOfflineQueue();
+      cleanupSessionResume();
     };
   }, []);
 

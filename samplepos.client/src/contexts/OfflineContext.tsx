@@ -13,6 +13,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import apiClient from '../utils/api';
+import { registerSessionResume } from '../lib/sessionResumeCoordinator';
 import {
   putProducts,
   putStockLevels,
@@ -113,7 +114,6 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isOnline) return;
 
-    // Check if caches are stale and prewarm in background
     const checkAndWarm = async () => {
       const productSync = await getLastSync(STORES.PRODUCTS);
       const stockSync = await getLastSync(STORES.STOCK_LEVELS);
@@ -131,6 +131,28 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
     const timer = setTimeout(checkAndWarm, 3000);
     return () => clearTimeout(timer);
   }, [isOnline, prewarmCache]);
+
+  // Tab resume: defer heavy prewarm until auth refresh completes (matches ~10 min stale).
+  useEffect(() => {
+    const unregister = registerSessionResume(
+      () => {
+        if (!navigator.onLine) return;
+        void (async () => {
+          const productSync = await getLastSync(STORES.PRODUCTS);
+          const stockSync = await getLastSync(STORES.STOCK_LEVELS);
+          const now = Date.now();
+          if (
+            now - productSync > STALE_THRESHOLD ||
+            now - stockSync > STALE_THRESHOLD
+          ) {
+            prewarmCache();
+          }
+        })();
+      },
+      { phase: 'after', delayMs: 2500 },
+    );
+    return unregister;
+  }, [prewarmCache]);
 
   return (
     <OfflineContext.Provider

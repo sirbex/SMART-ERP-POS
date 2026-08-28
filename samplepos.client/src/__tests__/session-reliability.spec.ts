@@ -975,3 +975,57 @@ describe('Enterprise reliability — integration smoke tests', () => {
         expect(offlineQueueSize()).toBe(1); // still there, ready to flush
     });
 });
+
+// ─── sessionResumeCoordinator — visibility resume ordering ────────────────────
+import {
+    registerSessionResume,
+    runSessionResume,
+    resetSessionResumeCoordinatorForTests,
+} from '../lib/sessionResumeCoordinator';
+
+describe('sessionResumeCoordinator — phased resume', () => {
+    beforeEach(() => {
+        resetSessionResumeCoordinatorForTests();
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        resetSessionResumeCoordinatorForTests();
+        vi.useRealTimers();
+    });
+
+    it('runs auth phase before after phase', async () => {
+        const log: string[] = [];
+        registerSessionResume(() => { log.push('auth'); }, { phase: 'auth' });
+        registerSessionResume(() => { log.push('after-0'); }, { phase: 'after', delayMs: 0 });
+        registerSessionResume(() => { log.push('after-500'); }, { phase: 'after', delayMs: 500 });
+
+        const run = runSessionResume();
+        await vi.runAllTimersAsync();
+        await run;
+
+        expect(log.indexOf('auth')).toBeLessThan(log.indexOf('after-0'));
+        expect(log.indexOf('after-0')).toBeLessThan(log.indexOf('after-500'));
+    });
+
+    it('dedupes concurrent runSessionResume calls', async () => {
+        let count = 0;
+        registerSessionResume(() => { count += 1; }, { phase: 'auth' });
+
+        const p1 = runSessionResume();
+        const p2 = runSessionResume();
+        await vi.runAllTimersAsync();
+        await Promise.all([p1, p2]);
+
+        expect(count).toBe(1);
+    });
+
+    it('unsubscribe stops callback from running', async () => {
+        let count = 0;
+        const unsub = registerSessionResume(() => { count += 1; }, { phase: 'auth' });
+        unsub();
+
+        await runSessionResume();
+        expect(count).toBe(0);
+    });
+});

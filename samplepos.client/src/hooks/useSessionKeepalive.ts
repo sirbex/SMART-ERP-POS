@@ -19,6 +19,7 @@ import {
 } from './useTokenRefresh';
 import { shouldKeepSessionAlive, touchSessionActivity, ACTIVE_SESSION_WINDOW_MS } from '../lib/sessionActivity';
 import { getAuthState } from '../lib/authStateMachine';
+import { registerSessionResume } from '../lib/sessionResumeCoordinator';
 
 /** Check every 4 minutes; refresh if token expires within 5 minutes. */
 const KEEPALIVE_INTERVAL_MS = 4 * 60 * 1000;
@@ -62,9 +63,15 @@ export function useSessionKeepalive(enabled: boolean): void {
       void tick();
     }, KEEPALIVE_INTERVAL_MS);
 
+    // Background tabs throttle setInterval — also tick on coordinated tab resume.
+    const unregisterResume = registerSessionResume(() => tick(), { phase: 'after', delayMs: 200 });
+
     // Run once soon after mount when resuming a long form session
     void tick();
 
-    return () => window.clearInterval(id);
+    return () => {
+      window.clearInterval(id);
+      unregisterResume();
+    };
   }, [enabled]);
 }

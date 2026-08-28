@@ -18,7 +18,9 @@
  * Replay is triggered by:
  *   - window 'online' event
  *   - Successful token refresh
- *   - Tab becoming visible (visibilitychange)
+ *   - Tab becoming visible (session resume coordinator, after auth)
+ *
+ * INVARIANT_SESSION_RESUME_INTEGRITY_v1
  *
  * Usage:
  *   // In axios response interceptor (network error on mutation):
@@ -29,6 +31,7 @@
  */
 
 import type { AxiosInstance } from 'axios';
+import { registerSessionResume } from './sessionResumeCoordinator';
 
 // ── Constants ─────────────────────────────────────────────────
 const QUEUE_KEY = 'smarterp_offline_queue';
@@ -175,19 +178,22 @@ export async function flushOfflineQueue(axiosInstance: AxiosInstance): Promise<v
 /**
  * Register the automatic flush triggers:
  *   • window 'online' event
- *   • document 'visibilitychange' (tab becomes active)
+ *   • session resume coordinator (tab becomes active, after auth phase)
  *
  * Returns a cleanup function.  Call from AuthProvider useEffect.
  */
 export function setupOfflineQueueAutoFlush(axiosInstance: AxiosInstance): () => void {
     const onOnline = () => flushOfflineQueue(axiosInstance);
-    const onVisible = () => { if (!document.hidden) flushOfflineQueue(axiosInstance); };
 
     window.addEventListener('online', onOnline);
-    document.addEventListener('visibilitychange', onVisible);
+    // Defer flush until auth resume completes — avoids competing with token refresh.
+    const unregisterResume = registerSessionResume(
+        () => flushOfflineQueue(axiosInstance),
+        { phase: 'after', delayMs: 400 },
+    );
 
     return () => {
         window.removeEventListener('online', onOnline);
-        document.removeEventListener('visibilitychange', onVisible);
+        unregisterResume();
     };
 }

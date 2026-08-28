@@ -14,6 +14,7 @@
     "test:pos-pricing-regression": "npm run test:at-cost-regression",
     "proof:gr-uom": "vitest run src/__tests__/gr-po-uom-display.test.ts",
     "proof:session-death-login-lock": "vitest run src/__tests__/session-death-login.invariant.lock.test.ts src/__tests__/session-force-login-redirect.proof.test.ts",
+    "proof:session-resume-integrity": "vitest run src/__tests__/session-resume-integrity.invariant.lock.test.ts src/__tests__/session-resume-integrity.proof.test.ts",
     "proof:offline-login-pin": "vitest run src/__tests__/offline-login-and-pin.proof.test.ts",
     "proof:soft-keyboard": "vitest run src/__tests__/login-soft-keyboard.proof.test.ts src/__tests__/search-soft-keyboard.proof.test.ts src/__tests__/numeric-soft-keyboard.proof.test.ts",
     "proof:restaurant-check-ownership": "vitest run src/__tests__/restaurant-check-ownership.proof.test.ts",

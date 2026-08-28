@@ -58,9 +58,9 @@ export function useMultistoreEnabled() {
       localStorage.setItem(MULTISTORE_ENABLED_KEY, String(enabled));
       return enabled;
     },
-    staleTime: 0,
+    staleTime: 60_000,
     refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     placeholderData: () => getCachedMultistoreEnabled(),
   });
 
