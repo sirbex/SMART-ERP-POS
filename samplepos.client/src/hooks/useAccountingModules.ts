@@ -2,6 +2,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../utils/api';
 import { toastApiError } from '../utils/errorHandler';
 import toast from 'react-hot-toast';
+import {
+  unwrapGrirAutoMatchPayload,
+  unwrapGrirListPayload,
+  unwrapGrirOpenPayload,
+} from '@shared/domain/grirClearingSsot';
 
 // ── Query Key Factories ──────────────────────────────────────────────
 
@@ -212,7 +217,7 @@ export function useGrirOpenItems(filters?: GrirOpenFilters) {
     queryKey: [...accountingKeys.grirClearing.all, 'open', filters],
     queryFn: async () => {
       const res = await api.grirClearing.getOpenItems(filters);
-      return res.data?.data;
+      return unwrapGrirOpenPayload(res.data);
     },
   });
 }
@@ -222,7 +227,7 @@ export function useGrirSearch(query: string) {
     queryKey: [...accountingKeys.grirClearing.all, 'search', query],
     queryFn: async () => {
       const res = await api.grirClearing.search(query);
-      return res.data?.data;
+      return unwrapGrirListPayload(res.data);
     },
     enabled: query.length >= 2,
   });
@@ -233,7 +238,11 @@ export function useGrirBalance() {
     queryKey: accountingKeys.grirClearing.balance(),
     queryFn: async () => {
       const res = await api.grirClearing.getBalance();
-      return res.data?.data;
+      const body = res.data as { success?: boolean; data?: unknown; error?: string };
+      if (body?.success === false) {
+        throw new Error(body.error || 'Failed to load GR/IR balance');
+      }
+      return body?.data;
     },
   });
 }
@@ -243,7 +252,11 @@ export function useGrirResiduals(enabled = true) {
     queryKey: [...accountingKeys.grirClearing.all, 'residuals'],
     queryFn: async () => {
       const res = await api.grirClearing.getResiduals({ limit: 100 });
-      return res.data?.data as {
+      const body = res.data as { success?: boolean; data?: unknown; error?: string };
+      if (body?.success === false) {
+        throw new Error(body.error || 'Failed to load GR/IR residuals');
+      }
+      return body?.data as {
         items: Array<{
           referenceNumber: string;
           referenceType: string;
@@ -262,7 +275,11 @@ export function useGrirResiduals(enabled = true) {
   });
 }
 
-export function useGrirMatchCandidates(supplierId?: string, tolerancePercent?: number) {
+export function useGrirMatchCandidates(
+  supplierId?: string,
+  tolerancePercent?: number,
+  enabled = true,
+) {
   return useQuery({
     queryKey: [...accountingKeys.grirClearing.all, 'candidates', supplierId, tolerancePercent],
     queryFn: async () => {
@@ -270,8 +287,9 @@ export function useGrirMatchCandidates(supplierId?: string, tolerancePercent?: n
         ...(supplierId ? { supplierId } : {}),
         ...(tolerancePercent != null ? { tolerancePercent } : {}),
       });
-      return res.data?.data;
+      return unwrapGrirListPayload(res.data);
     },
+    enabled,
   });
 }
 
@@ -280,7 +298,7 @@ export function useGrirGrItems(grId: string | null) {
     queryKey: [...accountingKeys.grirClearing.all, 'gr-items', grId],
     queryFn: async () => {
       const res = await api.grirClearing.getGrItems(grId!);
-      return res.data?.data;
+      return unwrapGrirListPayload(res.data);
     },
     enabled: !!grId,
   });
@@ -291,7 +309,7 @@ export function useGrirHistory(poId: string | null) {
     queryKey: [...accountingKeys.grirClearing.all, 'history', poId],
     queryFn: async () => {
       const res = await api.grirClearing.getHistory(poId!);
-      return res.data?.data;
+      return unwrapGrirListPayload(res.data);
     },
     enabled: !!poId,
   });
@@ -300,43 +318,56 @@ export function useGrirHistory(poId: string | null) {
 export function useClearGrirItem() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { grId: string; invoiceId: string; date?: string }) =>
-      api.grirClearing.clearItem(data),
+    mutationFn: async (data: { grId: string; invoiceId: string; date?: string }) => {
+      const res = await api.grirClearing.clearItem(data);
+      const body = res.data as { success?: boolean; data?: unknown; error?: string };
+      if (body?.success === false) {
+        throw new Error(body.error || 'Failed to clear GR/IR item');
+      }
+      return body?.data;
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: accountingKeys.grirClearing.all });
-      toast.success('GR/IR item cleared');
     },
-    onError: (err) => toastApiError(err),
+    onError: (err) => toastApiError(err, 'Failed to clear GR/IR item'),
   });
 }
 
 export function useClearGrirResidual() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: {
+    mutationFn: async (data: {
       referenceNumber: string;
       method: 'TO_PRICE_VARIANCE' | 'TO_RETURN_CLEARING' | 'RECLASS_FROM_EXPENSE';
       amount?: number;
       notes?: string;
-    }) => api.grirClearing.clearResidual(data),
+    }) => {
+      const res = await api.grirClearing.clearResidual(data);
+      const body = res.data as { success?: boolean; data?: unknown; error?: string };
+      if (body?.success === false) {
+        throw new Error(body.error || 'Failed to clear GR/IR residual');
+      }
+      return body?.data;
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: accountingKeys.grirClearing.all });
       toast.success('GR/IR residual cleared (no extra AP)');
     },
-    onError: (err) => toastApiError(err),
+    onError: (err) => toastApiError(err, 'Failed to clear GR/IR residual'),
   });
 }
 
 export function useGrirAutoMatch() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data?: { supplierId?: string; tolerancePercent?: number }) =>
-      api.grirClearing.autoMatch(data),
+    mutationFn: async (data?: { supplierId?: string; tolerancePercent?: number }) => {
+      const res = await api.grirClearing.autoMatch(data);
+      return unwrapGrirAutoMatchPayload(res.data);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: accountingKeys.grirClearing.all });
-      toast.success('Auto-match complete');
     },
-    onError: (err) => toastApiError(err),
+    onError: (err) => toastApiError(err, 'Auto-match failed'),
   });
 }
 

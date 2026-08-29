@@ -116,6 +116,11 @@ export interface AutoMatchResult {
   matched: number;
   withVariance: number;
   skipped: number;
+  failures: Array<{
+    grNumber: string;
+    invoiceNumber: string;
+    error: string;
+  }>;
   details: Array<{
     grNumber: string;
     invoiceNumber: string;
@@ -545,6 +550,7 @@ export async function autoMatch(
     matched: 0,
     withVariance: 0,
     skipped: Math.max(0, rawCandidates.length - selected.length),
+    failures: [],
     details: [],
   };
 
@@ -574,10 +580,16 @@ export async function autoMatch(
         status: clearResult.clearingRecord.status,
       });
     } catch (err) {
-      logger.warn('Auto-match skipped pair', {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn('Auto-match failed for pair', {
         grId: candidate.gr_id,
         invoiceId: candidate.invoice_id,
-        error: (err as Error).message,
+        error: message,
+      });
+      result.failures.push({
+        grNumber: candidate.gr_number,
+        invoiceNumber: candidate.invoice_number,
+        error: message,
       });
       result.skipped++;
     }

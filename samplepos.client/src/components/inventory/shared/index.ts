@@ -24,6 +24,7 @@ export { QuickCreateSupplierModal } from "./QuickCreateSupplierModal";
 export { QuickCreateProductModal } from "./QuickCreateProductModal";
 export { BusinessRulesInfo, PURCHASE_ORDER_RULES, GOODS_RECEIPT_RULES } from "./BusinessRulesInfo";
 export { WorkflowHelpTrigger } from "./WorkflowHelpTrigger";
+export { HelpTrigger } from "../../ui/HelpTrigger";
 export { TotalsSummary } from "./TotalsSummary";
 export { ModalHeader } from "./ModalHeader";
 export { ModalFooter } from "./ModalFooter";

@@ -1,0 +1,48 @@
+{
+  "at": "2026-08-29T04:44:36.158Z",
+  "feature": "GRIR_CLEARING_INTEGRITY_BUNDLE",
+  "purpose": "Evidence-only acceptance — server SSOT + client SSOT + F.13 (no claims without gates)",
+  "summary": {
+    "pass": 91,
+    "fail": 0,
+    "total": 91,
+    "verdict": "PASS",
+    "artifacts": 3,
+    "artifactsExpected": 3
+  },
+  "parts": [
+    {
+      "file": "PROOF_GRIR_CLEARING_INTEGRITY.json",
+      "feature": "GRIR_CLEARING_INTEGRITY",
+      "at": "2026-08-29T04:44:02.573Z",
+      "summary": {
+        "pass": 41,
+        "fail": 0,
+        "total": 41,
+        "verdict": "PASS"
+      }
+    },
+    {
+      "file": "PROOF_GRIR_CLEARING_SSOT_CLIENT.json",
+      "feature": "GRIR_CLEARING_SSOT_CLIENT",
+      "at": "2026-08-29T04:44:35.935Z",
+      "summary": {
+        "pass": 29,
+        "fail": 0,
+        "total": 29,
+        "verdict": "PASS"
+      }
+    },
+    {
+      "file": "PROOF_GRIR_F13_AUTO_MATCH.json",
+      "feature": "GRIR_F13_AUTO_MATCH",
+      "at": "2026-08-29T04:44:02.159Z",
+      "summary": {
+        "pass": 21,
+        "fail": 0,
+        "total": 21,
+        "verdict": "PASS"
+      }
+    }
+  ]
+}

@@ -1,0 +1,158 @@
+{
+  "at": "2026-08-29T04:44:35.935Z",
+  "feature": "GRIR_CLEARING_SSOT_CLIENT",
+  "summary": {
+    "pass": 29,
+    "fail": 0,
+    "total": 29,
+    "verdict": "PASS"
+  },
+  "scope": "Client SSOT + UI/API wiring (no tenant DB writes)",
+  "gates": [
+    {
+      "id": "STATUS_RESOLVE",
+      "ok": true,
+      "detail": "CASE mirror"
+    },
+    {
+      "id": "FILTER_WL",
+      "ok": true,
+      "detail": "whitelist"
+    },
+    {
+      "id": "F13_DEFAULT",
+      "ok": true,
+      "detail": "tol 2%"
+    },
+    {
+      "id": "MANUAL_CLEAR",
+      "ok": true,
+      "detail": "MR11N gate"
+    },
+    {
+      "id": "LABELS",
+      "ok": true,
+      "detail": "labels + filter opts"
+    },
+    {
+      "id": "ROUTE",
+      "ok": true,
+      "detail": "route"
+    },
+    {
+      "id": "HELP_SSOT",
+      "ok": true,
+      "detail": "help copy SSOT + short subtitle"
+    },
+    {
+      "id": "RESIDUAL_METHOD_GUARD",
+      "ok": true,
+      "detail": "reclass credit-only SSOT"
+    },
+    {
+      "id": "UNWRAP_OPEN",
+      "ok": true,
+      "detail": "paginated open list"
+    },
+    {
+      "id": "UNWRAP_FAIL",
+      "ok": true,
+      "detail": "throws on success:false"
+    },
+    {
+      "id": "UNWRAP_AUTO",
+      "ok": true,
+      "detail": "auto-match payload"
+    },
+    {
+      "id": "USES_SSOT",
+      "ok": true,
+      "detail": "imports domain SSOT"
+    },
+    {
+      "id": "USES_STATUS_LABEL",
+      "ok": true,
+      "detail": "badge labels"
+    },
+    {
+      "id": "USES_FILTER_OPTS",
+      "ok": true,
+      "detail": "filter dropdown SSOT"
+    },
+    {
+      "id": "USES_F13_DEFAULT",
+      "ok": true,
+      "detail": "default tolerance"
+    },
+    {
+      "id": "USES_PARSE_TOL",
+      "ok": true,
+      "detail": "parse tolerance"
+    },
+    {
+      "id": "USES_CLEAR_GATE",
+      "ok": true,
+      "detail": "manual clear gate"
+    },
+    {
+      "id": "USES_QUERY_ERROR",
+      "ok": true,
+      "detail": "surfaces load errors"
+    },
+    {
+      "id": "AUTO_MATCH_FAILURES",
+      "ok": true,
+      "detail": "shows auto-match pair failures"
+    },
+    {
+      "id": "HOOKS_UNWRAP",
+      "ok": true,
+      "detail": "hooks use SSOT unwrap"
+    },
+    {
+      "id": "USES_HELP_TRIGGER",
+      "ok": true,
+      "detail": "help icon SSOT"
+    },
+    {
+      "id": "RESIDUAL_METHOD_SSOT",
+      "ok": true,
+      "detail": "client validates method before clear"
+    },
+    {
+      "id": "RESIDUAL_ONE_CLEAR",
+      "ok": true,
+      "detail": "single Clear + per-row method (no Suggested button)"
+    },
+    {
+      "id": "NO_INLINE_RESIDUAL_ESSAY",
+      "ok": true,
+      "detail": "residual help in popover only"
+    },
+    {
+      "id": "NO_INLINE_FILTER_OPTS",
+      "ok": true,
+      "detail": "no hard-coded filter options"
+    },
+    {
+      "id": "NO_INLINE_TOL_FALLBACK",
+      "ok": true,
+      "detail": "no inline 2% fallback"
+    },
+    {
+      "id": "NAV_ROUTE",
+      "ok": true,
+      "detail": "accounting nav"
+    },
+    {
+      "id": "APP_ROUTE",
+      "ok": true,
+      "detail": "lazy route"
+    },
+    {
+      "id": "API_PREFIX",
+      "ok": true,
+      "detail": "open API"
+    }
+  ]
+}

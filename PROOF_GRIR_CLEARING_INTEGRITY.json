@@ -1,10 +1,10 @@
 {
-  "at": "2026-08-14T07:38:21.732Z",
+  "at": "2026-08-29T04:44:02.573Z",
   "feature": "GRIR_CLEARING_INTEGRITY",
   "summary": {
-    "pass": 35,
+    "pass": 41,
     "fail": 0,
-    "total": 35,
+    "total": 41,
     "verdict": "PASS"
   },
   "fixes": [
@@ -13,7 +13,8 @@
     "Open status whitelist (no SQL string injection)",
     "grir_clearing MATCHED/VARIANCE preferred on worklist",
     "Soft cancel/void for all list queries (not CANCELLED-only)",
-    "UI UNMATCHED badge"
+    "Shared domain grirClearingSsot for status/filter/tolerance + UI wiring",
+    "UI SSOT imports (no inline filter/tolerance drift)"
   ],
   "gates": [
     {
@@ -122,6 +123,11 @@
       "detail": "posted bill bookkeeping only"
     },
     {
+      "id": "SVC_AUTO_FAILURES",
+      "ok": true,
+      "detail": "auto-match reports pair failures"
+    },
+    {
       "id": "ALGO_AT2_COUNT",
       "ok": true,
       "detail": "at2=1 first=g1-i1"
@@ -167,6 +173,26 @@
       "detail": "uuid is id"
     },
     {
+      "id": "DOMAIN_STATUS",
+      "ok": true,
+      "detail": "resolveGrirClearingStatus"
+    },
+    {
+      "id": "DOMAIN_CLEAR",
+      "ok": true,
+      "detail": "MR11N gate"
+    },
+    {
+      "id": "SQL_STATUS_CASE",
+      "ok": true,
+      "detail": "SQL CASE matches domain"
+    },
+    {
+      "id": "INTEGRITY_SHARED",
+      "ok": true,
+      "detail": "server re-exports shared SSOT"
+    },
+    {
       "id": "ROUTE_AUTO_PARSE",
       "ok": true,
       "detail": "auto-match tol parse"
@@ -182,14 +208,19 @@
       "detail": "createClearingRecord no $9 CASE reuse"
     },
     {
-      "id": "UI_UNMATCHED",
+      "id": "UI_SSOT",
       "ok": true,
-      "detail": "UI badge supports UNMATCHED"
+      "detail": "UI imports shared SSOT"
+    },
+    {
+      "id": "UI_ROUTE",
+      "ok": true,
+      "detail": "route locked"
     },
     {
       "id": "UI_TOL_DEFAULT",
       "ok": true,
-      "detail": "UI default tolerance 2%"
+      "detail": "default tolerance SSOT"
     }
   ]
 }

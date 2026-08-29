@@ -1,6 +1,6 @@
 # PROOF — GR/IR Automatic Clearing (F.13)
 
-**Generated:** 2026-08-14T07:38:21.739Z  
+**Generated:** 2026-08-29T04:44:02.159Z  
 **Verdict:** **PASS** (21/21 gates)  
 **Scope:** Structural + algorithm only
 

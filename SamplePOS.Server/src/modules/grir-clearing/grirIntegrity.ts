@@ -1,10 +1,14 @@
 /**
- * GR/IR integrity SSOT — shared predicates and F.13 pair selection.
- * Preview and Run Auto-Match must use the same selection rules.
+ * GR/IR integrity SSOT — SQL predicates + F.13 pair selection.
+ * Portable rules live in shared/domain/grirClearingSsot.ts.
  */
 
-/** Default tolerance % (matches F.13 UI default of 2). */
-export const F13_DEFAULT_TOLERANCE_PERCENT = 2;
+export {
+  F13_DEFAULT_TOLERANCE_PERCENT,
+  normalizeOpenStatusFilter,
+  OPEN_STATUS_WHITELIST,
+} from '@shared/domain/grirClearingSsot.js';
+import { F13_DEFAULT_TOLERANCE_PERCENT as DEFAULT_TOL } from '@shared/domain/grirClearingSsot.js';
 
 /**
  * Active supplier invoice (excludes soft-void statuses used in live tenants).
@@ -66,12 +70,12 @@ export type RawMatchPair = {
  */
 export function selectF13Pairs<T extends RawMatchPair>(
   raw: T[],
-  tolerancePercent: number = F13_DEFAULT_TOLERANCE_PERCENT,
+  tolerancePercent: number = DEFAULT_TOL,
 ): T[] {
   const tol =
     Number.isFinite(tolerancePercent) && tolerancePercent >= 0
       ? tolerancePercent
-      : F13_DEFAULT_TOLERANCE_PERCENT;
+      : DEFAULT_TOL;
 
   const usedGr = new Set<string>();
   const usedInv = new Set<string>();
@@ -91,20 +95,4 @@ export function selectF13Pairs<T extends RawMatchPair>(
     selected.push(candidate);
   }
   return selected;
-}
-
-/** Whitelist of MR11 work-list statuses (never interpolate raw query strings). */
-export const OPEN_STATUS_WHITELIST = new Set([
-  'UNMATCHED',
-  'MATCHED',
-  'VARIANCE',
-  'CLEARED',
-]);
-
-export function normalizeOpenStatusFilter(raw?: string | null): string | null {
-  if (!raw || !String(raw).trim()) return null;
-  const s = String(raw).trim().toUpperCase();
-  if (s === 'PARTIALLY_MATCHED') return 'VARIANCE';
-  if (OPEN_STATUS_WHITELIST.has(s)) return s;
-  return null;
 }

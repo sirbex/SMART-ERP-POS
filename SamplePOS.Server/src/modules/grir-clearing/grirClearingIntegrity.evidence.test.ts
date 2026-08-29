@@ -21,6 +21,11 @@ import {
   SI_ACTIVE_SQL,
   SI_LINKS_GR_SQL,
 } from './grirIntegrity.js';
+import {
+  canShowManualClearAction,
+  GRIR_CLEARING_ROUTE,
+  resolveGrirClearingStatus,
+} from '@shared/domain/grirClearingSsot.js';
 import { resolveSupplierFilter } from './supplierFilter.js';
 
 const serverRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -122,6 +127,11 @@ describe('PROOF: GR/IR Clearing integrity', () => {
       src.includes('alreadyPosted') && src.includes('invoice already posted'),
       'posted bill bookkeeping only',
     );
+    gate(
+      'SVC_AUTO_FAILURES',
+      /export async function autoMatch[\s\S]*failures\.push/.test(src),
+      'auto-match reports pair failures',
+    );
   });
 
   it('selectF13Pairs algorithm integrity', () => {
@@ -148,6 +158,37 @@ describe('PROOF: GR/IR Clearing integrity', () => {
     gate('FILTER_UUID', resolveSupplierFilter('3bdfdabb-cb7a-478a-99f3-bea84db0a1a9').mode === 'id', 'uuid is id');
   });
 
+  it('shared domain: clearing_status CASE mirror + manual clear gate', () => {
+    gate(
+      'DOMAIN_STATUS',
+      resolveGrirClearingStatus({ invoiceId: null }) === 'UNMATCHED' &&
+        resolveGrirClearingStatus({ invoiceId: 'i', grAmount: 100, invoiceAmount: 100 }) === 'MATCHED' &&
+        resolveGrirClearingStatus({ gcStatus: 'VARIANCE', invoiceId: 'i' }) === 'VARIANCE',
+      'resolveGrirClearingStatus',
+    );
+    gate(
+      'DOMAIN_CLEAR',
+      canShowManualClearAction({ clearingStatus: 'VARIANCE', invoiceId: 'i' }) &&
+        !canShowManualClearAction({ clearingStatus: 'MATCHED', invoiceId: 'i' }),
+      'MR11N gate',
+    );
+    const repoSrc = readRepo('SamplePOS.Server/src/modules/grir-clearing/grirClearingRepository.ts');
+    gate(
+      'SQL_STATUS_CASE',
+      repoSrc.includes("WHEN gc.status IN ('MATCHED', 'VARIANCE') THEN gc.status") &&
+        repoSrc.includes("WHEN si.\"Id\" IS NULL THEN 'UNMATCHED'") &&
+        repoSrc.includes("ABS(b.gr_line_total_n - COALESCE(si.\"TotalAmount\", 0)) < 0.01 THEN 'MATCHED'"),
+      'SQL CASE matches domain',
+    );
+    gate(
+      'INTEGRITY_SHARED',
+      readRepo('SamplePOS.Server/src/modules/grir-clearing/grirIntegrity.ts').includes(
+        '@shared/domain/grirClearingSsot',
+      ),
+      'server re-exports shared SSOT',
+    );
+  });
+
   it('routes + CRUD + UI surfaces', () => {
     const routes = readRepo('SamplePOS.Server/src/modules/grir-clearing/grirClearingRoutes.ts');
     gate('ROUTE_AUTO_PARSE', routes.includes('parseFloat') && routes.includes('tolerancePercent'), 'auto-match tol parse');
@@ -168,21 +209,26 @@ describe('PROOF: GR/IR Clearing integrity', () => {
         ),
       'createClearingRecord no $9 CASE reuse',
     );
+    const page = readRepo('samplepos.client/src/pages/accounting/GrirClearingPage.tsx');
     gate(
-      'UI_UNMATCHED',
-      fileHas(
-        'samplepos.client/src/pages/accounting/GrirClearingPage.tsx',
-        'UNMATCHED',
-      ),
-      'UI badge supports UNMATCHED',
+      'UI_SSOT',
+      page.includes('grirClearingSsot') &&
+        page.includes('grirClearingStatusLabel') &&
+        page.includes('OPEN_STATUS_FILTER_OPTIONS') &&
+        page.includes('parseF13TolerancePercent') &&
+        page.includes('canShowManualClearAction'),
+      'UI imports shared SSOT',
+    );
+    gate(
+      'UI_ROUTE',
+      page.includes(GRIR_CLEARING_ROUTE) ||
+        fileHas('samplepos.client/src/App.tsx', GRIR_CLEARING_ROUTE),
+      'route locked',
     );
     gate(
       'UI_TOL_DEFAULT',
-      fileHas(
-        'samplepos.client/src/pages/accounting/GrirClearingPage.tsx',
-        "useState('2')",
-      ),
-      'UI default tolerance 2%',
+      page.includes('F13_DEFAULT_TOLERANCE_PERCENT') && !page.includes("useState('2')"),
+      'default tolerance SSOT',
     );
   });
 });
@@ -202,7 +248,8 @@ afterAll(() => {
       'Open status whitelist (no SQL string injection)',
       'grir_clearing MATCHED/VARIANCE preferred on worklist',
       'Soft cancel/void for all list queries (not CANCELLED-only)',
-      'UI UNMATCHED badge',
+      'Shared domain grirClearingSsot for status/filter/tolerance + UI wiring',
+      'UI SSOT imports (no inline filter/tolerance drift)',
     ],
     gates,
   };

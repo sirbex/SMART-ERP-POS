@@ -34,6 +34,7 @@
     "proof:foh-keyboard-ownership-deploy": "node scripts/proof-foh-keyboard-ownership-deploy.mjs",
     "proof:session-active": "node scripts/proof-session-active-no-logout.mjs",
     "proof:session-resume-integrity": "node scripts/proof-session-resume-integrity.mjs",
+    "proof:grir-clearing": "node scripts/proof-grir-clearing-integrity.mjs",
     "proof:pos-search-display": "node scripts/proof-pos-product-search-display.mjs",
     "proof:sortable-tables": "node scripts/proof-sortable-tables-accounting.mjs",
     "proof:corrections": "node scripts/proof-pre-commit-corrections.mjs",

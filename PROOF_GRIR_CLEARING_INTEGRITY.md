@@ -1,7 +1,7 @@
 # PROOF — GR/IR Clearing integrity
 
-**Generated:** 2026-08-14T07:38:21.732Z  
-**Verdict:** **PASS** (35/35 gates)  
+**Generated:** 2026-08-29T04:44:02.573Z  
+**Verdict:** **PASS** (41/41 gates)  
 **Scope:** Structural SSOT + algorithm (no tenant DB writes)
 
 ## Fixes proved
@@ -38,6 +38,7 @@
 | `SVC_AUTO_SELECT` | PASS | autoMatch uses selectF13Pairs |
 | `SVC_PREVIEW_SELECT` | PASS | preview uses selectF13Pairs |
 | `SVC_POSTED_BOOKKEEP` | PASS | posted bill bookkeeping only |
+| `SVC_AUTO_FAILURES` | PASS | auto-match reports pair failures |
 | `ALGO_AT2_COUNT` | PASS | at2=1 first=g1-i1 |
 | `ALGO_AT5_HAS_G3` | PASS | 5% includes 3% variance g3 |
 | `ALGO_AT5_NO_G4` | PASS | 5% excludes 10% g4 |
@@ -47,11 +48,16 @@
 | `STATUS_PARTIAL` | PASS | partial→VARIANCE |
 | `FILTER_TEXT` | PASS | text is search |
 | `FILTER_UUID` | PASS | uuid is id |
+| `DOMAIN_STATUS` | PASS | resolveGrirClearingStatus |
+| `DOMAIN_CLEAR` | PASS | MR11N gate |
+| `SQL_STATUS_CASE` | PASS | SQL CASE matches domain |
+| `INTEGRITY_SHARED` | PASS | server re-exports shared SSOT |
 | `ROUTE_AUTO_PARSE` | PASS | auto-match tol parse |
 | `ROUTE_RES_BEFORE_PO` | PASS | residuals before :poId |
 | `CRUD_NO_CASE_$9` | PASS | createClearingRecord no $9 CASE reuse |
-| `UI_UNMATCHED` | PASS | UI badge supports UNMATCHED |
-| `UI_TOL_DEFAULT` | PASS | UI default tolerance 2% |
+| `UI_SSOT` | PASS | UI imports shared SSOT |
+| `UI_ROUTE` | PASS | route locked |
+| `UI_TOL_DEFAULT` | PASS | default tolerance SSOT |
 
 ## Re-run
 
