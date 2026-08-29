@@ -25,6 +25,7 @@ const mockRepo = {
   getProductLegacyUnitOfMeasure: jest.fn<MockFn>(),
   getProductName: jest.fn<MockFn>(),
   getProductPurchaseUomContext: jest.fn<MockFn>(),
+  getProductOnHandBase: jest.fn<MockFn>().mockResolvedValue(0),
 };
 
 jest.unstable_mockModule('./uomRepository.js', () => mockRepo);

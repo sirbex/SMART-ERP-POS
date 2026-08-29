@@ -27,6 +27,7 @@ const mockRepo = {
   getProductSummary: jest.fn<MockFn>(),
   listOrphanedPurchaseUomProducts: jest.fn<MockFn>(),
   deleteProductUom: jest.fn<MockFn>(),
+  getProductOnHandBase: jest.fn<MockFn>(),
 };
 
 let transactionShouldCommit = true;
@@ -109,6 +110,7 @@ describe('updateProductUom purchase UoM lifecycle', () => {
       baseUomId,
     });
     mockRepo.getProductSummary.mockResolvedValue({ name: 'Abchlor eye drops', sku: '13' });
+    mockRepo.getProductOnHandBase.mockResolvedValue(0);
   });
 
   it('repoints products.purchase_uom_id when renaming the active purchase UoM (BOX → PACKET)', async () => {

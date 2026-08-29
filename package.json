@@ -35,6 +35,7 @@
     "proof:session-active": "node scripts/proof-session-active-no-logout.mjs",
     "proof:session-resume-integrity": "node scripts/proof-session-resume-integrity.mjs",
     "proof:grir-clearing": "node scripts/proof-grir-clearing-integrity.mjs",
+    "proof:muom-lifecycle-stock-guards": "cd SamplePOS.Server && npm run proof:muom-lifecycle-stock-guards",
     "proof:pos-search-display": "node scripts/proof-pos-product-search-display.mjs",
     "proof:sortable-tables": "node scripts/proof-sortable-tables-accounting.mjs",
     "proof:corrections": "node scripts/proof-pre-commit-corrections.mjs",

@@ -564,3 +564,23 @@ export async function getProductUomById(id: string, dbPool?: Queryable): Promise
   );
   return res.rows[0] ?? null;
 }
+
+/**
+ * True stock presence in base units — max of inventory cache and open batch remaining.
+ * Used to gate conversion-factor edits (SAP-style).
+ */
+export async function getProductOnHandBase(productId: string, db?: Queryable): Promise<number> {
+  const pool = db || globalPool;
+  const res = await pool.query(
+    `SELECT GREATEST(
+       ABS(COALESCE((SELECT pi.quantity_on_hand FROM product_inventory pi WHERE pi.product_id = $1), 0)),
+       ABS(COALESCE((
+         SELECT SUM(ib.remaining_quantity)
+         FROM inventory_batches ib
+         WHERE ib.product_id = $1
+       ), 0))
+     )::float AS "onHandBase"`,
+    [productId],
+  );
+  return Number(res.rows[0]?.onHandBase) || 0;
+}

@@ -15,6 +15,12 @@ import {
   resolveFactorToBase,
   type ItemUomConversion,
 } from './uomGraphService.js';
+import {
+  isMeaningfulFactorChange,
+  MUOM_LIFECYCLE_MESSAGES,
+  rebaseBlockedReason,
+  residualFactorChangeBlockedReason,
+} from '../../../../shared/domain/muomLifecycleSsot.js';
 import logger from '../../utils/logger.js';
 
 type Queryable = pg.Pool | pg.PoolClient;
@@ -1079,6 +1085,32 @@ export async function updateProductUom(
 
     const effectiveUomId = parsed.uomId ?? existing.uomId;
     const uomIdChanging = parsed.uomId !== undefined && parsed.uomId !== existing.uomId;
+    const currentBaseUomId = await repo.getProductBaseUomId(existing.productId, client);
+
+    const rebaseReason = rebaseBlockedReason({
+      uomIdChanging,
+      isDefaultRow: Boolean(existing.isDefault),
+      rowUomId: existing.uomId,
+      baseUomId: currentBaseUomId,
+    });
+    if (rebaseReason) {
+      throw new ConflictError(rebaseReason);
+    }
+
+    if (parsed.conversionFactor !== undefined) {
+      const prevFactor = parseFloat(String(existing.conversionFactor));
+      const nextFactor = Number(parsed.conversionFactor);
+      if (!Number.isFinite(nextFactor) || nextFactor < 1) {
+        throw new ValidationError(MUOM_LIFECYCLE_MESSAGES.factorInvalid);
+      }
+      if (isMeaningfulFactorChange(prevFactor, nextFactor)) {
+        const onHandBase = await repo.getProductOnHandBase(existing.productId, client);
+        const factorBlocked = residualFactorChangeBlockedReason(onHandBase);
+        if (factorBlocked) {
+          throw new ConflictError(factorBlocked);
+        }
+      }
+    }
 
     await assertNoCanonicalDuplicateMeaning(existing.productId, effectiveUomId, client, id);
 
@@ -1098,28 +1130,18 @@ export async function updateProductUom(
       priceOverride = cleared.priceOverride;
     }
 
-    let pendingBaseUomId: string | null = null;
+    // Non-base pack/purchase rows may rename UoM identity (BOX → PACKET).
+    // Base identity change is blocked above — never rewrite products.base_uom_id here.
     if (uomIdChanging) {
       const purchaseCtxBefore = await repo.getProductPurchaseUomContext(existing.productId, client);
       if (purchaseCtxBefore?.purchaseUomId === existing.uomId) {
         await repo.setProductPurchaseUomId(existing.productId, effectiveUomId, client);
       }
-
-      const currentBaseUomId = await repo.getProductBaseUomId(existing.productId, client);
-      if (currentBaseUomId === existing.uomId) {
-        await repo.deleteAllItemUomConversionsForProduct(existing.productId, client);
-        pendingBaseUomId = effectiveUomId;
-      } else {
-        await repo.deleteItemUomConversionBySource(existing.productId, existing.uomId, client);
-      }
+      await repo.deleteItemUomConversionBySource(existing.productId, existing.uomId, client);
     }
 
     if (parsed.isDefault) {
       await repo.unsetDefaultForProduct(existing.productId, client);
-    }
-
-    if (pendingBaseUomId) {
-      await repo.setProductBaseUomId(existing.productId, pendingBaseUomId, client);
     }
 
     const result = await repo.updateProductUom(

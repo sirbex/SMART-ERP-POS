@@ -1,0 +1,124 @@
+{
+  "at": "2026-08-29T09:05:11.363Z",
+  "feature": "MUOM_LIFECYCLE_STOCK_GUARDS",
+  "summary": {
+    "pass": 21,
+    "fail": 0,
+    "total": 21,
+    "verdict": "PASS"
+  },
+  "scope": "Proven only: schema columns for on-hand, SSOT wiring, rebase block, factor block with on-hand, pack rename + price override with stock",
+  "outOfScope": [
+    "Multi-UOM enable wizard UI",
+    "SKU migrate/split workflow",
+    "Live tenant DB mutation proof",
+    "Industry product marketing claims"
+  ],
+  "gates": [
+    {
+      "id": "SCHEMA_PRODUCT_INVENTORY",
+      "ok": true,
+      "detail": "product_inventory.quantity_on_hand exists in migration 410"
+    },
+    {
+      "id": "SCHEMA_INVENTORY_BATCHES",
+      "ok": true,
+      "detail": "inventory_batches.remaining_quantity + product_id exist in 001"
+    },
+    {
+      "id": "SCHEMA_SNAPSHOT_COLS",
+      "ok": true,
+      "detail": "transaction snapshot invariant documented in 415"
+    },
+    {
+      "id": "WIRE_SSOT_FILE",
+      "ok": true,
+      "detail": "SSOT file present"
+    },
+    {
+      "id": "WIRE_SVC_IMPORTS_SSOT",
+      "ok": true,
+      "detail": "uomService imports lifecycle SSOT"
+    },
+    {
+      "id": "WIRE_SVC_CALLS_ONHAND",
+      "ok": true,
+      "detail": "updateProductUom measures on-hand before factor change"
+    },
+    {
+      "id": "WIRE_SVC_NO_SILENT_REBASE",
+      "ok": true,
+      "detail": "pendingBaseUomId rebase path absent; rebaseBlockedReason present"
+    },
+    {
+      "id": "WIRE_REPO_ONHAND_SQL",
+      "ok": true,
+      "detail": "on-hand SQL uses inventory cache + batch remaining"
+    },
+    {
+      "id": "WIRE_SSOT_MESSAGES",
+      "ok": true,
+      "detail": "SSOT message constants stable"
+    },
+    {
+      "id": "WIRE_NPM_SCRIPT",
+      "ok": true,
+      "detail": "npm proof scripts registered"
+    },
+    {
+      "id": "STOCK_DETECT",
+      "ok": true,
+      "detail": "on-hand detect"
+    },
+    {
+      "id": "FACTOR_GATE",
+      "ok": true,
+      "detail": "factor only when stock ~0"
+    },
+    {
+      "id": "FACTOR_MSG",
+      "ok": true,
+      "detail": "factor block message SSOT"
+    },
+    {
+      "id": "FACTOR_MEANINGFUL",
+      "ok": true,
+      "detail": "meaningful factor delta"
+    },
+    {
+      "id": "REBASE_DETECT",
+      "ok": true,
+      "detail": "base row identity change is rebase; pack rename is not"
+    },
+    {
+      "id": "REBASE_MSG",
+      "ok": true,
+      "detail": "rebase message SSOT"
+    },
+    {
+      "id": "BEH_FACTOR_BLOCK",
+      "ok": true,
+      "detail": "no DB write on factor block"
+    },
+    {
+      "id": "BEH_FACTOR_OK_ZERO",
+      "ok": true,
+      "detail": "factor edit at zero stock"
+    },
+    {
+      "id": "BEH_REBASE_BLOCK",
+      "ok": true,
+      "detail": "no silent rebase via rename"
+    },
+    {
+      "id": "BEH_PACK_RENAME_OK",
+      "ok": true,
+      "detail": "non-base rename with stock + unchanged factor"
+    },
+    {
+      "id": "BEH_PRICE_OK",
+      "ok": true,
+      "detail": "price override with stock"
+    }
+  ]
+}
