@@ -5,6 +5,7 @@ import { buildPurchaseUomOptions } from '@/validation/product';
 import {
   productFormSectionVisibility,
   serviceInventoryClearsForm,
+  showRestaurantKitchenCatalogFields,
 } from '@shared/utils/productTypeRules';
 import { describeProductTaxLiability } from '@shared/utils/receiptPrintDisplay';
 import { useRestaurantEnabled } from '@/hooks/useRestaurantEnabled';
@@ -104,6 +105,7 @@ export default function ProductForm({
   taxInclusivePricing = false,
 }: ProductFormProps) {
   const { data: restaurantEnabled = false } = useRestaurantEnabled();
+  const showKitchenCatalog = showRestaurantKitchenCatalogFields(restaurantEnabled);
   const isService = values.productType === 'service';
   const sections = productFormSectionVisibility(values.productType);
   const inventoryDisabled = disabled || isService;
@@ -509,24 +511,26 @@ export default function ProductForm({
                 </div>
               </div>
             )}
-            <div className="flex items-start gap-2">
-              <input
-                id="is-buffet-cover-svc"
-                type="checkbox"
-                checked={Boolean(values.isBuffetCover)}
-                onChange={(e) => onChange('isBuffetCover', e.target.checked)}
-                disabled={disabled}
-                className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-              />
-              <div>
-                <label htmlFor="is-buffet-cover-svc" className="text-sm font-medium text-gray-700">
-                  Buffet cover / plate (capacity sale)
-                </label>
-                <p className="text-xs text-gray-500">
-                  Sold as covers against an OPEN Buffet Session — ingredients are not exploded at payment.
-                </p>
+            {showKitchenCatalog && (
+              <div className="flex items-start gap-2">
+                <input
+                  id="is-buffet-cover-svc"
+                  type="checkbox"
+                  checked={Boolean(values.isBuffetCover)}
+                  onChange={(e) => onChange('isBuffetCover', e.target.checked)}
+                  disabled={disabled}
+                  className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <div>
+                  <label htmlFor="is-buffet-cover-svc" className="text-sm font-medium text-gray-700">
+                    Buffet cover / plate (capacity sale)
+                  </label>
+                  <p className="text-xs text-gray-500">
+                    Sold as covers against an OPEN Buffet Session — ingredients are not exploded at payment.
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         ) : (
         <>
@@ -605,7 +609,7 @@ export default function ProductForm({
           </div>
         )}
 
-        {sections.showPreparedFood && (
+        {showKitchenCatalog && sections.showPreparedFood && (
           <div className="mt-3 flex items-start gap-2">
             <input
               id="is-prepared-food"
@@ -627,24 +631,26 @@ export default function ProductForm({
           </div>
         )}
 
-        <div className="mt-3 flex items-start gap-2">
-          <input
-            id="is-buffet-cover-inv"
-            type="checkbox"
-            checked={Boolean(values.isBuffetCover)}
-            onChange={(e) => onChange('isBuffetCover', e.target.checked)}
-            disabled={disabled}
-            className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-          />
-          <div>
-            <label htmlFor="is-buffet-cover-inv" className="text-sm font-medium text-gray-700">
-              Buffet cover / plate (capacity sale)
-            </label>
-            <p className="text-xs text-gray-500">
-              Usually a service SKU. Sale requires an OPEN Buffet Session and does not explode ingredients.
-            </p>
+        {showKitchenCatalog && (
+          <div className="mt-3 flex items-start gap-2">
+            <input
+              id="is-buffet-cover-inv"
+              type="checkbox"
+              checked={Boolean(values.isBuffetCover)}
+              onChange={(e) => onChange('isBuffetCover', e.target.checked)}
+              disabled={disabled}
+              className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <div>
+              <label htmlFor="is-buffet-cover-inv" className="text-sm font-medium text-gray-700">
+                Buffet cover / plate (capacity sale)
+              </label>
+              <p className="text-xs text-gray-500">
+                Usually a service SKU. Sale requires an OPEN Buffet Session and does not explode ingredients.
+              </p>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Expiry Enforcement (shown when Track Expiry is enabled) */}
         {values.trackExpiry && (

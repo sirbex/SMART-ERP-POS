@@ -150,3 +150,26 @@ export function productFormSectionVisibility(productType: string | null | undefi
     showPreparedFood: !service,
   };
 }
+
+/**
+ * Kitchen catalog flags (prepared food / buffet cover) are restaurant-only.
+ * Non-restaurant tenants must never persist or surface these as true.
+ */
+export function resolveRestaurantKitchenCatalogFlags(
+  restaurantEnabled: boolean,
+  flags: { isPreparedFood?: boolean; isBuffetCover?: boolean },
+  opts?: { isService?: boolean },
+): { isPreparedFood: boolean; isBuffetCover: boolean } {
+  if (!restaurantEnabled) {
+    return { isPreparedFood: false, isBuffetCover: false };
+  }
+  return {
+    isPreparedFood: opts?.isService ? false : Boolean(flags.isPreparedFood),
+    isBuffetCover: Boolean(flags.isBuffetCover),
+  };
+}
+
+/** UI: show kitchen catalog checkboxes only when restaurant mode is on. */
+export function showRestaurantKitchenCatalogFields(restaurantEnabled: boolean): boolean {
+  return Boolean(restaurantEnabled);
+}

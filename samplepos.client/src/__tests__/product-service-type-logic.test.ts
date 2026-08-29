@@ -7,7 +7,9 @@ import {
   isServiceProductType,
   normalizeProductSaveForType,
   productFormSectionVisibility,
+  resolveRestaurantKitchenCatalogFlags,
   serviceInventoryClearsForm,
+  showRestaurantKitchenCatalogFields,
 } from '@shared/utils/productTypeRules';
 import { planSaleStockDeduction } from '../../../SamplePOS.Server/src/modules/sales/saleRecipeExplosion';
 import { buildCreateProductInput, validateProductValues } from '@/validation/product';
@@ -73,6 +75,27 @@ describe('Service product type — form / save business logic', () => {
     expect(v.showStockLevels).toBe(true);
     expect(v.showProcurement).toBe(true);
     expect(v.showInventorySnapshot).toBe(true);
+  });
+
+  it('kitchen catalog flags resolve only when restaurant mode is on', () => {
+    expect(showRestaurantKitchenCatalogFields(false)).toBe(false);
+    expect(showRestaurantKitchenCatalogFields(true)).toBe(true);
+
+    expect(
+      resolveRestaurantKitchenCatalogFlags(false, { isPreparedFood: true, isBuffetCover: true }),
+    ).toEqual({ isPreparedFood: false, isBuffetCover: false });
+
+    expect(
+      resolveRestaurantKitchenCatalogFlags(true, { isPreparedFood: true, isBuffetCover: true }),
+    ).toEqual({ isPreparedFood: true, isBuffetCover: true });
+
+    expect(
+      resolveRestaurantKitchenCatalogFlags(
+        true,
+        { isPreparedFood: true, isBuffetCover: true },
+        { isService: true },
+      ),
+    ).toEqual({ isPreparedFood: false, isBuffetCover: true });
   });
 
   it('form clears wipe supplier / expiry / reorder when switching to service', () => {

@@ -6,7 +6,8 @@ import { useState, useMemo, useEffect } from 'react';
 import ProductForm, { ProductFormField } from '@/components/products/ProductForm';
 import { formatCurrency, parseCurrency } from '../../utils/currency';
 import { BUSINESS_RULES } from '../../utils/constants';
-import { normalizeProductSaveForType } from '@shared/utils/productTypeRules';
+import { normalizeProductSaveForType, resolveRestaurantKitchenCatalogFlags } from '@shared/utils/productTypeRules';
+import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
 // Zod-based form validation
 import { validateProductValues } from '@/validation/product';
 import { useCreateProduct, useUpdateProduct, useDeleteProduct, productKeys } from '../../hooks/useProducts';
@@ -185,6 +186,7 @@ export default function ProductsPage() {
   const { isOnline } = useOfflineContext();
   const { isMultistoreEnabled } = useMultistoreEnabled();
   const { permissions } = useAuth();
+  const { data: restaurantEnabled = false } = useRestaurantEnabled();
   const canUseStoreFilter = useMemo(() => {
     if (!isMultistoreEnabled) return false;
     return hasWarehouseNetworkAccess(permissions);
@@ -778,6 +780,14 @@ export default function ProductsPage() {
       const baseFormUom = productUoms.find((u) => u.isDefault) ?? productUoms[0];
 
       const isService = formData.productType === 'service';
+      const kitchenFlags = resolveRestaurantKitchenCatalogFlags(
+        restaurantEnabled,
+        {
+          isPreparedFood: formData.isPreparedFood,
+          isBuffetCover: formData.isBuffetCover,
+        },
+        { isService },
+      );
 
       // Convert form data to API format matching backend schema
       const productData = normalizeProductSaveForType({
@@ -789,8 +799,8 @@ export default function ProductsPage() {
         category: formData.category || undefined,
         productType: formData.productType || 'inventory',
         availableInRestaurant: formData.availableInRestaurant !== false,
-        isPreparedFood: isService ? false : !!formData.isPreparedFood,
-        isBuffetCover: !!formData.isBuffetCover,
+        isPreparedFood: kitchenFlags.isPreparedFood,
+        isBuffetCover: kitchenFlags.isBuffetCover,
         conversionFactor: parseFloat(formData.conversionFactor) || 1.0,
         costPrice: parseFloat(formData.costPrice) || 0,
         sellingPrice: parseFloat(formData.sellingPrice) || 0,
