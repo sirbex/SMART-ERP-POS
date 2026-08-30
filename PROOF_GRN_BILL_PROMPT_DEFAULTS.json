@@ -1,0 +1,132 @@
+{
+  "at": "2026-08-29T17:44:59.364Z",
+  "feature": "GRN_BILL_PROMPT_DEFAULTS",
+  "summary": {
+    "pass": 23,
+    "fail": 0,
+    "total": 23,
+    "verdict": "PASS"
+  },
+  "scope": "Proven: draft + bill prompt show paper vs GR + variance; paper may exceed GR for visibility; AP posts only at ≤ GR via Bill at GR; rounding reason ≤1 under only",
+  "outOfScope": [
+    "Live tenant POST from-grn mutation",
+    "Editable supplier picker (intentionally absent)"
+  ],
+  "gates": [
+    {
+      "id": "TOTAL_PREFILL",
+      "ok": true,
+      "detail": "computed total → 2dp input string"
+    },
+    {
+      "id": "INV_NUMBER",
+      "ok": true,
+      "detail": "INV-{GR} default invoice number"
+    },
+    {
+      "id": "SUPPLIER_LABEL",
+      "ok": true,
+      "detail": "supplier display from GR name or locked fallback"
+    },
+    {
+      "id": "MATCH_EPS",
+      "ok": true,
+      "detail": "paper vs computed match within 0.005"
+    },
+    {
+      "id": "BUILD_DEFAULTS",
+      "ok": true,
+      "detail": "buildGrnBillPromptDefaults packs all prompt fields"
+    },
+    {
+      "id": "PAPER_OVERRIDE",
+      "ok": true,
+      "detail": "paper override keeps supplier figure; GR total unchanged"
+    },
+    {
+      "id": "VARIANCE_UNDER",
+      "ok": true,
+      "detail": "paper < GR → under; abs + short summary"
+    },
+    {
+      "id": "VARIANCE_OVER",
+      "ok": true,
+      "detail": "paper 701000 vs GR 700999.20 → over 0.80; both figures kept"
+    },
+    {
+      "id": "VARIANCE_MATCH_NONE",
+      "ok": true,
+      "detail": "match when equal; none until paper total entered"
+    },
+    {
+      "id": "ALIGN_TO_GR",
+      "ok": true,
+      "detail": "explicit align-to-GR + over guidance (no silent clamp)"
+    },
+    {
+      "id": "REASON_ROUNDING_GATED",
+      "ok": true,
+      "detail": "rounding reason only when |diff| ≤ 1; auto-suggest then"
+    },
+    {
+      "id": "UI_IMPORTS_SSOT",
+      "ok": true,
+      "detail": "GoodsReceiptsPage imports bill prompt SSOT"
+    },
+    {
+      "id": "UI_COMPACT_SHELL",
+      "ok": true,
+      "detail": "modal scrolls body; footer sticky with Create bill"
+    },
+    {
+      "id": "UI_VARIANCE_PANEL",
+      "ok": true,
+      "detail": "single variance panel + gated reasons from SSOT"
+    },
+    {
+      "id": "UI_USES_BUILD",
+      "ok": true,
+      "detail": "setBillPrompt uses buildGrnBillPromptDefaults + draft paper carry"
+    },
+    {
+      "id": "UI_DRAFT_MATCH",
+      "ok": true,
+      "detail": "draft GR match check + bill-at-GR action (integrity)"
+    },
+    {
+      "id": "UI_NO_SILENT_CLAMP",
+      "ok": true,
+      "detail": "paper typing is not silently clamped to GR"
+    },
+    {
+      "id": "UI_NO_SUPPLIER_PICKER",
+      "ok": true,
+      "detail": "prompt POST has no supplier picker; only grnId + reported total"
+    },
+    {
+      "id": "UI_BILLABLE_PREVIEW",
+      "ok": true,
+      "detail": "computed amount from server billable-total preview"
+    },
+    {
+      "id": "API_NO_SUPPLIER_ID",
+      "ok": true,
+      "detail": "CreateInvoiceFromGRNSchema has no supplierId field"
+    },
+    {
+      "id": "SVC_SUPPLIER_FROM_GR",
+      "ok": true,
+      "detail": "createInvoiceFromGRN takes supplierId from GR only"
+    },
+    {
+      "id": "SVC_ROUNDING_MAX",
+      "ok": true,
+      "detail": "server rejects ROUNDING when |diff| > 1"
+    },
+    {
+      "id": "SSOT_FILE",
+      "ok": true,
+      "detail": "shared/domain/grnBillPromptSsot.ts present"
+    }
+  ]
+}
