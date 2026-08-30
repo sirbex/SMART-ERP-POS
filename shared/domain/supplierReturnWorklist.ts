@@ -2,11 +2,19 @@
  * Supplier return (RGRN) worklist SSOT.
  *
  * Nested under Goods Receipts: Inventory → Goods Receipts → Returns tab.
- * Rule: POSTED without active SCN = needs attention (clear 2160 / reduce AP via SCN).
+ *
+ * Accounting forks:
+ * - Uninvoiced return / uninvoiced full reverse: stock + GR/IR cleared on post.
+ *   No AP was created → no supplier bill, no SCN. Action = COMPLETE.
+ * - Invoiced return: AP exists → POSTED without SCN = NEED_SCN (clear 2160 / reduce AP).
+ *
+ * Never tell operators to "Bill on GR first" just to unlock a credit note for an
+ * uninvoiced reverse — that path invents AP after the receipt was already unwound.
  */
 
 export type SupplierReturnActionStatus =
   | 'DRAFT'
+  /** @deprecated not emitted — kept for older clients; use COMPLETE for uninvoiced */
   | 'NEED_BILL'
   | 'NEED_SCN'
   | 'HAS_SCN'
@@ -30,6 +38,8 @@ export interface SupplierReturnWorklistRow {
   hasSupplierBill?: boolean | null;
   /** When present, used to distinguish open vs applied SCN */
   creditNoteStatus?: string | null;
+  /** Optional: reason or flag from uninvoiced reverse orchestration */
+  reason?: string | null;
 }
 
 /**
@@ -45,15 +55,23 @@ export function resolveSupplierReturnActionStatus(
   const scnSt = String(row.creditNoteStatus || '').toUpperCase();
 
   if (status === 'DRAFT') return 'DRAFT';
-  if (!hasScn && !hasBill) return 'NEED_BILL';
+  // Uninvoiced return / reverse: nothing left to bill or credit
+  if (!hasScn && !hasBill) return 'COMPLETE';
   if (!hasScn) return 'NEED_SCN';
   if (['POSTED', 'OPEN', 'DRAFT'].includes(scnSt)) return 'HAS_SCN';
   return 'COMPLETE';
 }
 
-/** True when list default / needsAttention filter should include this row. */
+/**
+ * Default "Needs attention" filter: invoiced returns still waiting for SCN only.
+ * Uninvoiced reversals must not clutter this list.
+ */
 export function isSupplierReturnNeedsAttention(row: SupplierReturnWorklistRow): boolean {
-  return String(row.status || '').toUpperCase() === 'POSTED' && !row.hasCreditNote;
+  return (
+    String(row.status || '').toUpperCase() === 'POSTED' &&
+    !row.hasCreditNote &&
+    Boolean(row.hasSupplierBill)
+  );
 }
 
 export function canCreateSupplierCreditNoteFromReturn(row: SupplierReturnWorklistRow): boolean {
@@ -64,12 +82,18 @@ export function canCreateSupplierCreditNoteFromReturn(row: SupplierReturnWorklis
   );
 }
 
-export function mustBillBeforeSupplierCreditNote(row: SupplierReturnWorklistRow): boolean {
-  return (
-    String(row.status || '').toUpperCase() === 'POSTED' &&
-    !row.hasCreditNote &&
-    !row.hasSupplierBill
-  );
+/**
+ * Never force "create a bill so you can create an SCN" on uninvoiced returns.
+ * SCN only applies when AP already exists on the source GR.
+ */
+export function mustBillBeforeSupplierCreditNote(_row: SupplierReturnWorklistRow): boolean {
+  return false;
+}
+
+/** True when this RGRN was the orchestrated full reverse (with or without prior bill). */
+export function isUninvoicedReceiptReversal(row: Pick<SupplierReturnWorklistRow, 'reason'>): boolean {
+  const r = String(row.reason || '');
+  return r.includes('[Full reverse]') || r.includes('[Uninvoiced reversal]');
 }
 
 export const SUPPLIER_RETURN_ACTION_LABELS: Record<SupplierReturnActionStatus, string> = {
@@ -79,3 +103,16 @@ export const SUPPLIER_RETURN_ACTION_LABELS: Record<SupplierReturnActionStatus, s
   HAS_SCN: 'Apply credit note',
   COMPLETE: 'Done',
 };
+
+export function supplierReturnActionLabel(
+  row: SupplierReturnWorklistRow,
+  status: SupplierReturnActionStatus = resolveSupplierReturnActionStatus(row),
+): string {
+  if (status === 'COMPLETE' && isUninvoicedReceiptReversal(row)) {
+    return 'Reversal complete';
+  }
+  if (status === 'COMPLETE' && !row.hasSupplierBill) {
+    return 'Done (no bill)';
+  }
+  return SUPPLIER_RETURN_ACTION_LABELS[status];
+}

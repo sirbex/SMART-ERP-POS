@@ -23,6 +23,7 @@ import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository
 import { goodsReceiptService } from '../goods-receipts/goodsReceiptService.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 import { assertSupplierCreditHeadroom } from '../suppliers/supplierCreditGuard.js';
+import { syncPOStatusWithReceipts } from './poReceiptStatusSync.js';
 
 export interface CreatePOInput {
   supplierId: string;
@@ -121,11 +122,10 @@ export const purchaseOrderService = {
         });
       }
 
-      // Calculate total for additional validations
-      const totalAmount = Money.toNumber(input.items.reduce(
-        (sum, item) => sum.plus(new Decimal(item.quantity).times(item.unitCost)),
-        new Decimal(0)
-      ));
+      // Calculate total for additional validations (PricingEngine SSOT)
+      const totalAmount = PricingEngine.calculateDocumentTotal(
+        input.items.map((item) => ({ quantity: item.quantity, unitCost: item.unitCost })),
+      ).toNumber();
 
       await assertSupplierCreditHeadroom(
         client,
@@ -163,10 +163,14 @@ export const purchaseOrderService = {
           client,
         );
         const baseQty = PricingEngine.calculateBaseQuantity(item.quantity, conversionFactor).toNumber();
-        const baseUnitCost = PricingEngine.normalizeDisplayUnitCost(item.unitCost, conversionFactor);
-        const canonicalLineTotal = PricingEngine.calculateDocumentLineFromBase(
-          baseQty,
-          baseUnitCost.toNumber(),
+        // Preserve up to 6dp unit cost (line-total lead); never 2dp-truncate via Money.round
+        const unitCost = new Decimal(item.unitCost)
+          .toDecimalPlaces(6, Decimal.ROUND_HALF_UP)
+          .toNumber();
+        // SSOT: line total always from qty × unitCost — never trust client lineTotal alone
+        const canonicalLineTotal = PricingEngine.calculateLineTotal(
+          item.quantity,
+          unitCost,
         ).toNumber();
 
         poItems.push({
@@ -174,8 +178,8 @@ export const purchaseOrderService = {
           productId: item.productId,
           productName: item.productName,
           quantity: item.quantity,
-          unitCost: Money.toNumber(new Decimal(item.unitCost)), // Bank-grade precision
-          lineTotal: item.lineTotal != null ? Money.toNumber(new Decimal(item.lineTotal)) : canonicalLineTotal,
+          unitCost,
+          lineTotal: canonicalLineTotal,
           uomId: item.uomId || null,
           baseQty,
           baseUomId,
@@ -289,11 +293,10 @@ export const purchaseOrderService = {
           PurchaseOrderBusinessRules.validateUnitCost(Money.toNumber(unitCostDecimal));
         }
 
-        // Validate total and business rules
-        const totalAmount = Money.toNumber(input.items.reduce(
-          (sum, item) => sum.plus(new Decimal(item.quantity).times(item.unitCost)),
-          new Decimal(0)
-        ));
+        // Validate total and business rules (PricingEngine SSOT)
+        const totalAmount = PricingEngine.calculateDocumentTotal(
+          input.items.map((item) => ({ quantity: item.quantity, unitCost: item.unitCost })),
+        ).toNumber();
 
         await assertSupplierCreditHeadroom(
           client,
@@ -316,10 +319,12 @@ export const purchaseOrderService = {
             client,
           );
           const baseQty = PricingEngine.calculateBaseQuantity(item.quantity, conversionFactor).toNumber();
-          const baseUnitCost = PricingEngine.normalizeDisplayUnitCost(item.unitCost, conversionFactor);
-          const canonicalLineTotal = PricingEngine.calculateDocumentLineFromBase(
-            baseQty,
-            baseUnitCost.toNumber(),
+          const unitCost = new Decimal(item.unitCost)
+            .toDecimalPlaces(6, Decimal.ROUND_HALF_UP)
+            .toNumber();
+          const canonicalLineTotal = PricingEngine.calculateLineTotal(
+            item.quantity,
+            unitCost,
           ).toNumber();
 
           poItems.push({
@@ -327,8 +332,8 @@ export const purchaseOrderService = {
             productId: item.productId,
             productName: item.productName,
             quantity: item.quantity,
-            unitCost: Money.toNumber(new Decimal(item.unitCost)),
-            lineTotal: item.lineTotal != null ? Money.toNumber(new Decimal(item.lineTotal)) : canonicalLineTotal,
+            unitCost,
+            lineTotal: canonicalLineTotal,
             uomId: item.uomId || null,
             baseQty,
             baseUomId,
@@ -350,27 +355,14 @@ export const purchaseOrderService = {
   },
 
   /**
-   * Keep workflow status aligned with net-received totals (finalize / return GRN).
+   * Keep workflow status aligned with net-received totals (finalize / return GRN / reverse).
+   * Delegates to poReceiptStatusSync — the sole auto-writer (SSOT).
    */
   async syncPOStatusWithReceipts(
     pool: Pool | PoolClient,
     poId: string,
   ): Promise<void> {
-    const statusRes = await pool.query<{ status: string }>(
-      `SELECT status FROM purchase_orders WHERE id = $1`,
-      [poId],
-    );
-    const status = statusRes.rows[0]?.status;
-    if (!status || status === 'DRAFT' || status === 'CANCELLED') return;
-
-    const fullyReceived = await goodsReceiptRepository.isPOFullyReceived(pool, poId);
-    if (fullyReceived && status !== 'COMPLETED') {
-      await purchaseOrderRepository.updatePOStatus(pool, poId, 'COMPLETED');
-      return;
-    }
-    if (!fullyReceived && status === 'COMPLETED') {
-      await purchaseOrderRepository.updatePOStatus(pool, poId, 'PENDING');
-    }
+    await syncPOStatusWithReceipts(pool, poId);
   },
 
   /**
@@ -396,6 +388,8 @@ export const purchaseOrderService = {
     limit: number = 50,
     filters?: { status?: string; supplierId?: string; sortBy?: string; sortOrder?: 'asc' | 'desc' }
   ): Promise<{ pos: PurchaseOrder[]; total: number }> {
+    const { healFullyReversedPurchaseOrdersToDraft } = await import('./poReceiptStatusSync.js');
+    await healFullyReversedPurchaseOrdersToDraft(pool);
     return purchaseOrderRepository.listPOs(pool, page, limit, filters);
   },
 
@@ -502,10 +496,9 @@ export const purchaseOrderService = {
 
       await PurchaseOrderBusinessRules.validateSupplierExists(client, existing.po.supplierId);
 
-      const totalAmount = Money.toNumber(existing.items.reduce(
-        (sum, item) => sum.plus(new Decimal(item.quantity).times(item.unitCost)),
-        new Decimal(0),
-      ));
+      const totalAmount = PricingEngine.calculateDocumentTotal(
+        existing.items.map((item) => ({ quantity: item.quantity, unitCost: item.unitCost })),
+      ).toNumber();
       await assertSupplierCreditHeadroom(client, existing.po.supplierId, totalAmount, 'PO submit');
 
       return purchaseOrderRepository.updatePOStatus(client, id, 'PENDING');
@@ -565,10 +558,9 @@ export const purchaseOrderService = {
 
       await PurchaseOrderBusinessRules.validateSupplierExists(client, po.supplierId);
 
-      const totalAmount = Money.toNumber(items.reduce(
-        (sum, item) => sum.plus(new Decimal(item.quantity).times(item.unitCost)),
-        new Decimal(0),
-      ));
+      const totalAmount = PricingEngine.calculateDocumentTotal(
+        items.map((item) => ({ quantity: item.quantity, unitCost: item.unitCost })),
+      ).toNumber();
       await assertSupplierCreditHeadroom(
         client,
         po.supplierId,

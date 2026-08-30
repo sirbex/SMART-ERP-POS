@@ -109,8 +109,11 @@ async function assertPOAllowsReceiving(
     if (!hasOpen) {
       throw new Error('Purchase order is already fully received');
     }
-    // Net-received model: returns reopen receipt against this PO (Phase 1B).
-    await purchaseOrderRepository.updatePOStatus(pool, purchaseOrderId, 'PENDING');
+    // Net-received model: returns reopen receipt against this PO (Phase 1B) — SSOT sync.
+    const { syncPOStatusWithReceipts } = await import(
+      '../purchase-orders/poReceiptStatusSync.js'
+    );
+    await syncPOStatusWithReceipts(pool, purchaseOrderId);
     return;
   }
   if (status !== 'PENDING') {
@@ -799,11 +802,11 @@ export const goodsReceiptService = {
       // Complete the GR
       await goodsReceiptRepository.finalizeGR(client, id);
 
-      // If PO fully received, mark completed
-      const fully = await goodsReceiptRepository.isPOFullyReceived(client, gr.purchaseOrderId);
-      if (fully) {
-        await purchaseOrderRepository.updatePOStatus(client, gr.purchaseOrderId, 'COMPLETED');
-      }
+      // Align PO PENDING ↔ COMPLETED from net-received SSOT (sole sync writer)
+      const { syncPOStatusWithReceipts } = await import(
+        '../purchase-orders/poReceiptStatusSync.js'
+      );
+      await syncPOStatusWithReceipts(client, gr.purchaseOrderId);
 
       // ============================================================
       // SYSTEM RULE: GRN does NOT create Accounts Payable.
@@ -1055,7 +1058,7 @@ export const goodsReceiptService = {
       search?: string;
       startDate?: string;
       endDate?: string;
-      billingStatus?: 'TO_INVOICE' | 'INVOICED';
+      billingStatus?: 'TO_INVOICE' | 'INVOICED' | 'REVERSED';
       sortBy?: string;
       sortOrder?: 'asc' | 'desc';
     }
@@ -1398,10 +1401,10 @@ export const goodsReceiptService = {
     return correctionEligibilityService.eligibilityReverseUninvoicedReceipt(pool, grId);
   },
 
-  /**
-   * Reverse a posted uninvoiced goods receipt (SAP counter-document pattern).
-   * Creates + posts a full Return GRN in one transaction; GR stays COMPLETED with reversal metadata.
-   * Does NOT decrement purchase_order_items.received_quantity (Phase 1B).
+/**
+   * Full reverse of a posted goods receipt (one click).
+   * Auto-cancels linked unpaid bills (AP/GL), posts full Return GRN, marks GR reversed, PO → DRAFT.
+   * Blocked when any linked bill is paid or any received qty is sold/consumed.
    */
   async reverseUninvoicedReceipt(
     pool: Pool,
@@ -1410,6 +1413,7 @@ export const goodsReceiptService = {
   ): Promise<{
     gr: GoodsReceipt;
     returnGrn: { id: string; returnGrnNumber: string; status: string };
+    cancelledBills: Array<{ invoiceId: string; invoiceNumber: string; glReversed: boolean }>;
   }> {
     const reason = input.reason?.trim();
     if (!reason) throw new BusinessError('Reversal reason is required', 'ERR_GR_REVERSAL_001');
@@ -1423,10 +1427,51 @@ export const goodsReceiptService = {
       );
       if (!eligibility.allowed || eligibility.route !== 'REVERSE_UNINVOICED_RECEIPT') {
         throw new BusinessError(
-          eligibility.blockers[0] ?? 'This goods receipt is not eligible for uninvoiced reversal',
+          eligibility.blockers[0] ?? 'This goods receipt is not eligible for full reverse',
           'ERR_GR_REVERSAL_002',
           { blockers: eligibility.blockers },
         );
+      }
+
+      const { planSupplierBillsForGrFullReverse, GR_FULL_REVERSE_REASON_PREFIX } = await import(
+        '../../../../shared/domain/grFullReverseSsot.js'
+      );
+      const { correctionEligibilityRepository } = await import(
+        '../corrections/correctionEligibilityRepository.js'
+      );
+      const { cancelSupplierInvoiceForCorrection } = await import(
+        '../supplier-payments/supplierPaymentService.js'
+      );
+
+      const linkedBills =
+        await correctionEligibilityRepository.getSupplierInvoicesDirectlyLinkedToGrn(client, grId);
+      const billPlan = planSupplierBillsForGrFullReverse(linkedBills);
+      if (billPlan.blockers.length > 0) {
+        throw new BusinessError(billPlan.blockers[0], 'ERR_GR_REVERSAL_004', {
+          blockers: billPlan.blockers,
+        });
+      }
+
+      const cancelledBills: Array<{
+        invoiceId: string;
+        invoiceNumber: string;
+        glReversed: boolean;
+      }> = [];
+      for (const inv of billPlan.toCancel) {
+        const cancelled = await cancelSupplierInvoiceForCorrection(
+          pool,
+          inv.invoiceId,
+          input.userId,
+          `${GR_FULL_REVERSE_REASON_PREFIX} ${reason}`,
+          {
+            client,
+            grnId: grId,
+            glReasonTag: 'GR_FULL_REVERSE',
+            // Paid bills are blocked in planSupplierBillsForGrFullReverse — never unallocate here.
+            unallocatePaymentsFirst: false,
+          },
+        );
+        cancelledBills.push(cancelled);
       }
 
       const returnableSnapshot = await returnGrnRepository.getReturnableItems(client, grId);
@@ -1453,7 +1498,7 @@ export const goodsReceiptService = {
         pool,
         {
           grnId: grId,
-          reason: `[Uninvoiced reversal] ${reason}`,
+          reason: `${GR_FULL_REVERSE_REASON_PREFIX} ${reason}`,
           createdBy: input.userId,
           lines,
         },
@@ -1468,10 +1513,11 @@ export const goodsReceiptService = {
         reversedByUserId: input.userId,
       });
 
-      logger.info('[GR] Uninvoiced receipt reversed via Return GRN', {
+      logger.info('[GR] Full receipt reverse: bills cancelled + Return GRN posted', {
         grId,
         returnGrnId: posted.id,
         returnGrnNumber: posted.returnGrnNumber,
+        cancelledBillCount: cancelledBills.length,
         lineCount: lines.length,
       });
 
@@ -1485,6 +1531,7 @@ export const goodsReceiptService = {
           returnGrnNumber: posted.returnGrnNumber,
           status: posted.status,
         },
+        cancelledBills,
       };
     });
   },

@@ -14,6 +14,20 @@ import { grBillableLineTotal, splitGRReceiptQuantities } from '../../utils/grRec
 import { grItemTrackExpiry, grLineExpirySatisfied } from '../../utils/grExpiryGate';
 import { isGoodsReceiptPosted } from '@shared/domain/pgDomainEnums';
 import {
+  alignPaperTotalToGrAmount,
+  buildGrnBillPromptDefaults,
+  GRN_BILL_PROMPT_COPY,
+  listGrnBillUnderVarianceReasons,
+  resolveGrnBillOverGuidance,
+  resolveGrnBillPromptSupplierLabel,
+  resolveGrnBillPromptVariance,
+  suggestGrnBillVarianceReason,
+} from '@shared/domain/grnBillPromptSsot';
+import {
+  canCreateSupplierCreditNoteFromReturn,
+  supplierReturnActionLabel,
+} from '@shared/domain/supplierReturnWorklist';
+import {
   useGoodsReceipts,
   useFinalizeGoodsReceipt,
   useGoodsReceipt,
@@ -354,7 +368,7 @@ export default function GoodsReceiptsPage() {
   const embedded = Boolean(workbench?.embedded);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>('');
-  const [billingFilter, setBillingFilter] = useState<'' | 'TO_INVOICE' | 'INVOICED'>('');
+  const [billingFilter, setBillingFilter] = useState<'' | 'TO_INVOICE' | 'INVOICED' | 'REVERSED'>('');
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('custom');
@@ -438,6 +452,8 @@ export default function GoodsReceiptsPage() {
     varianceReason: '' | 'SUPPLIER_DISCOUNT' | 'ROUNDING_DIFFERENCE' | 'PRICE_VARIANCE' | 'EDIT_LINE_PRICES';
   } | null>(null);
   const [billPromptLoading, setBillPromptLoading] = useState(false);
+  /** Optional paper invoice total on draft GR — carry into bill prompt (visibility only). */
+  const [draftPaperInvoiceTotal, setDraftPaperInvoiceTotal] = useState('');
   const [baseline, setBaseline] = useState<'PO' | 'PRODUCT'>('PO');
   const [poSearch, setPoSearch] = useState('');
   const [poPage, setPoPage] = useState(1);
@@ -948,20 +964,11 @@ export default function GoodsReceiptsPage() {
       }
 
       // ── One-click bill prompt ──────────────────────────────────────────
-      // Modern UX: offer to create the supplier bill immediately so the user
-      // does not have to navigate back to the GR later. The bill is built
-      // entirely from this GR's data on the backend (createInvoiceFromGRN).
+      // Billable total comes from server PricingEngine SSOT — never computed in UI.
       try {
-        // Compute total from the same items array used elsewhere on this page.
-        const grTotal = items.reduce((sum, it) => {
-          const edits = editItems[it.id] || {};
-          const qty = Number(edits.receivedQuantity ?? it.receivedQuantity ?? it.received_quantity ?? 0);
-          const cost = Number(edits.unitCost ?? it.unitCost ?? it.unit_cost ?? 0);
-          const ordered = Number(it.orderedQuantity ?? it.ordered_quantity ?? 0);
-          const poAlready = Number(it.poAlreadyReceived ?? it.po_already_received ?? 0);
-          const bonus = !!(edits.isBonus ?? it.isBonus ?? it.is_bonus ?? false);
-          return sum + grBillableLineTotal(ordered, poAlready, qty, cost, bonus);
-        }, 0);
+        const previewRes = await api.get(`/supplier-payments/grns/${id}/billable-total`);
+        const preview = previewRes.data?.data as { billableTotal?: number } | undefined;
+        const grTotal = Number(preview?.billableTotal ?? 0);
         const grNumber = selectedGR?.grNumber || selectedGR?.receiptNumber || selectedGR?.receipt_number || '';
         const alreadyBilled =
           ((grDetail?.gr as { supplierBillNumber?: string } | undefined)?.supplierBillNumber || '').length > 0;
@@ -986,17 +993,17 @@ export default function GoodsReceiptsPage() {
           (selectedGR as { supplierName?: string; supplier_name?: string } | undefined)?.supplier_name ||
           '';
         if (grTotal > 0 && !skipBillPrompt) {
-          // Open designed modal (not browser confirm) — see post-finalize modal below.
-          setBillPrompt({
-            grId: id,
-            grNumber,
-            total: grTotal,
-            supplierName,
-            supplierInvoiceNumber: grNumber ? `INV-${grNumber}` : '',
-            invoiceDate: new Date().toLocaleDateString('en-CA'),
-            supplierReportedTotal: '',
-            varianceReason: '',
-          });
+          // Defaults SSOT: supplier from GR; paper total from draft match check when entered.
+          setBillPrompt(
+            buildGrnBillPromptDefaults({
+              grId: id,
+              grNumber,
+              computedTotal: grTotal,
+              supplierName,
+              paperTotalOverride: draftPaperInvoiceTotal,
+            }),
+          );
+          setDraftPaperInvoiceTotal('');
         } else if (linkedSiblingBill) {
           toast.success(
             `Received. Linked to existing bill ${linkedSiblingBill.invoiceNumber} from ${linkedSiblingBill.grnNumber} — no new supplier invoice.`,
@@ -1017,6 +1024,7 @@ export default function GoodsReceiptsPage() {
     setEditItems({});
     setShowPerLineStoreOverride(false);
     setHeaderReceivingStoreId('');
+    setDraftPaperInvoiceTotal('');
     setSelectedGR(gr);
     setShowDetailsModal(true);
   };
@@ -1052,6 +1060,10 @@ export default function GoodsReceiptsPage() {
   }, [showReturnModal, returnableItems]);
 
   const handleOpenReturnModal = () => {
+    if (isGrReversed) {
+      toast.error('This receipt is already reversed — return is closed.');
+      return;
+    }
     setReturnReason('');
     setReturnQuantities({});
     setReturnUomIds({});
@@ -1059,6 +1071,10 @@ export default function GoodsReceiptsPage() {
   };
 
   const handleOpenReverseModal = () => {
+    if (isGrReversed) {
+      toast.error('This receipt is already reversed.');
+      return;
+    }
     setReverseReason('');
     setShowReverseModal(true);
   };
@@ -1092,16 +1108,28 @@ export default function GoodsReceiptsPage() {
       const res = await api.goodsReceipts.reverseUninvoiced(selectedGRId, {
         reason: reverseReason.trim(),
       });
-      const payload = (res.data as { data?: { returnGrn?: { returnGrnNumber?: string } } })?.data;
+      const payload = (res.data as {
+        data?: {
+          returnGrn?: { returnGrnNumber?: string };
+          cancelledBills?: Array<{ invoiceNumber?: string }>;
+        };
+      })?.data;
       const rgrnNum = payload?.returnGrn?.returnGrnNumber ?? 'Return GRN';
-      toast.success(`Receipt reversed via ${rgrnNum}. Original GR remains posted for audit.`);
+      const billCount = payload?.cancelledBills?.length ?? 0;
+      toast.success(
+        billCount > 0
+          ? `Receipt reversed via ${rgrnNum}. ${billCount} bill(s) cancelled. PO returned to Draft.`
+          : `Receipt reversed via ${rgrnNum}. PO returned to Draft.`,
+      );
       setShowReverseModal(false);
       queryClient.invalidateQueries({ queryKey: ['goods-receipts'] });
       queryClient.invalidateQueries({ queryKey: ['gr-reverse-eligibility', selectedGRId] });
       queryClient.invalidateQueries({ queryKey: ['return-grn'] });
       queryClient.invalidateQueries({ queryKey: ['goods-receipt', selectedGRId] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['supplier-invoices'] });
     } catch (err) {
-      handleApiError(err, { fallback: 'Failed to reverse uninvoiced receipt' });
+      handleApiError(err, { fallback: 'Failed to reverse receipt' });
     } finally {
       setReverseSubmitting(false);
     }
@@ -1160,9 +1188,10 @@ export default function GoodsReceiptsPage() {
           { duration: 7000 },
         );
       } else {
-        toast(
-          'Return posted. Create Supplier Bill on this receipt first, then Create Credit Note on the return.',
-          { duration: 8000, icon: '📋' },
+        // Uninvoiced return SSOT: no AP → no SCN. Never tell operators to bill first.
+        toast.success(
+          'Return posted. No supplier bill on this receipt — credit note not required (stock + GR/IR cleared).',
+          { duration: 7000 },
         );
       }
       setShowReturnModal(false);
@@ -1323,10 +1352,9 @@ export default function GoodsReceiptsPage() {
   // Server returns sorted/filtered slice — no client-side re-sort on current page
   const displayGoodsReceipts = goodsReceipts;
 
-  const billingCounts = useMemo(() => ({
-    toInvoice: goodsReceipts.filter((g) => (g.billingStatus || g.billing_status) === 'TO_INVOICE').length,
-    invoiced: goodsReceipts.filter((g) => (g.billingStatus || g.billing_status) === 'INVOICED').length,
-  }), [goodsReceipts]);
+  /** Only show count when that lane filter is active (server total) — never page-slice fake totals. */
+  const activeBillingTotal =
+    billingFilter && pagination?.total != null ? Number(pagination.total) : null;
 
   const renderGrActions = (gr: GRRow, layout: 'row' | 'stack' = 'row') => {
     const viewBtn = (
@@ -1448,7 +1476,7 @@ export default function GoodsReceiptsPage() {
                       id="billing-filter"
                       value={billingFilter}
                       onChange={(e) => {
-                        setBillingFilter(e.target.value as '' | 'TO_INVOICE' | 'INVOICED');
+                        setBillingFilter(e.target.value as '' | 'TO_INVOICE' | 'INVOICED' | 'REVERSED');
                         setPage(1);
                       }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
@@ -1456,6 +1484,7 @@ export default function GoodsReceiptsPage() {
                       <option value="">All</option>
                       <option value="TO_INVOICE">To invoice (not billed)</option>
                       <option value="INVOICED">Invoiced (bill posted)</option>
+                      <option value="REVERSED">Reversed (uninvoiced undo)</option>
                     </select>
                   </div>
                 </div>
@@ -1547,7 +1576,7 @@ export default function GoodsReceiptsPage() {
         <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-gray-100">
           {/* Quick billing lane filters (SAP/Odoo) */}
           <div className="px-4 sm:px-6 py-3 border-b border-gray-100 bg-gray-50/80 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="grid grid-cols-1 min-[400px]:grid-cols-3 gap-2 sm:flex sm:flex-wrap">
+            <div className="grid grid-cols-1 min-[400px]:grid-cols-2 sm:grid-cols-4 gap-2 sm:flex sm:flex-wrap">
               <button
                 type="button"
                 onClick={() => { setBillingFilter(''); setPage(1); }}
@@ -1560,14 +1589,30 @@ export default function GoodsReceiptsPage() {
                 onClick={() => { setBillingFilter('TO_INVOICE'); setPage(1); }}
                 className={`w-full sm:w-auto px-3 py-2 text-xs font-medium rounded-lg transition-colors ${billingFilter === 'TO_INVOICE' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-900 ring-1 ring-amber-200 hover:bg-amber-100'}`}
               >
-                To invoice{billingCounts.toInvoice > 0 ? ` (${billingCounts.toInvoice})` : ''}
+                To invoice
+                {billingFilter === 'TO_INVOICE' && activeBillingTotal != null
+                  ? ` (${activeBillingTotal})`
+                  : ''}
               </button>
               <button
                 type="button"
                 onClick={() => { setBillingFilter('INVOICED'); setPage(1); }}
                 className={`w-full sm:w-auto px-3 py-2 text-xs font-medium rounded-lg transition-colors ${billingFilter === 'INVOICED' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100'}`}
               >
-                Invoiced{billingCounts.invoiced > 0 ? ` (${billingCounts.invoiced})` : ''}
+                Invoiced
+                {billingFilter === 'INVOICED' && activeBillingTotal != null
+                  ? ` (${activeBillingTotal})`
+                  : ''}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setBillingFilter('REVERSED'); setPage(1); }}
+                className={`w-full sm:w-auto px-3 py-2 text-xs font-medium rounded-lg transition-colors ${billingFilter === 'REVERSED' ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-800 ring-1 ring-slate-200 hover:bg-slate-200'}`}
+              >
+                Reversed
+                {billingFilter === 'REVERSED' && activeBillingTotal != null
+                  ? ` (${activeBillingTotal})`
+                  : ''}
               </button>
             </div>
             <p className="text-xs text-gray-500 leading-relaxed max-w-xl hidden lg:block">
@@ -1601,7 +1646,10 @@ export default function GoodsReceiptsPage() {
                       </p>
                     </div>
                     <div className="shrink-0 pt-0.5">
-                      <GrReceiptStatusBadge status={gr.status} />
+                      <GrReceiptStatusBadge
+                        status={gr.status}
+                        isReversed={gr.isReversed ?? gr.is_reversed}
+                      />
                     </div>
                   </div>
                   <GrBillingStatusBadge
@@ -1673,7 +1721,10 @@ export default function GoodsReceiptsPage() {
                         {formatDisplayDate(gr.receivedDate || gr.received_date)}
                       </td>
                       <td className="px-4 lg:px-6 py-3 whitespace-nowrap">
-                        <GrReceiptStatusBadge status={gr.status} />
+                        <GrReceiptStatusBadge
+                          status={gr.status}
+                          isReversed={gr.isReversed ?? gr.is_reversed}
+                        />
                       </td>
                       <td className="px-4 lg:px-6 py-3 whitespace-nowrap">
                         <GrBillingStatusBadge
@@ -1742,7 +1793,9 @@ export default function GoodsReceiptsPage() {
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700">Status</label>
-                  <div className="mt-1"><GrReceiptStatusBadge status={selectedGR.status} /></div>
+                  <div className="mt-1">
+                    <GrReceiptStatusBadge status={selectedGR.status} isReversed={isGrReversed} />
+                  </div>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700">Received By</label>
@@ -1984,9 +2037,19 @@ export default function GoodsReceiptsPage() {
                 <div className="mb-6 bg-slate-50 border border-slate-200 rounded-lg p-4">
                   <h5 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
-                    This receipt will post
+                    {isGrReversed
+                      ? 'Originally posted (now reversed — net zero)'
+                      : isGoodsReceiptPosted(selectedGR.status)
+                        ? 'This receipt posted'
+                        : 'This receipt will post'}
                   </h5>
-                  <div className="grid grid-cols-2 gap-4">
+                  {isGrReversed ? (
+                    <p className="text-sm text-slate-600 mb-3">
+                      Inventory and GR/IR were unwound by the counter-document
+                      {reversedByRgrnNumber ? ` (${reversedByRgrnNumber})` : ''}. Amounts below are historical only.
+                    </p>
+                  ) : null}
+                  <div className={`grid grid-cols-2 gap-4 ${isGrReversed ? 'opacity-60' : ''}`}>
                     <div className="flex items-center justify-between bg-white rounded-md px-3 py-2 border">
                       <div>
                         <span className="text-xs text-slate-500">DR</span>
@@ -2002,6 +2065,67 @@ export default function GoodsReceiptsPage() {
                       <span className="text-sm font-bold text-red-700">{formatCurrency(accountingPreview)}</span>
                     </div>
                   </div>
+
+                  {/* Paper vs GR match — visibility only; does not change stock posting */}
+                  {selectedGR.status === 'DRAFT' && accountingPreview > 0 && (() => {
+                    const match = resolveGrnBillPromptVariance(
+                      accountingPreview,
+                      draftPaperInvoiceTotal,
+                    );
+                    return (
+                      <div className="mt-3 pt-3 border-t border-slate-200 space-y-2">
+                        <div className="flex flex-wrap items-end gap-3">
+                          <div className="flex-1 min-w-[10rem]">
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                              Supplier invoice (paper)
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              value={draftPaperInvoiceTotal}
+                              onChange={(e) => setDraftPaperInvoiceTotal(e.target.value)}
+                              placeholder={formatCurrency(accountingPreview)}
+                            />
+                          </div>
+                          <div className="text-right pb-1.5">
+                            <div className="text-xs text-slate-500">GR amount</div>
+                            <div className="text-sm font-bold text-slate-900 tabular-nums">
+                              {formatCurrency(accountingPreview)}
+                            </div>
+                          </div>
+                        </div>
+                        {match.hasPaperTotal && (
+                          <div
+                            className={`rounded-md border px-3 py-2 text-sm flex flex-wrap items-center justify-between gap-2 ${
+                              match.direction === 'match'
+                                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                                : match.direction === 'over'
+                                  ? 'bg-amber-50 border-amber-300 text-amber-950'
+                                  : 'bg-sky-50 border-sky-200 text-sky-950'
+                            }`}
+                          >
+                            <span className="font-medium">{GRN_BILL_PROMPT_COPY.variancePanelTitle}</span>
+                            <span className="font-mono font-bold tabular-nums">
+                              {match.direction === 'match'
+                                ? formatCurrency(0)
+                                : `${match.direction === 'under' ? '−' : '+'}${formatCurrency(match.absVariance)}`}
+                            </span>
+                            <span className="w-full text-xs opacity-90">
+                              Paper {formatCurrency(match.paperTotal)} · GR{' '}
+                              {formatCurrency(match.computedTotal)}
+                              {match.direction === 'over'
+                                ? ` — ${resolveGrnBillOverGuidance(match.absVariance)}`
+                                : match.direction === 'under'
+                                  ? ' — under-bill; pick a reason when creating the bill'
+                                  : ' — ready to bill'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -2072,10 +2196,11 @@ export default function GoodsReceiptsPage() {
                     {isGrReversed && (
                       <div className="text-sm rounded-lg border border-rose-300 bg-rose-50 text-rose-900 px-3 py-2">
                         <span className="font-semibold">Reversed (counter-document).</span>
-                        {' '}Status remains <strong>COMPLETED</strong>
+                        {' '}Receipt status stays <strong>Completed</strong> for audit
                         {reversedByRgrnNumber ? (
                           <> — reversed by <strong>{reversedByRgrnNumber}</strong></>
                         ) : null}
+                        . Not billable; return and supplier reassign are closed.
                         {(grReversalMeta?.reversalReason ?? grReversalMeta?.reversal_reason) && (
                           <span className="block mt-1 text-rose-800">
                             Reason: {grReversalMeta?.reversalReason ?? grReversalMeta?.reversal_reason}
@@ -2086,18 +2211,26 @@ export default function GoodsReceiptsPage() {
                     {(() => {
                       const supplierBillNum =
                         (grDetail?.gr as { supplierBillNumber?: string } | undefined)?.supplierBillNumber || '';
-                      const hasSupplierBill =
-                        supplierBillNum.length > 0
-                        || existingReturns.some((r) => r.hasSupplierBill);
-                      const pendingCreditReturns = existingReturns.filter(
-                        (r) => r.status === 'POSTED' && !r.hasCreditNote,
-                      );
-                      if (pendingCreditReturns.length > 0 && !hasSupplierBill) {
+                      const uninvoicedPosted = existingReturns.filter((r) => {
+                        const hasBill = supplierBillNum.length > 0 || !!r.hasSupplierBill;
                         return (
-                          <div className="text-sm rounded-lg border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2">
-                            <span className="font-semibold">Credit note not available yet.</span>
-                            {' '}Create the <strong>Supplier Bill</strong> for this receipt first — you cannot issue a
-                            supplier credit note until the goods receipt has been billed (accounts payable must exist to reduce).
+                          String(r.status || '').toUpperCase() === 'POSTED' &&
+                          !r.hasCreditNote &&
+                          !hasBill
+                        );
+                      });
+                      if (uninvoicedPosted.length > 0) {
+                        return (
+                          <div className="text-sm rounded-lg border border-slate-200 bg-slate-50 text-slate-800 px-3 py-2">
+                            <span className="font-semibold">No credit note needed.</span>
+                            {' '}
+                            {supplierReturnActionLabel({
+                              status: 'POSTED',
+                              hasCreditNote: false,
+                              hasSupplierBill: false,
+                              reason: uninvoicedPosted[0]?.reason,
+                            })}
+                            {' — '}stock and GR/IR cleared on post; do not create a bill just to unlock SCN.
                           </div>
                         );
                       }
@@ -2120,23 +2253,19 @@ export default function GoodsReceiptsPage() {
                         ))}
                         </div>
                         <div className="flex flex-col gap-2 w-full sm:flex-row sm:flex-wrap">
-                        {existingReturns.filter((r) => r.status === 'POSTED' && !r.hasCreditNote).map((r) => {
-                          const supplierBillNum =
-                            (grDetail?.gr as { supplierBillNumber?: string } | undefined)?.supplierBillNumber || '';
-                          const canCreateCreditNote =
-                            supplierBillNum.length > 0 || !!r.hasSupplierBill;
-                          if (!canCreateCreditNote) {
-                            return (
-                              <span
-                                key={`cn-blocked-${r.id}`}
-                                className="text-xs px-3 py-2 rounded-lg border border-amber-400 bg-amber-50 text-amber-800 w-full sm:w-auto text-center sm:text-left"
-                                title="Create Supplier Bill on this receipt first, then create the credit note on the return."
-                              >
-                                Bill required before credit note
-                              </span>
-                            );
-                          }
-                          return (
+                        {existingReturns
+                          .filter((r) => {
+                            const supplierBillNum =
+                              (grDetail?.gr as { supplierBillNumber?: string } | undefined)
+                                ?.supplierBillNumber || '';
+                            return canCreateSupplierCreditNoteFromReturn({
+                              status: r.status,
+                              hasCreditNote: r.hasCreditNote,
+                              hasSupplierBill: supplierBillNum.length > 0 || !!r.hasSupplierBill,
+                              reason: r.reason,
+                            });
+                          })
+                          .map((r) => (
                           <button
                             key={`cn-${r.id}`}
                             onClick={() =>
@@ -2160,8 +2289,7 @@ export default function GoodsReceiptsPage() {
                           >
                             {createCreditNoteMutation.isPending ? 'Creating…' : 'Create Credit Note'}
                           </button>
-                          );
-                        })}
+                          ))}
                         </div>
                       </div>
                     )}
@@ -2171,24 +2299,26 @@ export default function GoodsReceiptsPage() {
                         type="button"
                         onClick={handleOpenReverseModal}
                         className="text-sm font-medium px-4 bg-rose-700 text-white rounded-lg hover:bg-rose-800 flex gap-2"
-                        title="Full reversal via Return GRN — original receipt stays posted (uninvoiced only)"
+                        title="Full reverse: auto-cancel unpaid linked bills (AP), reverse stock, return PO to Draft. Blocked if paid or stock consumed."
                       >
                         <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                         </svg>
-                        Reverse Uninvoiced Receipt
+                        Reverse Receipt
                       </button>
                     )}
-                    <button
-                      onClick={handleOpenReturnModal}
-                      className="text-sm font-medium px-4 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex gap-2"
-                    >
-                      <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                      </svg>
-                      Return to Supplier
-                    </button>
-                    {canReassignSupplier && (grDetail?.gr?.supplierId || selectedGR.supplierId || selectedGR.supplier_id) && (
+                    {!isGrReversed && (
+                      <button
+                        onClick={handleOpenReturnModal}
+                        className="text-sm font-medium px-4 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex gap-2"
+                      >
+                        <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                        </svg>
+                        Return to Supplier
+                      </button>
+                    )}
+                    {!isGrReversed && canReassignSupplier && (grDetail?.gr?.supplierId || selectedGR.supplierId || selectedGR.supplier_id) && (
                       <button
                         type="button"
                         onClick={() => setShowSupplierReassignModal(true)}
@@ -2219,6 +2349,26 @@ export default function GoodsReceiptsPage() {
                         return sum + qty * cost;
                       }, 0);
                       const isCreating = creatingBillForGR === grId;
+                      // Fully reversed uninvoiced receipt — no AP to create
+                      if (isGrReversed) {
+                        return (
+                          <div
+                            className={`${mobileActionBtnClass} px-4 bg-rose-50 border border-rose-300 text-rose-900 rounded-lg flex gap-2 text-sm font-semibold`}
+                            title={
+                              reversedByRgrnNumber
+                                ? `Reversed by ${reversedByRgrnNumber} — cannot create supplier bill`
+                                : 'Receipt fully reversed — cannot create supplier bill'
+                            }
+                          >
+                            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                            {reversedByRgrnNumber
+                              ? `Reversed (${reversedByRgrnNumber}) — not billable`
+                              : 'Reversed — not billable'}
+                          </div>
+                        );
+                      }
                       // Already billed → show a passive badge instead of the action button
                       if (existingBillNum) {
                         return (
@@ -2333,8 +2483,8 @@ export default function GoodsReceiptsPage() {
           onClose={() => {
             if (!reverseSubmitting) setShowReverseModal(false);
           }}
-          title="Reverse Uninvoiced Receipt"
-          subtitle={`Creates a full Return GRN — original ${selectedGR.grNumber || selectedGR.receipt_number} stays COMPLETED for audit`}
+          title="Reverse Receipt"
+          subtitle={`Cancels unpaid linked bills, reverses on-hand stock/GR-IR, marks ${selectedGR.grNumber || selectedGR.receipt_number} reversed, returns PO to Draft. Blocked if paid or goods consumed.`}
           width="lg"
           transactional
           cancellable={!reverseSubmitting}
@@ -2753,193 +2903,268 @@ export default function GoodsReceiptsPage() {
         </SlideDrawer>
       )}
 
-      {/* Post-Finalize: Create Supplier Bill Prompt (variance-aware ERP modal) */}
+      {/* Post-Finalize: Create Supplier Bill — compact, sticky actions */}
       {billPrompt && (() => {
-        // Derive variance state from current form values
-        const supplierTotalNum = billPrompt.supplierReportedTotal !== ''
-          ? parseFloat(billPrompt.supplierReportedTotal)
-          : NaN;
-        const hasSupplierTotal = !isNaN(supplierTotalNum) && supplierTotalNum > 0;
-        const varianceDiff = hasSupplierTotal
-          ? Math.round((billPrompt.total - supplierTotalNum) * 100) / 100
-          : 0;
-        const hasVariance = hasSupplierTotal && Math.abs(varianceDiff) > 0.005;
-        const needsVarianceReason = hasVariance && !billPrompt.varianceReason;
-        const isEditLinePrices = billPrompt.varianceReason === 'EDIT_LINE_PRICES';
-        const canSubmit = !needsVarianceReason && !isEditLinePrices;
+        const variance = resolveGrnBillPromptVariance(
+          billPrompt.total,
+          billPrompt.supplierReportedTotal,
+        );
+        const supplierTotalNum = variance.paperTotal;
+        const hasSupplierTotal = variance.hasPaperTotal;
+        const billExceedsReceived = variance.direction === 'over';
+        const underReasons =
+          variance.direction === 'under'
+            ? listGrnBillUnderVarianceReasons(variance.absVariance)
+            : [];
+        const reasonAllowed =
+          !billPrompt.varianceReason ||
+          underReasons.some((r) => r.value === billPrompt.varianceReason);
+        const effectiveReason =
+          reasonAllowed && billPrompt.varianceReason
+            ? billPrompt.varianceReason
+            : suggestGrnBillVarianceReason(variance.direction, variance.absVariance);
+        const needsVarianceReason =
+          variance.direction === 'under' && !effectiveReason;
+        const isEditLinePrices = effectiveReason === 'EDIT_LINE_PRICES';
+        const canSubmit =
+          hasSupplierTotal &&
+          !billExceedsReceived &&
+          !needsVarianceReason &&
+          !isEditLinePrices;
+
+        const applyPaperTotal = (raw: string) => {
+          const next = resolveGrnBillPromptVariance(billPrompt.total, raw);
+          const suggested = suggestGrnBillVarianceReason(next.direction, next.absVariance);
+          const allowed =
+            next.direction === 'under'
+              ? listGrnBillUnderVarianceReasons(next.absVariance).map((r) => r.value)
+              : [];
+          setBillPrompt((prev) => {
+            if (!prev) return prev;
+            const keep =
+              prev.varianceReason &&
+              allowed.includes(prev.varianceReason as (typeof allowed)[number])
+                ? prev.varianceReason
+                : suggested;
+            return {
+              ...prev,
+              supplierReportedTotal: raw,
+              varianceReason: keep as typeof prev.varianceReason,
+            };
+          });
+        };
+
+        const billAtGrAmount = () => {
+          applyPaperTotal(alignPaperTotalToGrAmount(billPrompt.total));
+        };
 
         return (
           <div
-            className="fixed inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+            className="fixed inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm p-3 sm:p-4"
             style={{ zIndex: ZINDEX.NESTED_PANEL + 1 }}
             role="dialog"
             aria-modal="true"
             aria-labelledby="bill-prompt-title"
           >
             <div
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-auto max-h-[min(92vh,640px)] flex flex-col overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Header */}
-              <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 px-6 py-5 text-white">
-                <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 id="bill-prompt-title" className="text-lg font-bold">Goods Receipt Finalized</h3>
-                    <p className="text-emerald-50 text-sm">{billPrompt.grNumber} is now in stock</p>
-                  </div>
-                </div>
+              <div className="shrink-0 bg-emerald-600 px-4 py-3 text-white">
+                <h3 id="bill-prompt-title" className="text-base font-bold leading-tight">
+                  Create supplier bill
+                </h3>
+                <p className="text-emerald-100 text-xs mt-0.5">
+                  {billPrompt.grNumber} · {resolveGrnBillPromptSupplierLabel(billPrompt.supplierName)}
+                </p>
               </div>
 
-              {/* Body */}
-              <div className="px-6 py-5 space-y-4">
-                <p className="text-gray-800 font-semibold text-base">Create supplier bill now?</p>
+              <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
+                <div className="flex items-baseline justify-between gap-3 text-sm">
+                  <span className="text-gray-500">GR amount</span>
+                  <span className="font-bold text-emerald-700 tabular-nums">
+                    {formatCurrency(billPrompt.total)}
+                  </span>
+                </div>
 
-                {/* Computed total — read-only, always from GRN */}
-                <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-2 text-sm">
-                  {billPrompt.supplierName && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Supplier</span>
-                      <span className="font-medium text-gray-900">{billPrompt.supplierName}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Goods Receipt</span>
-                    <span className="font-mono font-medium text-gray-900">{billPrompt.grNumber}</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Invoice #
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      value={billPrompt.supplierInvoiceNumber}
+                      onChange={(e) =>
+                        setBillPrompt((prev) =>
+                          prev ? { ...prev, supplierInvoiceNumber: e.target.value } : prev,
+                        )
+                      }
+                      placeholder={billPrompt.grNumber}
+                    />
                   </div>
-                  <div className="flex justify-between border-t border-gray-200 pt-2">
-                    <span className="text-gray-700 font-semibold">Computed bill amount</span>
-                    <span className="font-bold text-emerald-700 text-base">{formatCurrency(billPrompt.total)}</span>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Invoice date
+                    </label>
+                    <DatePicker
+                      value={billPrompt.invoiceDate}
+                      onChange={(v) =>
+                        setBillPrompt((prev) => (prev ? { ...prev, invoiceDate: v } : prev))
+                      }
+                      placeholder="Invoice date"
+                    />
                   </div>
-                  <p className="text-xs text-gray-400">Derived from GRN quantities × unit costs. Read-only.</p>
                 </div>
 
-                {/* Supplier Invoice Number */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Supplier Invoice Number
-                  </label>
-                  <input
-                    type="text"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    value={billPrompt.supplierInvoiceNumber}
-                    onChange={(e) => setBillPrompt(prev => prev ? { ...prev, supplierInvoiceNumber: e.target.value } : prev)}
-                    placeholder={billPrompt.grNumber}
-                  />
-                </div>
-
-                {/* Invoice Date */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Invoice Date
-                  </label>
-                  <DatePicker
-                    value={billPrompt.invoiceDate}
-                    onChange={(v) => setBillPrompt(prev => prev ? { ...prev, invoiceDate: v } : prev)}
-                    placeholder="Invoice date"
-                  />
-                </div>
-
-                {/* Supplier Reported Total (reference) */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Supplier Invoice Total <span className="font-normal text-gray-400">(from paper invoice, optional)</span>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Paper invoice total
                   </label>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     value={billPrompt.supplierReportedTotal}
-                    onChange={(e) => setBillPrompt(prev => prev ? {
-                      ...prev,
-                      supplierReportedTotal: e.target.value,
-                      varianceReason: '',   // reset reason when total changes
-                    } : prev)}
-                    placeholder="Leave blank if same as computed"
+                    onChange={(e) => applyPaperTotal(e.target.value)}
+                    placeholder={formatCurrency(billPrompt.total)}
                   />
-                  <p className="text-xs text-gray-400 mt-1">
-                    If different from computed amount, you will need to select a variance reason.
-                  </p>
+                  <p className="text-[11px] text-gray-400 mt-1">{GRN_BILL_PROMPT_COPY.supplierTotalHint}</p>
                 </div>
 
-                {/* Variance alert + reason picker */}
-                {hasVariance && (
-                  <div className={`rounded-lg border p-4 space-y-3 ${isEditLinePrices ? 'bg-red-50 border-red-300' : 'bg-amber-50 border-amber-300'}`}>
-                    <div className="flex items-start gap-2">
-                      <svg className={`w-5 h-5 flex-shrink-0 mt-0.5 ${isEditLinePrices ? 'text-red-500' : 'text-amber-600'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                      </svg>
-                      <div>
-                        <p className={`text-sm font-semibold ${isEditLinePrices ? 'text-red-800' : 'text-amber-800'}`}>
-                          Invoice total differs from received value by{' '}
-                          <span className="font-mono">{formatCurrency(Math.abs(varianceDiff))}</span>
-                          {varianceDiff > 0 ? ' (supplier billed less)' : ' (supplier billed more)'}
-                        </p>
-                        {isEditLinePrices && (
-                          <p className="text-xs text-red-700 mt-1">
-                            Correct the unit costs on GR {billPrompt.grNumber} first, then re-create this bill.
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-amber-800 mb-1">
-                        Select variance reason to continue
-                      </label>
-                      <select
-                        className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-amber-500"
-                        value={billPrompt.varianceReason}
-                        onChange={(e) => setBillPrompt(prev => prev ? {
-                          ...prev,
-                          varianceReason: e.target.value as typeof billPrompt.varianceReason
-                        } : prev)}
+                {variance.hasPaperTotal && (
+                  <div
+                    className={`rounded-lg border px-3 py-2.5 text-sm space-y-2 ${
+                      variance.direction === 'match'
+                        ? 'bg-emerald-50 border-emerald-200'
+                        : variance.direction === 'over'
+                          ? 'bg-amber-50 border-amber-300'
+                          : 'bg-amber-50 border-amber-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-gray-600">
+                        {GRN_BILL_PROMPT_COPY.variancePanelTitle}
+                      </span>
+                      <span
+                        className={`font-mono font-bold tabular-nums ${
+                          variance.direction === 'match'
+                            ? 'text-emerald-700'
+                            : variance.direction === 'over'
+                              ? 'text-amber-900'
+                              : 'text-amber-900'
+                        }`}
                       >
-                        <option value="">— Select reason —</option>
-                        <option value="SUPPLIER_DISCOUNT">Supplier Discount — supplier gave a discount</option>
-                        <option value="ROUNDING_DIFFERENCE">Rounding Difference — minor rounding (≤ 1 UGX)</option>
-                        <option value="PRICE_VARIANCE">Price Variance — supplier invoiced at different price</option>
-                        <option value="EDIT_LINE_PRICES">Edit Line Prices — I entered wrong costs on the GRN</option>
-                      </select>
+                        {variance.direction === 'match'
+                          ? formatCurrency(0)
+                          : `${variance.direction === 'under' ? '−' : '+'}${formatCurrency(variance.absVariance)}`}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-gray-700">
+                      <span>GR (stock / AP max)</span>
+                      <span className="text-right font-mono tabular-nums">
+                        {formatCurrency(variance.computedTotal)}
+                      </span>
+                      <span>Paper (supplier)</span>
+                      <span className="text-right font-mono tabular-nums">
+                        {formatCurrency(variance.paperTotal)}
+                      </span>
                     </div>
 
-                    {!isEditLinePrices && billPrompt.varianceReason && (
-                      <div className="text-xs text-amber-700 bg-amber-100 rounded p-2">
-                        <strong>GL impact:</strong>{' '}
-                        DR GR/IR Clearing (2150) {formatCurrency(billPrompt.total)} &nbsp;/&nbsp;
-                        CR Accounts Payable (2100) {formatCurrency(supplierTotalNum)} &nbsp;/&nbsp;
-                        {varianceDiff > 0 ? 'CR' : 'DR'} Price Variance (5020) {formatCurrency(Math.abs(varianceDiff))}
+                    {variance.direction === 'over' && (
+                      <div className="space-y-2">
+                        <p className="text-xs text-amber-950">
+                          {resolveGrnBillOverGuidance(variance.absVariance)}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={billAtGrAmount}
+                          className="w-full px-3 py-1.5 text-sm font-semibold text-emerald-800 bg-white border border-emerald-300 rounded-lg hover:bg-emerald-50"
+                        >
+                          {GRN_BILL_PROMPT_COPY.billAtGrLabel} (
+                          {formatCurrency(variance.computedTotal)})
+                        </button>
                       </div>
                     )}
-                  </div>
-                )}
 
-                {!hasVariance && (
-                  <div className="mt-1 px-3 py-2 bg-blue-50 border border-blue-100 rounded text-xs text-blue-800">
-                    <strong>GL impact:</strong> DR GR/IR Clearing (2150) &nbsp;/&nbsp; CR Accounts Payable (2100)
+                    {variance.direction === 'under' && (
+                      <>
+                        <div>
+                          <label className="block text-xs font-medium text-amber-900 mb-1">
+                            Reason
+                          </label>
+                          <select
+                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-amber-500"
+                            value={effectiveReason}
+                            onChange={(e) =>
+                              setBillPrompt((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      varianceReason: e.target
+                                        .value as typeof billPrompt.varianceReason,
+                                    }
+                                  : prev,
+                              )
+                            }
+                          >
+                            {!effectiveReason && <option value="">— Select —</option>}
+                            {underReasons.map((r) => (
+                              <option key={r.value} value={r.value}>
+                                {r.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        {isEditLinePrices && (
+                          <p className="text-xs text-red-700">
+                            Fix unit costs on {billPrompt.grNumber}, then create the bill again.
+                          </p>
+                        )}
+                        {!isEditLinePrices && effectiveReason && (
+                          <p className="text-[11px] text-amber-800/90 leading-snug">
+                            GL: DR 2150 {formatCurrency(billPrompt.total)} · CR 2100{' '}
+                            {formatCurrency(supplierTotalNum)} · CR 5020{' '}
+                            {formatCurrency(variance.absVariance)}
+                          </p>
+                        )}
+                      </>
+                    )}
+
+                    {variance.direction === 'match' && (
+                      <p className="text-[11px] text-emerald-800">
+                        GL: DR 2150 / CR 2100 — no variance
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* Footer */}
-              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex gap-3 justify-end">
+              <div className="shrink-0 px-4 py-3 bg-gray-50 border-t border-gray-200 flex gap-2 justify-end">
                 <button
                   type="button"
                   disabled={billPromptLoading}
                   onClick={() => setBillPrompt(null)}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                  className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
                 >
-                  Skip for now
+                  Skip
                 </button>
                 <button
                   type="button"
                   disabled={billPromptLoading || !canSubmit}
-                  title={!canSubmit ? (needsVarianceReason ? 'Select a variance reason to continue' : 'Fix GRN costs first') : undefined}
+                  title={
+                    !canSubmit
+                      ? needsVarianceReason
+                        ? 'Select a variance reason'
+                        : billExceedsReceived
+                          ? 'Paper total cannot exceed GR'
+                          : isEditLinePrices
+                            ? 'Fix GR costs first'
+                            : 'Enter paper invoice total'
+                      : undefined
+                  }
                   onClick={async () => {
                     if (!billPrompt) return;
                     setBillPromptLoading(true);
@@ -2952,15 +3177,24 @@ export default function GoodsReceiptsPage() {
                       };
                       if (hasSupplierTotal) {
                         body.supplierReportedTotal = supplierTotalNum;
-                        if (billPrompt.varianceReason) {
-                          body.varianceReason = billPrompt.varianceReason;
+                        if (effectiveReason) {
+                          body.varianceReason = effectiveReason;
                         }
                       }
                       const { data } = await api.post('/supplier-payments/invoices/from-grn', body);
                       if (!data.success) throw new Error(data.error || 'Failed to create bill');
-                      const dataObj = data.data as { invoice?: Record<string, unknown>; invoiceNumber?: string; SupplierInvoiceNumber?: string } | undefined;
+                      const dataObj = data.data as
+                        | {
+                            invoice?: Record<string, unknown>;
+                            invoiceNumber?: string;
+                            SupplierInvoiceNumber?: string;
+                          }
+                        | undefined;
                       const inv = dataObj?.invoice ?? dataObj;
-                      const invNum = (inv?.invoiceNumber as string | undefined) || (inv?.SupplierInvoiceNumber as string | undefined) || '';
+                      const invNum =
+                        (inv?.invoiceNumber as string | undefined) ||
+                        (inv?.SupplierInvoiceNumber as string | undefined) ||
+                        '';
                       setBillPrompt(null);
                       await detailsQuery.refetch();
                       alert(`✅ Supplier bill ${invNum} created from ${billPrompt.grNumber}.`);
@@ -2971,23 +3205,29 @@ export default function GoodsReceiptsPage() {
                       setCreatingBillForGR(null);
                     }
                   }}
-                  className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="px-3 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {billPromptLoading ? (
                     <>
                       <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        />
                       </svg>
-                      Creating bill…
+                      Creating…
                     </>
                   ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      Create supplier bill
-                    </>
+                    'Create bill'
                   )}
                 </button>
               </div>

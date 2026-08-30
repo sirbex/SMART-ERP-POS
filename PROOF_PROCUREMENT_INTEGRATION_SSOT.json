@@ -1,0 +1,177 @@
+{
+  "at": "2026-08-30T07:31:29.325Z",
+  "feature": "PROCUREMENT_INTEGRATION_SSOT",
+  "summary": {
+    "pass": 31,
+    "fail": 0,
+    "total": 31,
+    "verdict": "PASS"
+  },
+  "scope": "Cross-module SSOT: PO money, bill settlement, GR reverse≠billable, return next-step, dashboard refresh — shared modules + wiring + behavior",
+  "sharedModules": [
+    "shared/utils/pricingEngine.ts",
+    "shared/utils/po-line-uom.ts",
+    "shared/utils/supplierBillSettlement.ts",
+    "shared/domain/supplierReturnWorklist.ts",
+    "shared/domain/grnBillPromptSsot.ts",
+    "shared/domain/grBillingStatusSsot.ts",
+    "shared/domain/poReceiptWorkflowSsot.ts"
+  ],
+  "gates": [
+    {
+      "id": "FILE_shared_utils_pricingEngine_ts",
+      "ok": true,
+      "detail": "shared/utils/pricingEngine.ts"
+    },
+    {
+      "id": "FILE_shared_utils_po-line-uom_ts",
+      "ok": true,
+      "detail": "shared/utils/po-line-uom.ts"
+    },
+    {
+      "id": "FILE_shared_utils_supplierBillSettlement_ts",
+      "ok": true,
+      "detail": "shared/utils/supplierBillSettlement.ts"
+    },
+    {
+      "id": "FILE_shared_utils_supplierBillCancelEligibility_ts",
+      "ok": true,
+      "detail": "shared/utils/supplierBillCancelEligibility.ts"
+    },
+    {
+      "id": "FILE_shared_domain_supplierReturnWorklist_ts",
+      "ok": true,
+      "detail": "shared/domain/supplierReturnWorklist.ts"
+    },
+    {
+      "id": "FILE_shared_domain_grnBillPromptSsot_ts",
+      "ok": true,
+      "detail": "shared/domain/grnBillPromptSsot.ts"
+    },
+    {
+      "id": "FILE_shared_domain_grBillingStatusSsot_ts",
+      "ok": true,
+      "detail": "shared/domain/grBillingStatusSsot.ts"
+    },
+    {
+      "id": "FILE_shared_domain_poReceiptWorkflowSsot_ts",
+      "ok": true,
+      "detail": "shared/domain/poReceiptWorkflowSsot.ts"
+    },
+    {
+      "id": "FILE_shared_sql_610_po_unit_price_precision_6dp_sql",
+      "ok": true,
+      "detail": "shared/sql/610_po_unit_price_precision_6dp.sql"
+    },
+    {
+      "id": "PE_ENGINE",
+      "ok": true,
+      "detail": "6dp unit keeps 7000; 2dp truncate yields 7000.08"
+    },
+    {
+      "id": "PO_PRESERVE_7000",
+      "ok": true,
+      "detail": "typed line total preserved across sync + save finalize"
+    },
+    {
+      "id": "CANCELLED_NEVER_PAID",
+      "ok": true,
+      "detail": "cancelled bill is Cancelled with 0 due — never Paid"
+    },
+    {
+      "id": "UNINVOICED_RETURN_DONE",
+      "ok": true,
+      "detail": "uninvoiced reverse → Done/Reversal complete — not Need bill"
+    },
+    {
+      "id": "INVOICED_RETURN_NEED_SCN",
+      "ok": true,
+      "detail": "invoiced return still needs SCN"
+    },
+    {
+      "id": "GR_LANE_REVERSED_BEATS_BILL",
+      "ok": true,
+      "detail": "reversed lane wins over sibling/bill number — never billable"
+    },
+    {
+      "id": "PO_REOPEN_AFTER_REVERSE",
+      "ok": true,
+      "detail": "full reverse → DRAFT workflow + Draft lane (manage again)"
+    },
+    {
+      "id": "WIRE_PO_CLIENT",
+      "ok": true,
+      "detail": "Purchase Orders UI uses po-line-uom SSOT"
+    },
+    {
+      "id": "WIRE_PO_SERVER",
+      "ok": true,
+      "detail": "PO service persists PE totals + 6dp unit"
+    },
+    {
+      "id": "WIRE_PO_DB_6DP",
+      "ok": true,
+      "detail": "DB unit_price scale ≥ 6 locked by migration + postcondition"
+    },
+    {
+      "id": "WIRE_BILL_SETTLEMENT",
+      "ok": true,
+      "detail": "supplier invoice UI uses settlement SSOT"
+    },
+    {
+      "id": "WIRE_DASHBOARD_REFRESH",
+      "ok": true,
+      "detail": "cancel/payment refreshes shared Outstanding cards"
+    },
+    {
+      "id": "WIRE_GR_NO_BILL_REVERSED",
+      "ok": true,
+      "detail": "reversed GR: historical posting copy; hide return/reassign; block rebill"
+    },
+    {
+      "id": "WIRE_GR_BILLING_LANE_SSOT",
+      "ok": true,
+      "detail": "list SQL + getById + badge share REVERSED-before-INVOICED lane"
+    },
+    {
+      "id": "WIRE_PO_RECEIPT_WORKFLOW",
+      "ok": true,
+      "detail": "PO UI + return post share poReceiptWorkflow sync/badge SSOT"
+    },
+    {
+      "id": "WIRE_RETURN_WORKLIST",
+      "ok": true,
+      "detail": "returns list SQL + UI share uninvoiced=COMPLETE rule"
+    },
+    {
+      "id": "SCRIPT_proof_po-total-ssot",
+      "ok": true,
+      "detail": "proof:po-total-ssot"
+    },
+    {
+      "id": "SCRIPT_proof_po-receipt-workflow-ssot",
+      "ok": true,
+      "detail": "proof:po-receipt-workflow-ssot"
+    },
+    {
+      "id": "SCRIPT_proof_grn-bill-prompt-defaults",
+      "ok": true,
+      "detail": "proof:grn-bill-prompt-defaults"
+    },
+    {
+      "id": "SCRIPT_proof_supplier-invoice-grn-bounds",
+      "ok": true,
+      "detail": "proof:supplier-invoice-grn-bounds"
+    },
+    {
+      "id": "SCRIPT_proof_supplier-bill-cancel",
+      "ok": true,
+      "detail": "proof:supplier-bill-cancel"
+    },
+    {
+      "id": "SCRIPT_proof_procurement-integration-ssot",
+      "ok": true,
+      "detail": "proof:procurement-integration-ssot"
+    }
+  ]
+}

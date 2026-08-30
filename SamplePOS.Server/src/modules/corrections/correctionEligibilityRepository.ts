@@ -13,6 +13,7 @@ export interface GrnSupplierInvoiceRow {
     amountPaid: number;
     outstandingBalance: number;
     isPostedToGl: boolean;
+    creditsApplied?: number;
 }
 
 export interface GrnConsumedBatchRow {
@@ -100,6 +101,53 @@ export const correctionEligibilityRepository = {
             amountPaid: Number(r.amountPaid),
             outstandingBalance: Number(r.outstandingBalance),
             isPostedToGl: Boolean(r.isPostedToGl),
+            creditsApplied: 0,
+        }));
+    },
+
+    /**
+     * Bills linked only to this GR (junction or InternalReferenceNumber = receipt).
+     * Used by full reverse — never cancel a sibling GR's bill on the same PO.
+     */
+    async getSupplierInvoicesDirectlyLinkedToGrn(
+        pool: Pool | PoolClient,
+        grnId: string,
+    ): Promise<GrnSupplierInvoiceRow[]> {
+        const result = await pool.query(
+            `SELECT DISTINCT ON (si."Id")
+                    si."Id" AS id,
+                    COALESCE(si."SupplierInvoiceNumber", '') AS "invoiceNumber",
+                    si."Status" AS status,
+                    si.document_type AS "documentType",
+                    COALESCE(si."TotalAmount", 0)::numeric AS "totalAmount",
+                    COALESCE(si."AmountPaid", 0)::numeric AS "amountPaid",
+                    COALESCE(si."OutstandingBalance",
+                             si."TotalAmount" - COALESCE(si."AmountPaid", 0))::numeric AS "outstandingBalance",
+                    COALESCE(si.is_posted_to_gl, false) AS "isPostedToGl"
+             FROM supplier_invoices si
+             WHERE si.deleted_at IS NULL
+               AND UPPER(COALESCE(si."Status", '')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
+               AND (
+                 si."Id" IN (
+                   SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl WHERE sigl.grn_id = $1::uuid
+                 )
+                 OR si."InternalReferenceNumber" = (
+                   SELECT gr.receipt_number FROM goods_receipts gr WHERE gr.id = $1::uuid
+                 )
+               )
+             ORDER BY si."Id", si."CreatedAt" DESC`,
+            [grnId],
+        );
+        return result.rows.map((r) => ({
+            id: r.id as string,
+            invoiceNumber: r.invoiceNumber as string,
+            status: r.status as string,
+            documentType: (r.documentType as string | null) ?? null,
+            totalAmount: Number(r.totalAmount),
+            amountPaid: Number(r.amountPaid),
+            outstandingBalance: Number(r.outstandingBalance),
+            isPostedToGl: Boolean(r.isPostedToGl),
+            creditsApplied: 0,
         }));
     },
 

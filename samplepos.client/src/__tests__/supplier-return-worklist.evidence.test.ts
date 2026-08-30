@@ -53,16 +53,17 @@ describe('Supplier return worklist domain SSOT (client)', () => {
     };
     gate(
       'UI_SSOT_NEED_BILL',
-      resolveSupplierReturnActionStatus(needBill) === 'NEED_BILL' &&
-        mustBillBeforeSupplierCreditNote(needBill) &&
-        !canCreateSupplierCreditNoteFromReturn(needBill),
-      'no SCN without bill',
+      resolveSupplierReturnActionStatus(needBill) === 'COMPLETE' &&
+        !mustBillBeforeSupplierCreditNote(needBill) &&
+        !canCreateSupplierCreditNoteFromReturn(needBill) &&
+        !isSupplierReturnNeedsAttention(needBill),
+      'uninvoiced return is Done — no bill-first drama',
     );
 
     gate(
       'LABELS',
       SUPPLIER_RETURN_ACTION_LABELS.NEED_SCN === 'Need credit note' &&
-        SUPPLIER_RETURN_ACTION_LABELS.NEED_BILL === 'Need supplier bill',
+        SUPPLIER_RETURN_ACTION_LABELS.COMPLETE === 'Done',
       'labels locked',
     );
     gate(
@@ -141,8 +142,8 @@ describe('Supplier return worklist UI/API wiring', () => {
     );
     gate(
       'USES_MUST_BILL',
-      page.includes('mustBillBeforeSupplierCreditNote'),
-      'gates Bill CTA via SSOT',
+      !page.includes('Bill on GR first') && !page.includes('bill-first-'),
+      'never renders Bill-on-GR-first CTA (mustBillBefore is always false)',
     );
     gate(
       'USES_RESOLVE_STATUS',
@@ -175,9 +176,9 @@ describe('Supplier return worklist UI/API wiring', () => {
     gate(
       'SSOT_GATES_ONLY',
       page.includes('canCreateSupplierCreditNoteFromReturn') &&
-        page.includes('mustBillBeforeSupplierCreditNote') &&
-        page.includes('isSupplierReturnNeedsAttention'),
-      'create SCN / bill / open count use domain SSOT only',
+        page.includes('isSupplierReturnNeedsAttention') &&
+        !page.includes('Bill on GR first'),
+      'create SCN / attention use domain SSOT; no bill-first fork',
     );
   });
 

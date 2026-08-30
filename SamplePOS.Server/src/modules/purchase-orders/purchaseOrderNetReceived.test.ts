@@ -38,6 +38,25 @@ describe('purchaseOrderNetReceived SQL helpers', () => {
     expect(badge.label).toBe('Partially Received');
   });
 
+  it('derivePOReceiptStatusBadge shows Draft after full reverse (net 0)', () => {
+    const badge = derivePOReceiptStatusBadge('DRAFT', {
+      completedGrCount: 1,
+      netReceivedQtyTotal: 0,
+      openQtyTotal: 24,
+    });
+    expect(badge.label).toBe('Draft');
+    expect(badge.lane).toBe('DRAFT');
+  });
+
+  it('resolveTargetPOWorkflowStatus maps full reverse to DRAFT', async () => {
+    const { resolveTargetPOWorkflowStatus } = await import(
+      '../../../../shared/domain/poReceiptWorkflowSsot.js'
+    );
+    expect(
+      resolveTargetPOWorkflowStatus('PENDING', { fullyReceived: false, fullyReversed: true }),
+    ).toBe('DRAFT');
+  });
+
   it('derivePOReceiptStatusBadge shows Awaiting Receipt before first GR', () => {
     const badge = derivePOReceiptStatusBadge('PENDING', {
       completedGrCount: 0,

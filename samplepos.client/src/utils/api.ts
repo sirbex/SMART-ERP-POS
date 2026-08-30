@@ -943,7 +943,7 @@ export const api = {
       search?: string;
       startDate?: string;
       endDate?: string;
-      billingStatus?: 'TO_INVOICE' | 'INVOICED';
+      billingStatus?: 'TO_INVOICE' | 'INVOICED' | 'REVERSED';
     } & ServerListParams) =>
       apiClient.get<ApiResponse>('goods-receipts', {
         params: params

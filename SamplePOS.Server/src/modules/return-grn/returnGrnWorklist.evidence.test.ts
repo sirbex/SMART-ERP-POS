@@ -56,8 +56,8 @@ describe('Supplier return worklist — actionStatus SSOT', () => {
         status: 'POSTED',
         hasCreditNote: false,
         hasSupplierBill: false,
-      }) === 'NEED_BILL',
-      'no bill no scn',
+      }) === 'COMPLETE',
+      'uninvoiced return/reversal is Done — not Need bill',
     );
     gate(
       'SSOT_NEED_SCN',
@@ -90,12 +90,25 @@ describe('Supplier return worklist — actionStatus SSOT', () => {
     );
     gate(
       'ATTN_POSTED_NO_SCN',
-      isSupplierReturnNeedsAttention({ status: 'POSTED', hasCreditNote: false }),
-      'needs attention',
+      isSupplierReturnNeedsAttention({
+        status: 'POSTED',
+        hasCreditNote: false,
+        hasSupplierBill: true,
+      }),
+      'invoiced return needs attention',
+    );
+    gate(
+      'ATTN_NOT_UNINVOICED',
+      !isSupplierReturnNeedsAttention({
+        status: 'POSTED',
+        hasCreditNote: false,
+        hasSupplierBill: false,
+      }),
+      'uninvoiced reverse not attention',
     );
     gate(
       'ATTN_NOT_WITH_SCN',
-      !isSupplierReturnNeedsAttention({ status: 'POSTED', hasCreditNote: true }),
+      !isSupplierReturnNeedsAttention({ status: 'POSTED', hasCreditNote: true, hasSupplierBill: true }),
       'has scn not attention',
     );
     gate(
@@ -114,12 +127,12 @@ describe('Supplier return worklist — actionStatus SSOT', () => {
         hasCreditNote: false,
         hasSupplierBill: false,
       }) &&
-        mustBillBeforeSupplierCreditNote({
+        !mustBillBeforeSupplierCreditNote({
           status: 'POSTED',
           hasCreditNote: false,
           hasSupplierBill: false,
         }),
-      'must bill first',
+      'no SCN without AP; never force bill-first for uninvoiced',
     );
   });
 });
@@ -163,7 +176,8 @@ describe('Supplier return worklist — repository list (SQL e2e against mock poo
               hasCreditNote: false,
               hasSupplierBill: false,
               totalAmount: 5000,
-              actionStatus: 'NEED_BILL',
+              reason: '[Uninvoiced reversal] test',
+              actionStatus: 'COMPLETE',
             },
           ],
         };
@@ -195,6 +209,12 @@ describe('Supplier return worklist — repository list (SQL e2e against mock poo
       dataSql.includes('ILIKE') && captured[1].params.some((p) => String(p).includes('SALUD')),
       'search bind',
     );
+    gate(
+      'SQL_NEEDS_HAS_BILL',
+      (captured[0]?.sql || '').includes("document_type = 'SUPPLIER_INVOICE'") &&
+        (captured[0]?.sql || '').includes(`r.status = 'POSTED'`),
+      'attention SQL requires active supplier bill (excludes uninvoiced reverse)',
+    );
     gate('SQL_TOTAL_AMOUNT', dataSql.includes('"totalAmount"'), 'amount column');
     gate('SQL_HAS_BILL', dataSql.includes('"hasSupplierBill"'), 'bill flag');
     gate('SQL_HAS_SCN', dataSql.includes('"hasCreditNote"'), 'scn flag');
@@ -202,9 +222,9 @@ describe('Supplier return worklist — repository list (SQL e2e against mock poo
     gate(
       'SQL_ACTION_CASE',
       dataSql.includes("WHEN r.status = 'DRAFT' THEN 'DRAFT'") &&
-        dataSql.includes("THEN 'NEED_BILL'") &&
+        dataSql.includes("THEN 'COMPLETE'") &&
         dataSql.includes("THEN 'NEED_SCN'"),
-      'CASE matches domain SSOT labels',
+      'CASE: uninvoiced → COMPLETE; invoiced open → NEED_SCN',
     );
     gate(
       'SQL_ORDER_ATTN_FIRST',
@@ -229,9 +249,10 @@ describe('Supplier return worklist — repository list (SQL e2e against mock poo
       'NEED_SCN can create',
     );
     gate(
-      'ROW2_MUST_BILL',
-      mustBillBeforeSupplierCreditNote(result.rows[1]),
-      'NEED_BILL gates SCN',
+      'ROW2_UNINVOICED_DONE',
+      !mustBillBeforeSupplierCreditNote(result.rows[1]) &&
+        resolveSupplierReturnActionStatus(result.rows[1]) === 'COMPLETE',
+      'uninvoiced reverse is Done — never bill-first',
     );
   });
 
@@ -299,7 +320,17 @@ describe('Supplier return worklist — structural e2e chain (API → UI)', () =>
     gate('PAGE_DEFAULT_ATTN', page.includes('SUPPLIER_RETURNS_DEFAULT_FILTER') || page.includes("'attention'"), 'default attention');
     gate('PAGE_NEEDS_PARAM', page.includes('needsAttention') && page.includes('true'), 'sends needsAttention');
     gate('PAGE_CREATE_CN', page.includes('Create credit note'), 'create SCN CTA');
-    gate('PAGE_BILL_FIRST', page.includes('Bill on GR first'), 'bill CTA');
+    gate(
+      'PAGE_NO_BILL_FIRST_DRAMA',
+      page.includes('supplierReturnActionLabel') &&
+        !page.includes('Bill on GR first') &&
+        !mustBillBeforeSupplierCreditNote({
+          status: 'POSTED',
+          hasCreditNote: false,
+          hasSupplierBill: false,
+        }),
+      'uninvoiced returns never force Bill on GR first',
+    );
     gate('PAGE_SSOT', page.includes('canCreateSupplierCreditNoteFromReturn'), 'uses domain SSOT');
     gate(
       'PAGE_ALL_SUPPLIERS',
@@ -412,7 +443,7 @@ afterAll(() => {
     defaultFilter: SUPPLIER_RETURNS_DEFAULT_FILTER,
     claims: [
       'All-supplier RGRN list API with needsAttention + search',
-      'actionStatus SSOT shared with UI (DRAFT|NEED_BILL|NEED_SCN|HAS_SCN|COMPLETE)',
+      'actionStatus SSOT shared with UI (DRAFT|NEED_SCN|HAS_SCN|COMPLETE; uninvoiced=COMPLETE)',
       'UI nested under Goods Receipts → Returns (/inventory/goods-receipts/returns); legacy /supplier-returns redirects',
       'Create SCN gated by supplier bill (product + UI)',
     ],

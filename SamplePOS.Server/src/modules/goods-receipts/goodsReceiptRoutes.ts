@@ -66,7 +66,7 @@ const ListGRsQuerySchema = z.object({
   search: z.string().optional(),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  billingStatus: z.enum(['TO_INVOICE', 'INVOICED']).optional(),
+  billingStatus: z.enum(['TO_INVOICE', 'INVOICED', 'REVERSED']).optional(),
   ...EnterpriseListQueryFields,
 });
 

@@ -89,5 +89,16 @@ describe('goodsReceiptRepository.listGRs — billing status', () => {
         for (const gr of toInvoice) {
             expect(reversedIds.has(gr.id)).toBe(false);
         }
+
+        const { grs: reversedOnly } = await goodsReceiptRepository.listGRs(pool, 1, 100, {
+            billingStatus: 'REVERSED',
+        });
+        for (const gr of reversedOnly) {
+            expect(gr.billingStatus).toBe('REVERSED');
+            expect(gr.isReversed).toBe(true);
+        }
+        for (const gr of reversed) {
+            expect(reversedOnly.some((r) => r.id === gr.id)).toBe(true);
+        }
     });
 });

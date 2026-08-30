@@ -19,9 +19,8 @@ import { Button } from '../../components/ui/button';
 import {
   canCreateSupplierCreditNoteFromReturn,
   isSupplierReturnNeedsAttention,
-  mustBillBeforeSupplierCreditNote,
   resolveSupplierReturnActionStatus,
-  SUPPLIER_RETURN_ACTION_LABELS,
+  supplierReturnActionLabel,
   SUPPLIER_RETURNS_DEFAULT_FILTER,
   type SupplierReturnActionStatus,
 } from '@shared/domain/supplierReturnWorklist';
@@ -49,14 +48,16 @@ function actionBadge(row: ReturnGrnRecord): { label: string; className: string; 
     COMPLETE: 'bg-emerald-100 text-emerald-900',
   };
   const hints: Record<SupplierReturnActionStatus, string> = {
-    DRAFT: 'Post the return to reduce stock, then create a credit note when billed.',
-    NEED_BILL: 'Create the supplier bill on the goods receipt before issuing a credit note.',
+    DRAFT: 'Post the return to reduce stock.',
+    NEED_BILL: 'Deprecated — uninvoiced returns do not require a bill.',
     NEED_SCN: 'Create a supplier credit note to clear return clearing (2160) / AP.',
     HAS_SCN: 'SCN exists — apply it to open bills under Credit / Debit Notes if still open.',
-    COMPLETE: 'Return has a supplier credit note applied (or settled).',
+    COMPLETE: row.hasSupplierBill
+      ? 'Return settled (SCN applied).'
+      : 'Uninvoiced return/reversal — stock and GR/IR cleared; no bill or credit note needed.',
   };
   return {
-    label: SUPPLIER_RETURN_ACTION_LABELS[status],
+    label: supplierReturnActionLabel(row, status),
     className: styles[status],
     hint: hints[status],
   };
@@ -235,7 +236,6 @@ export default function SupplierReturnsPage() {
               {rows.map((row) => {
                 const badge = actionBadge(row);
                 const canCreateCn = canCreateSupplierCreditNoteFromReturn(row);
-                const needsBill = mustBillBeforeSupplierCreditNote(row);
                 return (
                   <tr
                     key={row.id}
@@ -326,15 +326,6 @@ export default function SupplierReturnsPage() {
                           >
                             Create credit note
                           </button>
-                        )}
-                        {needsBill && (
-                          <Link
-                            to="/inventory/goods-receipts"
-                            className="text-xs px-2 py-1.5 rounded-md border border-amber-400 bg-amber-50 text-amber-900 text-center hover:bg-amber-100"
-                            data-testid={`bill-first-${row.returnGrnNumber}`}
-                          >
-                            Bill on GR first
-                          </Link>
                         )}
                         {row.hasCreditNote && (
                           <Link

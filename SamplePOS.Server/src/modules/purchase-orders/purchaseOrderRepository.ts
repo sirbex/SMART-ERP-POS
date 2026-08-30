@@ -5,6 +5,7 @@ import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 import { getBusinessYear } from '../../utils/dateRange.js';
 import { tableHasColumn } from '../../db/schemaColumnCache.js';
 import { pickSortColumn, sqlSortOrder } from '../../utils/enterpriseListQuery.js';
+import { PricingEngine } from '../../utils/pricingEngine.js';
 import {
   poItemNetReceivedQuantitySql,
   poItemOpenQuantitySql,
@@ -77,7 +78,7 @@ export interface CreatePOItemData {
   productName: string;
   quantity: number;
   unitCost: number;
-  lineTotal?: number; // Frontend-authoritative total (preserves user's intended total)
+  lineTotal?: number; // Ignored for persistence — PE(qty×unit) is SSOT
   uomId?: string | null;
   baseQty?: number | null; // SAP UoM snapshot: quantity in base unit
   baseUomId?: string | null; // SAP UoM snapshot: base UoM ID at posting time
@@ -214,10 +215,10 @@ export const purchaseOrderRepository = {
   ): Promise<{ po: PurchaseOrder; items: PurchaseOrderItem[] }> {
     const poNumber = await this.generatePONumber(pool);
 
-    // Calculate total amount from items
-    const totalAmount = data.items.reduce((sum, item) => {
-      return sum.plus(new Decimal(item.quantity).times(item.unitCost));
-    }, new Decimal(0)).toNumber();
+    // Calculate total amount from items (PricingEngine SSOT)
+    const totalAmount = PricingEngine.calculateDocumentTotal(
+      data.items.map((item) => ({ quantity: item.quantity, unitCost: item.unitCost })),
+    ).toNumber();
 
     // Create PO with COMPLETED status and manual_receipt flag
     const poResult = await pool.query(
@@ -277,9 +278,8 @@ export const purchaseOrderRepository = {
 
     items.forEach((item, index) => {
       const offset = index * fieldsPerRow;
-      const lineTotal = item.lineTotal != null
-        ? new Decimal(item.lineTotal).toNumber()
-        : new Decimal(item.quantity).times(item.unitCost).toNumber();
+      // SSOT: persist PricingEngine line total from qty × unit (ignore divergent client totals)
+      const lineTotal = PricingEngine.calculateLineTotal(item.quantity, item.unitCost).toNumber();
 
       if (hasUomSnapshot) {
         placeholders.push(
@@ -480,19 +480,41 @@ export const purchaseOrderRepository = {
   },
 
   /**
-   * Update PO total amount
+   * Update PO total amount — sum of PricingEngine line totals; heal line total_price too.
    */
   async updatePOTotal(pool: Pool | PoolClient, id: string): Promise<void> {
+    const lines = await pool.query<{
+      id: string;
+      ordered_quantity: string;
+      unit_price: string;
+    }>(
+      `SELECT id, ordered_quantity::text, unit_price::text
+       FROM purchase_order_items
+       WHERE purchase_order_id = $1`,
+      [id],
+    );
+
+    for (const row of lines.rows) {
+      const lineTotal = PricingEngine.calculateLineTotal(
+        row.ordered_quantity,
+        row.unit_price,
+      ).toNumber();
+      await pool.query(
+        `UPDATE purchase_order_items SET total_price = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [lineTotal, row.id],
+      );
+    }
+
+    const totalAmount = PricingEngine.calculateDocumentTotal(
+      lines.rows.map((r) => ({ quantity: r.ordered_quantity, unitCost: r.unit_price })),
+    ).toNumber();
+
     await pool.query(
-      `UPDATE purchase_orders 
-       SET total_amount = (
-         SELECT COALESCE(SUM(total_price), 0) 
-         FROM purchase_order_items 
-         WHERE purchase_order_id = $1
-       ),
-       updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
-      [id]
+      `UPDATE purchase_orders
+       SET total_amount = $1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2`,
+      [totalAmount, id],
     );
   },
 
@@ -514,27 +536,19 @@ export const purchaseOrderRepository = {
       return `Purchase order is ${status}. Supplier can only be changed while DRAFT or PENDING (before receipt).`;
     }
 
+    const netSql = poItemNetReceivedQuantitySql('poi');
     const receivedRes = await pool.query(
       `SELECT COUNT(*)::int AS cnt
-       FROM purchase_order_items
-       WHERE purchase_order_id = $1 AND COALESCE(received_quantity, 0) > 0`,
+       FROM purchase_order_items poi
+       WHERE poi.purchase_order_id = $1
+         AND (${netSql})::numeric > 0.0001`,
       [poId]
     );
     if ((receivedRes.rows[0]?.cnt ?? 0) > 0) {
       return 'Goods have already been received on this PO. Use Return to supplier for corrections.';
     }
 
-    const completedGrRes = await pool.query(
-      // goods_receipt_status enum is DRAFT | COMPLETED | CANCELLED only (not FINALIZED).
-      // Never list invalid enum labels here — PG 22P02 on prepare/bind.
-      `SELECT COUNT(*)::int AS cnt FROM goods_receipts
-       WHERE purchase_order_id = $1 AND status = 'COMPLETED'`,
-      [poId]
-    );
-    if ((completedGrRes.rows[0]?.cnt ?? 0) > 0) {
-      return 'A goods receipt has already been posted for this PO.';
-    }
-
+    // Net 0 after reverse: manage as draft. Still block if an active supplier bill remains.
     const invoiceRes = await pool.query(
       `SELECT si."SupplierInvoiceNumber" AS invoice_number
        FROM supplier_invoices si
@@ -638,11 +652,17 @@ export const purchaseOrderRepository = {
       throw new Error('No fields to update');
     }
 
-    // Recalculate total_price if quantity or unitCost changed
+    // Recalculate total_price if quantity or unitCost changed (PricingEngine SSOT)
     if (data.quantity !== undefined || data.unitCost !== undefined) {
-      setClauses.push(`total_price = COALESCE($${paramIndex}, ordered_quantity) * COALESCE($${paramIndex + 1}, unit_price)`);
-      values.push(data.quantity ?? null, data.unitCost ?? null);
-      paramIndex += 2;
+      const current = await pool.query<{ ordered_quantity: string; unit_price: string }>(
+        `SELECT ordered_quantity::text, unit_price::text FROM purchase_order_items WHERE id = $1`,
+        [itemId],
+      );
+      const qty = data.quantity ?? Number(current.rows[0]?.ordered_quantity ?? 0);
+      const unit = data.unitCost ?? Number(current.rows[0]?.unit_price ?? 0);
+      const lineTotal = PricingEngine.calculateLineTotal(qty, unit).toNumber();
+      setClauses.push(`total_price = $${paramIndex++}`);
+      values.push(lineTotal);
     }
 
     const result = await pool.query(

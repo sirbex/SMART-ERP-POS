@@ -12,6 +12,7 @@ import {
   poItemNetReceivedQuantitySql,
   poItemReturnedQuantitySql,
 } from '../purchase-orders/purchaseOrderNetReceived.js';
+import { resolveGrBillingLane } from '@shared/domain/grBillingStatusSsot.js';
 
 const GR_SORT_COLUMNS: Record<string, string> = {
   grNumber: 'gr.receipt_number',
@@ -513,10 +514,16 @@ export const goodsReceiptRepository = {
       }
     }
 
+    const grRow = grResult.rows[0] as GoodsReceipt;
     return {
       gr: {
-        ...grResult.rows[0],
-        poSiblingBill: await this.resolvePoSiblingBill(pool, grResult.rows[0], id),
+        ...grRow,
+        billingStatus: resolveGrBillingLane({
+          receiptStatus: grRow.status,
+          isReversed: grRow.isReversed,
+          supplierBillNumber: grRow.supplierBillNumber,
+        }),
+        poSiblingBill: await this.resolvePoSiblingBill(pool, grRow, id),
       },
       items: itemsResult.rows,
       productUomsMap,
@@ -727,8 +734,8 @@ export const goodsReceiptRepository = {
       search?: string;
       startDate?: string;
       endDate?: string;
-      /** TO_INVOICE = completed GR with no supplier bill; INVOICED = bill linked */
-      billingStatus?: 'TO_INVOICE' | 'INVOICED';
+      /** TO_INVOICE = completed GR with no supplier bill; INVOICED = bill linked; REVERSED = fully reversed */
+      billingStatus?: 'TO_INVOICE' | 'INVOICED' | 'REVERSED';
       sortBy?: string;
       sortOrder?: 'asc' | 'desc';
     }
@@ -788,6 +795,7 @@ export const goodsReceiptRepository = {
     if (filters?.billingStatus === 'INVOICED') {
       whereClauses.push(`gr.status = 'COMPLETED'`);
       whereClauses.push(supplierBillExistsSql);
+      whereClauses.push(`NOT (${fullyReversedSql})`);
     } else if (filters?.billingStatus === 'TO_INVOICE') {
       whereClauses.push(`gr.status = 'COMPLETED'`);
       whereClauses.push(`NOT (${supplierBillExistsSql})`);
@@ -798,6 +806,9 @@ export const goodsReceiptRepository = {
         WHERE gri0.goods_receipt_id = gr.id
           AND COALESCE(gri0.received_quantity, 0) > 0
       )`);
+    } else if (filters?.billingStatus === 'REVERSED') {
+      whereClauses.push(`gr.status = 'COMPLETED'`);
+      whereClauses.push(`(${fullyReversedSql})`);
     }
 
     const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';

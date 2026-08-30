@@ -1,0 +1,93 @@
+{
+  "at": "2026-08-30T06:28:25.016Z",
+  "feature": "PO_RECEIPT_WORKFLOW_SSOT",
+  "summary": {
+    "pass": 15,
+    "fail": 0,
+    "total": 15,
+    "verdict": "PASS"
+  },
+  "scope": "Full GR reverse → PO DRAFT (manage again); hide 0/N progress noise; sole sync + list heal",
+  "sharedModules": [
+    "shared/domain/poReceiptWorkflowSsot.ts",
+    "shared/utils/purchaseOrderReceiptDisplay.ts",
+    "SamplePOS.Server/src/modules/purchase-orders/poReceiptStatusSync.ts"
+  ],
+  "gates": [
+    {
+      "id": "FILE_shared_domain_poReceiptWorkflowSsot_ts",
+      "ok": true,
+      "detail": "shared/domain/poReceiptWorkflowSsot.ts"
+    },
+    {
+      "id": "FILE_shared_utils_purchaseOrderReceiptDisplay_ts",
+      "ok": true,
+      "detail": "shared/utils/purchaseOrderReceiptDisplay.ts"
+    },
+    {
+      "id": "FILE_SamplePOS_Server_src_modules_purchase-orders_poReceiptStatusSync_ts",
+      "ok": true,
+      "detail": "SamplePOS.Server/src/modules/purchase-orders/poReceiptStatusSync.ts"
+    },
+    {
+      "id": "SYNC_FULL_REVERSE_TO_DRAFT",
+      "ok": true,
+      "detail": "full reverse → DRAFT (editable), not Pending/Reopened"
+    },
+    {
+      "id": "SYNC_COMPLETE_AND_PARTIAL",
+      "ok": true,
+      "detail": "full receive → COMPLETED; partial reopen → PENDING; CANCELLED/DRAFT untouched"
+    },
+    {
+      "id": "FULLY_REVERSED_HELPER",
+      "ok": true,
+      "detail": "full reverse detected; hide 0/N open progress noise"
+    },
+    {
+      "id": "LANE_DRAFT_AFTER_REVERSE",
+      "ok": true,
+      "detail": "UI shows Draft — not Reopened (reversed)"
+    },
+    {
+      "id": "LANE_AWAITING",
+      "ok": true,
+      "detail": "never-received stays Awaiting Receipt"
+    },
+    {
+      "id": "LANE_PARTIAL",
+      "ok": true,
+      "detail": "partial after return → Partially Received"
+    },
+    {
+      "id": "NO_REOPENED_LABEL",
+      "ok": true,
+      "detail": "no Reopened (reversed) operator noise"
+    },
+    {
+      "id": "WIRE_SYNC_TO_DRAFT",
+      "ok": true,
+      "detail": "sync + batch heal write DRAFT on full reverse"
+    },
+    {
+      "id": "WIRE_LIST_HEALS",
+      "ok": true,
+      "detail": "PO list heals stale PENDING reversed rows to DRAFT"
+    },
+    {
+      "id": "WIRE_RETURN_USES_SYNC",
+      "ok": true,
+      "detail": "Return GRN post uses sync"
+    },
+    {
+      "id": "WIRE_GR_FINALIZE_USES_SYNC",
+      "ok": true,
+      "detail": "GR finalize uses sync"
+    },
+    {
+      "id": "WIRE_UI_DRAFT",
+      "ok": true,
+      "detail": "UI + domain: Draft after reverse, no REOPENED_REVERSED lane"
+    }
+  ]
+}

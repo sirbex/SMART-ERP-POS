@@ -26,6 +26,7 @@ import {
 
 import { DatePicker } from '../../components/ui/date-picker';
 import { derivePOReceiptStatusBadge } from '../../../../shared/utils/purchaseOrderReceiptDisplay';
+import { shouldShowPOReceiptProgressLine } from '../../../../shared/domain/poReceiptWorkflowSsot';
 import { downloadFile } from '../../utils/download';
 import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
@@ -48,9 +49,14 @@ import type { ProcurementProduct } from '../../components/inventory/shared';
 import { UomSelector } from '../../components/inventory/UomSelector';
 import {
   convertPoLineQuantityForUomChange,
+  finalizePoLineForSave,
+  hydratePoLineMoney,
   poLineBaseCostFromDisplay,
   poLineDisplayUnitCost,
   poLineTotal,
+  resolveUnitCostAfterBlur,
+  syncPoLineFromEnteredTotal,
+  deriveUnitCostWhileEditingLineTotal,
 } from '../../../../shared/utils/po-line-uom';
 
 // Configure Decimal for financial calculations
@@ -306,7 +312,6 @@ function LineItemRow({
           )}
         </div>
       </td>
-      {/* Unit Cost — always editable (SAP Net Price) */}
       <td className="px-2 py-2 w-36">
         <input
           ref={(el) => { localCostRef.current = el; onCostRef(el); }}
@@ -314,6 +319,14 @@ function LineItemRow({
           value={item.unitCost}
           onChange={(e) => onUpdate(item.id, 'unitCost', e.target.value)}
           onFocus={(e) => e.target.select()}
+          onBlur={() => {
+            const next = resolveUnitCostAfterBlur(
+              item.quantity,
+              item.unitCost,
+              item.lineTotal,
+            );
+            if (next != null) onUpdate(item.id, 'unitCost', next);
+          }}
           onKeyDown={handleKeyDown('cost')}
           step="0.01"
           min="0"
@@ -327,7 +340,6 @@ function LineItemRow({
           </div>
         )}
       </td>
-      {/* Line Total — always editable (SAP Net Value) */}
       <td className="px-2 py-2 w-36">
         <input
           ref={(el) => { localTotalRef.current = el; }}
@@ -335,6 +347,11 @@ function LineItemRow({
           value={item.lineTotal}
           onChange={(e) => onUpdate(item.id, 'lineTotal', e.target.value)}
           onFocus={(e) => e.target.select()}
+          onBlur={() => {
+            // Preserve entered total (7000 stays 7000.00); unit gets only the dp needed
+            const synced = syncPoLineFromEnteredTotal(item.quantity, item.lineTotal);
+            onUpdate(item.id, 'lineTotal', synced.lineTotal);
+          }}
           onKeyDown={handleKeyDown('total')}
           step="0.01"
           min="0"
@@ -440,14 +457,16 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
     focusSearch();
   }, [focusSearch]);
 
-  // Calculate totals — always use lineTotal (kept in sync by bi-directional update)
+  // Calculate totals — line totals PE-synced; avg = weighted unit cost (subtotal ÷ qty)
   const totals = useMemo(() => {
     let subtotal = new Decimal(0);
+    let totalQty = new Decimal(0);
     let itemCount = 0;
 
     lineItems.forEach((item) => {
       try {
         subtotal = subtotal.plus(new Decimal(item.lineTotal || 0));
+        totalQty = totalQty.plus(new Decimal(item.quantity || 0));
         itemCount++;
       } catch {
         // Invalid number, skip
@@ -457,7 +476,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
     return {
       subtotal: subtotal.toNumber(),
       itemCount,
-      avgCost: itemCount > 0 ? subtotal.div(itemCount).toNumber() : 0,
+      avgCost: totalQty.gt(0) ? subtotal.div(totalQty).toNumber() : 0,
     };
   }, [lineItems]);
 
@@ -527,21 +546,19 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
             updated.lineTotal = poLineTotal(updated.quantity, value);
             updated.baseCost = poLineBaseCostFromDisplay(value, updated.conversionFactor || '1');
           } else if (field === 'lineTotal') {
-            // Line total changed → recalculate unit cost
-            const qty = new Decimal(updated.quantity || 0);
-            if (qty.gt(0)) {
-              updated.unitCost = new Decimal(value || 0)
-                .div(qty)
-                .toDecimalPlaces(2)
-                .toString();
-              updated.baseCost = poLineBaseCostFromDisplay(updated.unitCost, updated.conversionFactor || '1');
+            // Keep what the user types; refresh unit cost when the total is parseable
+            updated.lineTotal = value;
+            const derived = deriveUnitCostWhileEditingLineTotal(updated.quantity, value);
+            if (derived != null) {
+              updated.unitCost = derived;
+              updated.baseCost = poLineBaseCostFromDisplay(
+                derived,
+                updated.conversionFactor || '1',
+              );
             }
           } else if (field === 'quantity') {
             // Quantity changed → recalculate line total (keep unit cost)
-            updated.lineTotal = new Decimal(value || 0)
-              .times(new Decimal(updated.unitCost || 0))
-              .toDecimalPlaces(2)
-              .toString();
+            updated.lineTotal = poLineTotal(value, updated.unitCost);
           }
         } catch { /* invalid decimal, skip sync */ }
         return updated;
@@ -642,14 +659,21 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
         expectedDate: toApiDateOnly(expectedDelivery) || undefined,
         notes: notes || undefined,
         createdBy: user.id,
-        items: lineItems.map((item) => ({
-          productId: item.productId,
-          productName: item.productName,
-          quantity: parseFloat(item.quantity),
-          unitCost: parseFloat(item.unitCost),
-          lineTotal: parseFloat(item.lineTotal),
-          uomId: item.selectedUomId || null,
-        })),
+        items: lineItems.map((item) => {
+          const finalized = finalizePoLineForSave(
+            item.quantity,
+            item.unitCost,
+            item.lineTotal,
+          );
+          return {
+            productId: item.productId,
+            productName: item.productName,
+            quantity: parseFloat(item.quantity),
+            unitCost: Number(finalized.unitCost),
+            lineTotal: Number(finalized.lineTotal),
+            uomId: item.selectedUomId || null,
+          };
+        }),
       };
 
       await createPOMutation.mutateAsync(poData);
@@ -877,12 +901,16 @@ function poStatusBadge(po: PORow) {
 }
 
 function poCanChangeSupplier(po: PORow): boolean {
-  if (po.status !== 'PENDING') return false;
+  if (po.status !== 'DRAFT' && po.status !== 'PENDING') return false;
+  // Net-received SSOT: fully reversed (net 0) can be managed like a fresh draft.
+  if (Number(po.netReceivedQtyTotal ?? po.net_received_qty_total ?? 0) > 0.0001) {
+    return false;
+  }
   const items = po.items || [];
-  return !items.some(
-    (i) =>
-      Number(i.net_received_quantity ?? i.netReceivedQuantity ?? i.receivedQuantity ?? i.received_quantity ?? 0) > 0
-  );
+  if (items.some((i) => Number(i.net_received_quantity ?? i.netReceivedQuantity ?? 0) > 0.0001)) {
+    return false;
+  }
+  return true;
 }
 
 // ── Edit PO Modal ──
@@ -906,19 +934,20 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
       const qty = String(item.ordered_quantity || item.quantity || 0);
       const factor = Number(item.conversion_factor || item.conversionFactor || 1);
       const productBaseCost = Number(item.product_cost_price || item.productCostPrice || 0);
+      const storedTotal = item.total_price ?? item.totalPrice ?? item.lineTotal;
+      const money = hydratePoLineMoney(qty, cost, storedTotal);
       const derivedBaseCost = productBaseCost > 0
         ? String(productBaseCost)
         : factor > 1
-          ? new Decimal(cost).dividedBy(factor).toFixed(2)
-          : cost;
-      const total = new Decimal(qty || 0).times(new Decimal(cost || 0)).toFixed(2);
+          ? new Decimal(money.unitCost).dividedBy(factor).toFixed(6).replace(/\.?0+$/, '') || '0'
+          : money.unitCost;
       return {
         id: item.id || `existing-${Math.random()}`,
         productId: item.product_id || item.productId || '',
         productName: item.product_name || item.productName || '',
         quantity: qty,
-        unitCost: cost,
-        lineTotal: total,
+        unitCost: money.unitCost,
+        lineTotal: money.lineTotal,
         baseCost: derivedBaseCost,
         selectedUomId: item.uom_id || item.uomId || null,
         selectedUomName: item.uom_name || item.uomName || undefined,
@@ -950,20 +979,22 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
     focusSearch();
   }, [focusSearch]);
 
-  // Calculate totals — always use lineTotal (kept in sync by bi-directional update)
+  // Calculate totals — line totals PE-synced; avg = weighted unit cost (subtotal ÷ qty)
   const totals = useMemo(() => {
     let subtotal = new Decimal(0);
+    let totalQty = new Decimal(0);
     let itemCount = 0;
     lineItems.forEach((item) => {
       try {
         subtotal = subtotal.plus(new Decimal(item.lineTotal || 0));
+        totalQty = totalQty.plus(new Decimal(item.quantity || 0));
         itemCount++;
       } catch { /* skip */ }
     });
     return {
       subtotal: subtotal.toNumber(),
       itemCount,
-      avgCost: itemCount > 0 ? subtotal.div(itemCount).toNumber() : 0,
+      avgCost: totalQty.gt(0) ? subtotal.div(totalQty).toNumber() : 0,
     };
   }, [lineItems]);
 
@@ -1022,19 +1053,17 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
             updated.lineTotal = poLineTotal(updated.quantity, value);
             updated.baseCost = poLineBaseCostFromDisplay(value, updated.conversionFactor || '1');
           } else if (field === 'lineTotal') {
-            const qty = new Decimal(updated.quantity || 0);
-            if (qty.gt(0)) {
-              updated.unitCost = new Decimal(value || 0)
-                .div(qty)
-                .toDecimalPlaces(2)
-                .toString();
-              updated.baseCost = poLineBaseCostFromDisplay(updated.unitCost, updated.conversionFactor || '1');
+            updated.lineTotal = value;
+            const derived = deriveUnitCostWhileEditingLineTotal(updated.quantity, value);
+            if (derived != null) {
+              updated.unitCost = derived;
+              updated.baseCost = poLineBaseCostFromDisplay(
+                derived,
+                updated.conversionFactor || '1',
+              );
             }
           } else if (field === 'quantity') {
-            updated.lineTotal = new Decimal(value || 0)
-              .times(new Decimal(updated.unitCost || 0))
-              .toDecimalPlaces(2)
-              .toString();
+            updated.lineTotal = poLineTotal(value, updated.unitCost);
           }
         } catch { /* invalid decimal, skip sync */ }
         return updated;
@@ -1103,14 +1132,21 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
           supplierId: supplierId || undefined,
           expectedDate: toApiDateOnly(expectedDelivery),
           notes: notes || null,
-          items: lineItems.map((item) => ({
-            productId: item.productId,
-            productName: item.productName,
-            quantity: parseFloat(item.quantity),
-            unitCost: parseFloat(item.unitCost),
-            lineTotal: parseFloat(item.lineTotal),
-            uomId: item.selectedUomId || null,
-          })),
+          items: lineItems.map((item) => {
+            const finalized = finalizePoLineForSave(
+              item.quantity,
+              item.unitCost,
+              item.lineTotal,
+            );
+            return {
+              productId: item.productId,
+              productName: item.productName,
+              quantity: parseFloat(item.quantity),
+              unitCost: Number(finalized.unitCost),
+              lineTotal: Number(finalized.lineTotal),
+              uomId: item.selectedUomId || null,
+            };
+          }),
         },
       });
       alert('Purchase Order updated successfully!');
@@ -1852,9 +1888,9 @@ export default function PurchaseOrdersPage() {
                           >
                             {statusConfig.icon} {statusConfig.label}
                           </span>
-                          {Number(po.netReceivedQtyTotal ?? 0) > 0 && (
+                          {shouldShowPOReceiptProgressLine(po) && (
                             <div className="text-xs text-gray-500 mt-1">
-                              {Number(po.netReceivedQtyTotal)} / {Number(po.orderedQtyTotal ?? 0)} net received
+                              {Number(po.netReceivedQtyTotal ?? 0)} / {Number(po.orderedQtyTotal ?? 0)} net received
                               {Number(po.openQtyTotal ?? 0) > 0
                                 ? ` · ${Number(po.openQtyTotal)} open`
                                 : ''}
@@ -2044,11 +2080,12 @@ export default function PurchaseOrdersPage() {
                     </span>
                   );
                 })()}
-                {Number(selectedPO.netReceivedQtyTotal ?? 0) > 0 && (
+                {shouldShowPOReceiptProgressLine(selectedPO) && (
                   <p className="text-sm text-gray-600">
                     Receipt progress:{' '}
                     <strong>
-                      {Number(selectedPO.netReceivedQtyTotal)} / {Number(selectedPO.orderedQtyTotal ?? 0)}
+                      {Number(selectedPO.netReceivedQtyTotal ?? 0)} /{' '}
+                      {Number(selectedPO.orderedQtyTotal ?? 0)}
                     </strong>{' '}
                     units net received
                     {Number(selectedPO.openQtyTotal ?? 0) > 0 ? (
@@ -2137,7 +2174,18 @@ export default function PurchaseOrdersPage() {
                 <div>
                   <h3 className="text-sm font-medium text-gray-500">Total Amount</h3>
                   <p className="mt-1 text-base font-bold text-gray-900">
-                    {formatCurrency(new Decimal(selectedPO.totalAmount || 0).toNumber())}
+                    {formatCurrency(
+                      (selectedPO.items && selectedPO.items.length > 0
+                        ? selectedPO.items.reduce((sum: Decimal, item: POItemRow) => {
+                            const q = String(item.quantity ?? item.ordered_quantity ?? 0);
+                            const u = String(item.unitCost ?? item.unit_price ?? 0);
+                            const stored = item.total_price ?? item.totalPrice ?? item.lineTotal;
+                            const money = hydratePoLineMoney(q, u, stored);
+                            return sum.plus(new Decimal(money.lineTotal));
+                          }, new Decimal(0))
+                        : new Decimal(selectedPO.totalAmount || 0)
+                      ).toNumber(),
+                    )}
                   </p>
                 </div>
               </div>
@@ -2180,9 +2228,11 @@ export default function PurchaseOrdersPage() {
                       <tbody className="bg-white divide-y divide-gray-200">
                         {selectedPO.items && selectedPO.items.length > 0 ? (
                           selectedPO.items.map((item: POItemRow, index: number) => {
-                            const quantity = new Decimal(item.quantity || 0);
-                            const unitCost = new Decimal(item.unitCost || 0);
-                            const total = quantity.times(unitCost);
+                            const quantity = new Decimal(item.quantity || item.ordered_quantity || 0);
+                            const unitRaw = String(item.unitCost || item.unit_price || 0);
+                            const stored = item.total_price ?? item.totalPrice ?? item.lineTotal;
+                            const money = hydratePoLineMoney(quantity.toString(), unitRaw, stored);
+                            const total = Number(money.lineTotal);
 
                             return (
                               <tr key={index}>
@@ -2196,10 +2246,10 @@ export default function PurchaseOrdersPage() {
                                   {item.uomName || item.uom_name || 'Base UoM'}
                                 </td>
                                 <td className="px-4 py-3 text-sm text-gray-900 text-right">
-                                  {formatCurrency(unitCost.toNumber())}
+                                  {formatCurrency(money.unitCost, true, 6)}
                                 </td>
                                 <td className="px-4 py-3 text-sm font-medium text-gray-900 text-right">
-                                  {formatCurrency(total.toNumber())}
+                                  {formatCurrency(total)}
                                 </td>
                               </tr>
                             );

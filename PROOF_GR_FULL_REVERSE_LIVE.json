@@ -1,0 +1,111 @@
+{
+  "feature": "GR_FULL_REVERSE_LIVE",
+  "verdict": "PASS",
+  "startedAt": "2026-08-30T07:32:03.614Z",
+  "finishedAt": "2026-08-30T07:32:04.885Z",
+  "stamp": "20260830073203",
+  "summary": {
+    "passed": 16,
+    "failed": 0,
+    "total": 16
+  },
+  "contract": "Full reverse auto-cancels linked bills + reverses AP GL + posts Return GRN + marks GR reversed + PO→DRAFT; rebill blocked",
+  "fixtures": {
+    "sku": "GFR-20260830073203",
+    "grNumber": "GR-GFR-20260830073203",
+    "poNumber": "PO-GFR-20260830073203",
+    "grnId": "77c7b56e-2f76-4a66-bc16-55b75f33206e",
+    "invoiceId": "34ecd26c-7cbd-4665-868d-b3df63c4c5b9",
+    "invoiceNumber": "SBILL-2026-0026",
+    "returnGrnNumber": "RGRN-2026-0010",
+    "cancelledBills": [
+      {
+        "invoiceId": "34ecd26c-7cbd-4665-868d-b3df63c4c5b9",
+        "invoiceNumber": "SBILL-2026-0026",
+        "glReversed": true
+      }
+    ]
+  },
+  "gates": [
+    {
+      "id": "SSOT_PLAN_CANCEL",
+      "ok": true,
+      "detail": "toCancel=1 blockers=0"
+    },
+    {
+      "id": "SSOT_PLAN_BLOCK_PAID",
+      "ok": true,
+      "detail": "toCancel=0 blockers=Bill SBILL-PAID has payments applied — cannot reverse this goods receipt. Unallocate or refund payments first, or use Return to Supplier + credit note."
+    },
+    {
+      "id": "USER",
+      "ok": true,
+      "detail": "userId=2201cbde-f130-460a-97f2-d163080c5798"
+    },
+    {
+      "id": "SUPPLIER",
+      "ok": true,
+      "detail": "supplier=VERIFY-OB-TEST-SUP"
+    },
+    {
+      "id": "SEED_PRODUCT",
+      "ok": true,
+      "detail": "sku=GFR-20260830073203 uom=ea6d95c7"
+    },
+    {
+      "id": "SEED_GR_STOCK",
+      "ok": true,
+      "detail": "GR-GFR-20260830073203 qty=4 batch=6098d950"
+    },
+    {
+      "id": "BILL_POSTED",
+      "ok": true,
+      "detail": "invoice=SBILL-2026-0026 total=6000.000000 posted=true openGl=1"
+    },
+    {
+      "id": "ELIGIBILITY_ALLOWS",
+      "ok": true,
+      "detail": "allowed=true route=REVERSE_UNINVOICED_RECEIPT billsToAutoCancel=1 blockers=[]"
+    },
+    {
+      "id": "REVERSE_OK",
+      "ok": true,
+      "detail": "rgrn=RGRN-2026-0010 cancelled=[{\"invoiceId\":\"34ecd26c-7cbd-4665-868d-b3df63c4c5b9\",\"invoiceNumber\":\"SBILL-2026-0026\",\"glReversed\":true}]"
+    },
+    {
+      "id": "BILL_CANCELLED",
+      "ok": true,
+      "detail": "status=Cancelled outstanding=0.000000"
+    },
+    {
+      "id": "BILL_GL_REVERSED",
+      "ok": true,
+      "detail": "openGlAfter=0 (must be 0)"
+    },
+    {
+      "id": "GR_REVERSED",
+      "ok": true,
+      "detail": "reversed=true rgrn=6670f269-164f-4143-9cef-8959d493a328"
+    },
+    {
+      "id": "RGRN_POSTED",
+      "ok": true,
+      "detail": "status=POSTED reason=[Full reverse] LIVE proof full reverse 20260830073203"
+    },
+    {
+      "id": "PO_DRAFT",
+      "ok": true,
+      "detail": "po.status=DRAFT (must be DRAFT after full reverse)"
+    },
+    {
+      "id": "REBILL_BLOCKED",
+      "ok": true,
+      "detail": "Cannot bill GR GR-GFR-20260830073203 — receipt was fully reversed (uninvoiced) by RGRN-2026-0010. No AP liability remains."
+    },
+    {
+      "id": "STOCK_RETURNED",
+      "ok": true,
+      "detail": "batch.remaining=0.0000 (must be 0)"
+    }
+  ]
+}

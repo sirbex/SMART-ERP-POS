@@ -48,8 +48,7 @@ import {
     SUPPLIER_BILL_REQUIRED_FOR_SCN_MESSAGE,
 } from './returnGrnMessages.js';
 import { resolveCanonicalProductUom } from '../products/uomService.js';
-import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository.js';
-import { purchaseOrderRepository } from '../purchase-orders/purchaseOrderRepository.js';
+import { syncPOStatusWithReceipts } from '../purchase-orders/poReceiptStatusSync.js';
 import { warehouseSupplierReturnDeductionService } from '../inventory/warehouse/warehouseSupplierReturnDeductionService.js';
 import { isGoodsReceiptPosted } from '@shared/domain/pgDomainEnums.js';
 import {
@@ -436,23 +435,14 @@ export const returnGrnService = {
             const posted = await returnGrnRepository.post(client, rgrnId);
             if (!posted) throw new Error('Failed to post Return GRN');
 
-            // 4b. Reopen PO when net received drops below ordered (Phase 1B re-receive).
+            // 4b. Reopen / complete PO from net-received SSOT (sole sync writer).
             const grPoRow = await client.query<{ purchase_order_id: string | null }>(
               `SELECT purchase_order_id FROM goods_receipts WHERE id = $1`,
               [rgrn.grnId],
             );
             const linkedPoId = grPoRow.rows[0]?.purchase_order_id;
             if (linkedPoId) {
-              const fullyReceived = await goodsReceiptRepository.isPOFullyReceived(client, linkedPoId);
-              if (!fullyReceived) {
-                const poStatusRow = await client.query<{ status: string }>(
-                  `SELECT status FROM purchase_orders WHERE id = $1`,
-                  [linkedPoId],
-                );
-                if (poStatusRow.rows[0]?.status === 'COMPLETED') {
-                  await purchaseOrderRepository.updatePOStatus(client, linkedPoId, 'PENDING');
-                }
-              }
+              await syncPOStatusWithReceipts(client, linkedPoId);
             }
 
             // 5. GL posting — INSIDE transaction (SAP LUW: issue from subledger valuation)

@@ -95,6 +95,15 @@ describe('EVIDENCE — Supplier bill cancel integrity', () => {
       'Suppliers invoice detail cancel',
     );
     gate(
+      'UI_SUPPLIERS_DASHBOARD_REFRESH',
+      suppliersUi.includes('onApChanged') &&
+        suppliersUi.includes('refreshApDashboard') &&
+        suppliersUi.includes('getInvoiceSummary') &&
+        suppliersUi.includes('invalidateQueries') &&
+        suppliersUi.includes('Bill cancelled, but summary refresh failed'),
+      'cancel refreshes Outstanding cards + supplier balances immediately',
+    );
+    gate(
       'NO_SWALLOW_SUMMARY',
       !paymentsUi.includes('getInvoiceSummary().then(setInvoiceSummary).catch(() => undefined)'),
       'no silent catch on post-cancel summary refresh',

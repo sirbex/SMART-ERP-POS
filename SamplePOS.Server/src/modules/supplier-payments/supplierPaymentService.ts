@@ -25,6 +25,7 @@ import { assertSupplierCreditHeadroom } from '../suppliers/supplierCreditGuard.j
 import * as whtService from '../withholding-tax/whtService.js';
 import {
     assertLinkedGrnsReadyForBilling,
+    computeGrnBillableTotal,
     validateSupplierInvoiceGrnVariance,
 } from './supplierInvoiceGrnValidation.js';
 import {
@@ -1052,6 +1053,20 @@ export async function createInvoiceFromGRN(
         throw new ValidationError(`Cannot bill GR ${gr.grNumber} — status is ${gr.status}, expected COMPLETED`);
     }
 
+    const grReversed = Boolean(
+        (gr as { isReversed?: boolean }).isReversed
+        || (gr as { reversedByReturnGrnId?: string | null }).reversedByReturnGrnId,
+    );
+    if (grReversed) {
+        const rgrn =
+            (gr as { reversedByReturnGrnNumber?: string | null }).reversedByReturnGrnNumber
+            || (gr as { reversedByReturnGrnId?: string | null }).reversedByReturnGrnId
+            || 'return GRN';
+        throw new ValidationError(
+            `Cannot bill GR ${gr.grNumber} — receipt was fully reversed (uninvoiced) by ${rgrn}. No AP liability remains.`,
+        );
+    }
+
     const supplierId = (gr as { supplierId?: string }).supplierId;
     if (!supplierId) {
         throw new ValidationError(`GR ${gr.grNumber} has no supplier — cannot create invoice`);
@@ -1103,14 +1118,9 @@ export async function createInvoiceFromGRN(
         throw new ValidationError(`GR ${gr.grNumber} has no billable (non-bonus) items`);
     }
 
-    // ── PricingEngine: compute authoritative document total ──────────────────
-    // This is the only source of truth. UI computed totals are not trusted.
-    const grnComputedTotal = PricingEngine.calculateDocumentTotal(
-        billableItems.map((it) => ({
-            quantity: it.receivedQuantity,
-            unitCost: it.unitCost,
-        })),
-    );
+    // ── PricingEngine SSOT: authoritative billable total from linked GR ───────
+    const linked = await assertLinkedGrnsReadyForBilling(pool, [input.grnId], supplierId);
+    const grnComputedTotal = linked.billableTotal;
 
     // ── Variance enforcement ────────────────────────────────────────────────
     let resolvedInvoiceTotal = grnComputedTotal;
@@ -1344,26 +1354,29 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
                 : null;
 
         if (hasGrReference && (computedTotal === null || !Number.isFinite(computedTotal))) {
-            // Prefer sum of all linked GRs; else the single GR we resolved
-            const sumQ = await client.query(
-                `SELECT COALESCE(SUM(gri.received_quantity * gri.cost_price), 0)::float AS t
+            const linkIds = await client.query<{ grn_id: string }>(
+                `SELECT sigl.grn_id::text AS grn_id
                    FROM supplier_invoice_grn_links sigl
-                   JOIN goods_receipt_items gri ON gri.goods_receipt_id = sigl.grn_id
                   WHERE sigl.invoice_id = $1`,
                 [invoiceId],
             );
-            let t = Number(sumQ.rows[0]?.t || 0);
-            if (t < 0.005 && linkedGrNumber) {
-                const one = await client.query(
-                    `SELECT COALESCE(SUM(gri.received_quantity * gri.cost_price), 0)::float AS t
+            const grnIds = linkIds.rows.map((row) => row.grn_id);
+            if (grnIds.length > 0) {
+                computedTotal = (await computeGrnBillableTotal(client, grnIds)).toNumber();
+            } else if (linkedGrNumber) {
+                const one = await client.query<{ id: string }>(
+                    `SELECT gr.id::text AS id
                        FROM goods_receipts gr
-                       JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
-                      WHERE gr.receipt_number = $1`,
+                      WHERE gr.receipt_number = $1
+                      LIMIT 1`,
                     [linkedGrNumber],
                 );
-                t = Number(one.rows[0]?.t || 0);
+                if (one.rows[0]?.id) {
+                    computedTotal = (
+                        await computeGrnBillableTotal(client, [one.rows[0].id])
+                    ).toNumber();
+                }
             }
-            if (t >= 0.005) computedTotal = t;
         }
 
         if (hasGrReference && computedTotal !== null && Number.isFinite(computedTotal)) {
@@ -1403,6 +1416,27 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
         const { syncSupplierApCache } = await import('./apBalanceGovernance.js');
         await syncSupplierApCache(client, inv.SupplierId, 'POST_INVOICE_TO_GL');
     });
+}
+
+/**
+ * Authoritative GR billable total for UI preview — same PricingEngine path as billing/GL.
+ */
+export async function getGrnBillableTotalPreview(pool: Pool, grnId: string) {
+    const grRecord = await goodsReceiptRepository.getGRById(pool, grnId);
+    if (!grRecord) {
+        throw new ValidationError(`Goods Receipt ${grnId} not found`);
+    }
+    const { gr } = grRecord;
+    if (gr.status !== 'COMPLETED') {
+        throw new ValidationError(`GR ${gr.grNumber} is ${gr.status} — billable total requires COMPLETED`);
+    }
+    const linked = await assertLinkedGrnsReadyForBilling(pool, [grnId]);
+    return {
+        grnId,
+        grNumber: gr.grNumber,
+        billableTotal: linked.billableTotal.toNumber(),
+        receiptNumbers: linked.receiptNumbers,
+    };
 }
 
 /**

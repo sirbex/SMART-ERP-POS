@@ -304,9 +304,10 @@ export const returnGrnRepository = {
          )`;
 
         if (options.needsAttention) {
-            // POSTED stock return still waiting for Supplier Credit Note
+            // Invoiced returns still waiting for Supplier Credit Note (not uninvoiced reverses)
             conditions.push(`r.status = 'POSTED'`);
             conditions.push(`NOT (${hasActiveScnSql})`);
+            conditions.push(`(${hasSupplierBillSql})`);
         }
 
         const where = conditions.join(' AND ');
@@ -344,7 +345,7 @@ export const returnGrnRepository = {
          bill."SupplierInvoiceNumber" AS "supplierBillNumber",
          CASE
            WHEN r.status = 'DRAFT' THEN 'DRAFT'
-           WHEN NOT (${hasActiveScnSql}) AND NOT (${hasSupplierBillSql}) THEN 'NEED_BILL'
+           WHEN NOT (${hasActiveScnSql}) AND NOT (${hasSupplierBillSql}) THEN 'COMPLETE'
            WHEN NOT (${hasActiveScnSql}) THEN 'NEED_SCN'
            WHEN UPPER(COALESCE(scn."Status",'')) IN ('POSTED', 'OPEN', 'DRAFT') THEN 'HAS_SCN'
            ELSE 'COMPLETE'

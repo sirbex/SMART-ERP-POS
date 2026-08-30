@@ -27,8 +27,22 @@ const mockGrRepo = {
     setReversalMetadata: jest.fn<MockFn>(),
 };
 
+const mockCorrectionRepo = {
+    getSupplierInvoicesDirectlyLinkedToGrn: jest.fn<MockFn>(),
+};
+
+const mockCancelBill = jest.fn<MockFn>();
+
 jest.unstable_mockModule('../corrections/correctionEligibilityService.js', () => ({
     correctionEligibilityService: mockEligibility,
+}));
+
+jest.unstable_mockModule('../corrections/correctionEligibilityRepository.js', () => ({
+    correctionEligibilityRepository: mockCorrectionRepo,
+}));
+
+jest.unstable_mockModule('../supplier-payments/supplierPaymentService.js', () => ({
+    cancelSupplierInvoiceForCorrection: mockCancelBill,
 }));
 
 jest.unstable_mockModule('../return-grn/returnGrnRepository.js', () => ({
@@ -92,7 +106,7 @@ describe('goodsReceiptService.reverseUninvoicedReceipt', () => {
         ).rejects.toThrow(/Supplier invoice exists/);
     });
 
-    it('orchestrates create + post + reversal metadata on success', async () => {
+    it('orchestrates bill cancel + create + post + reversal metadata on success', async () => {
         mockEligibility.eligibilityReverseUninvoicedReceipt.mockResolvedValue({
             allowed: true,
             route: 'REVERSE_UNINVOICED_RECEIPT',
@@ -101,6 +115,24 @@ describe('goodsReceiptService.reverseUninvoicedReceipt', () => {
             suggestedActions: [],
             documentType: 'GOODS_RECEIPT',
             documentId: 'gr-1',
+        });
+
+        mockCorrectionRepo.getSupplierInvoicesDirectlyLinkedToGrn.mockResolvedValue([
+            {
+                id: 'inv-1',
+                invoiceNumber: 'SBILL-1',
+                status: 'Open',
+                documentType: 'SUPPLIER_INVOICE',
+                amountPaid: 0,
+                outstandingBalance: 50,
+                totalAmount: 50,
+                isPostedToGl: true,
+            },
+        ]);
+        mockCancelBill.mockResolvedValue({
+            invoiceId: 'inv-1',
+            invoiceNumber: 'SBILL-1',
+            glReversed: true,
         });
 
         mockReturnGrnRepo.getReturnableItems.mockResolvedValue([
@@ -141,6 +173,7 @@ describe('goodsReceiptService.reverseUninvoicedReceipt', () => {
             userId: 'user-1',
         });
 
+        expect(mockCancelBill).toHaveBeenCalled();
         expect(mockReturnGrnService.create).toHaveBeenCalled();
         expect(mockReturnGrnService.post).toHaveBeenCalledWith(mockPool, 'rgrn-1', mockClient);
         expect(mockGrRepo.setReversalMetadata).toHaveBeenCalledWith(
@@ -153,5 +186,6 @@ describe('goodsReceiptService.reverseUninvoicedReceipt', () => {
             }),
         );
         expect(result.returnGrn.returnGrnNumber).toBe('RGRN-2026-0001');
+        expect(result.cancelledBills).toHaveLength(1);
     });
 });

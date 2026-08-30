@@ -1,6 +1,6 @@
 /**
- * EVIDENCE: Supplier invoice must not exceed GRN received value without
- * direction-correct variance (PRICE_VARIANCE only when bill > GRN).
+ * EVIDENCE: Supplier invoice must not exceed GRN received value.
+ * Under-billing allowed only with SUPPLIER_DISCOUNT or ROUNDING_DIFFERENCE.
  *
  * Run: npx vitest run src/modules/supplier-payments/supplierInvoiceGrnIntegrity.evidence.test.ts
  */
@@ -25,20 +25,22 @@ function read(rel: string): string {
 }
 
 describe('EVIDENCE — Supplier invoice ≤ GRN integrity', () => {
-  it('SSOT validator: over-bill requires PRICE_VARIANCE; under-bill forbids it', () => {
+  it('SSOT validator: over-bill always rejected; under-bill allows discount/rounding only', () => {
     expect(() =>
       validateSupplierInvoiceGrnVariance({
         grnComputedTotal: 50_000,
         invoiceTotal: 60_000,
       }),
-    ).toThrow(/differs from goods received/i);
+    ).toThrow(/cannot exceed goods received/i);
 
-    const over = validateSupplierInvoiceGrnVariance({
-      grnComputedTotal: 50_000,
-      invoiceTotal: 60_000,
-      varianceReason: 'PRICE_VARIANCE',
-    });
-    gate('OVER_PV', over.hasVariance && over.normalizedReason === 'PRICE_VARIANCE', 'over-GRN + PRICE_VARIANCE ok');
+    expect(() =>
+      validateSupplierInvoiceGrnVariance({
+        grnComputedTotal: 50_000,
+        invoiceTotal: 60_000,
+        varianceReason: 'PRICE_VARIANCE',
+      }),
+    ).toThrow(/cannot exceed goods received/i);
+    gate('OVER_NO_PV', true, 'over-GRN rejects even with PRICE_VARIANCE');
 
     expect(() =>
       validateSupplierInvoiceGrnVariance({
@@ -46,7 +48,7 @@ describe('EVIDENCE — Supplier invoice ≤ GRN integrity', () => {
         invoiceTotal: 60_000,
         varianceReason: 'SUPPLIER_DISCOUNT',
       }),
-    ).toThrow(/PRICE_VARIANCE/i);
+    ).toThrow(/cannot exceed goods received/i);
     gate('OVER_NO_DISCOUNT', true, 'over-GRN rejects SUPPLIER_DISCOUNT');
 
     expect(() =>
@@ -55,7 +57,7 @@ describe('EVIDENCE — Supplier invoice ≤ GRN integrity', () => {
         invoiceTotal: 40_000,
         varianceReason: 'PRICE_VARIANCE',
       }),
-    ).toThrow(/below goods received/i);
+    ).toThrow(/Unrecognized variance reason/i);
     gate('UNDER_NO_PV', true, 'under-GRN rejects PRICE_VARIANCE');
   });
 
@@ -72,8 +74,9 @@ describe('EVIDENCE — Supplier invoice ≤ GRN integrity', () => {
       'MODULE',
       validation.includes('assertLinkedGrnsReadyForBilling') &&
         validation.includes('validateSupplierInvoiceGrnVariance') &&
-        validation.includes("reason !== 'PRICE_VARIANCE'"),
-      'validation module enforces GR ready + direction',
+        validation.includes('computeGrnBillableTotalFromLines') &&
+        validation.includes('cannot exceed goods received value'),
+      'validation module enforces GR ready + PricingEngine SSOT + no over-billing AP',
     );
     gate(
       'CREATE_WIRE',
@@ -96,9 +99,9 @@ describe('EVIDENCE — Supplier invoice ≤ GRN integrity', () => {
     gate(
       'ROUTES',
       routes.includes('/invoices/from-grn') &&
-        routes.includes('varianceReason') &&
-        routes.includes('PRICE_VARIANCE'),
-      'API accepts varianceReason on create + from-grn',
+        routes.includes('/grns/:grnId/billable-total') &&
+        routes.includes('varianceReason'),
+      'API: from-grn + billable-total preview + varianceReason',
     );
     gate(
       'ROUTES_CANCEL',
@@ -106,6 +109,31 @@ describe('EVIDENCE — Supplier invoice ≤ GRN integrity', () => {
         routes.includes("requirePermission('purchasing.cancel_bill')") &&
         svc.includes('cancelSupplierInvoice'),
       'cancel unpaid bill route + service wired',
+    );
+    gate(
+      'BLOCK_BILL_REVERSED_GR',
+      svc.includes('receipt was fully reversed') &&
+        svc.includes('isReversed') &&
+        grUi.includes('Reversed') &&
+        grUi.includes('not billable') &&
+        grUi.includes('isGrReversed'),
+      'UI + from-grn block Create Supplier Bill after reverse',
+    );
+    gate(
+      'FULL_REVERSE_AUTO_CANCEL_BILLS',
+      read('SamplePOS.Server/src/modules/goods-receipts/goodsReceiptService.ts').includes(
+        'cancelSupplierInvoiceForCorrection',
+      ) &&
+        read('SamplePOS.Server/src/modules/corrections/correctionEligibilityService.ts').includes(
+          'planSupplierBillsForGrFullReverse',
+        ) &&
+        read('shared/domain/grFullReverseSsot.ts').includes('planSupplierBillsForGrFullReverse') &&
+        read('shared/domain/grFullReverseSsot.ts').includes('payments applied') &&
+        read('SamplePOS.Server/src/modules/corrections/correctionEligibilityService.ts').includes(
+          'getConsumedBatchesForGrn',
+        ) &&
+        grUi.includes('Reverse Receipt'),
+      'Full reverse: unpaid cancel OK; paid + consumed blocked',
     );
     gate(
       'UI_CANCEL_BILL',
@@ -130,9 +158,11 @@ describe('EVIDENCE — Supplier invoice ≤ GRN integrity', () => {
     gate(
       'UI_FROM_GRN',
       grUi.includes('/supplier-payments/invoices/from-grn') &&
+        grUi.includes('/supplier-payments/grns/') &&
+        grUi.includes('billable-total') &&
         grUi.includes('supplierReportedTotal') &&
-        grUi.includes('PRICE_VARIANCE'),
-      'GR billing UI uses from-grn + variance modal',
+        grUi.includes('billExceedsReceived'),
+      'GR billing UI uses server billable total + blocks bill > received value',
     );
   });
 
@@ -142,7 +172,7 @@ describe('EVIDENCE — Supplier invoice ≤ GRN integrity', () => {
       feature: 'SUPPLIER_INVOICE_GRN_BOUNDS',
       provenAt: new Date().toISOString(),
       contract:
-        'GR-linked supplier invoices cannot exceed received billable value unless PRICE_VARIANCE; linked GRs must be COMPLETED with billable qty; postInvoiceToGL re-validates; manual GR-note bills blocked in UI',
+        'GR-linked supplier invoices cannot exceed PricingEngine billable total; one SSOT path for validation, billing, GL, and UI preview; linked GRs must be COMPLETED with billable qty',
       gates,
       summary: {
         total: gates.length,

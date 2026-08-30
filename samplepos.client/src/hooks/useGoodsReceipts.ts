@@ -22,7 +22,7 @@ export function useGoodsReceipts(params?: {
   search?: string;
   startDate?: string;
   endDate?: string;
-  billingStatus?: 'TO_INVOICE' | 'INVOICED';
+  billingStatus?: 'TO_INVOICE' | 'INVOICED' | 'REVERSED';
   enabled?: boolean;
 } & ServerListParams) {
   return useQuery({

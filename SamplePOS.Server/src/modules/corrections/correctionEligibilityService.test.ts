@@ -11,6 +11,7 @@ const mockPool = {} as Pool;
 const mockRepo = {
     getGrnHeader: jest.fn<MockFn>(),
     getSupplierInvoicesForGrn: jest.fn<MockFn>(),
+    getSupplierInvoicesDirectlyLinkedToGrn: jest.fn<MockFn>(),
     getConsumedBatchesForGrn: jest.fn<MockFn>(),
     getReturnGrnsForGrn: jest.fn<MockFn>(),
     getGrnReversalMetadata: jest.fn<MockFn>(),
@@ -54,6 +55,7 @@ const { correctionEligibilityService } = await import('./correctionEligibilitySe
 describe('correctionEligibilityService', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockRepo.getConsumedBatchesForGrn.mockResolvedValue([]);
     });
 
     describe('GOODS_RECEIPT', () => {
@@ -239,6 +241,7 @@ describe('correctionEligibilityService', () => {
                 reversalReason: null,
             });
             mockRepo.getSupplierInvoicesForGrn.mockResolvedValue([]);
+            mockRepo.getSupplierInvoicesDirectlyLinkedToGrn.mockResolvedValue([]);
             mockRepo.getReturnGrnsForGrn.mockResolvedValue([]);
             mockReturnGrnRepo.getReturnableItems.mockResolvedValue([
                 {
@@ -259,7 +262,7 @@ describe('correctionEligibilityService', () => {
             expect(r.route).toBe('REVERSE_UNINVOICED_RECEIPT');
         });
 
-        it('blocks when supplier invoice exists', async () => {
+        it('allows full reverse when unpaid supplier invoice exists (auto-cancel)', async () => {
             mockRepo.getGrnHeader.mockResolvedValue({
                 id: 'gr-2',
                 grNumber: 'GR-2026-0101',
@@ -274,25 +277,135 @@ describe('correctionEligibilityService', () => {
                 reversalTimestamp: null,
                 reversalReason: null,
             });
-            mockRepo.getSupplierInvoicesForGrn.mockResolvedValue([
+            mockRepo.getSupplierInvoicesDirectlyLinkedToGrn.mockResolvedValue([
                 {
                     id: 'inv-1',
                     invoiceNumber: 'SBILL-1',
                     status: 'Open',
+                    documentType: 'SUPPLIER_INVOICE',
                     amountPaid: 0,
                     outstandingBalance: 100,
+                    totalAmount: 100,
+                    isPostedToGl: true,
+                    creditsApplied: 0,
                 },
             ]);
             mockRepo.getReturnGrnsForGrn.mockResolvedValue([]);
-            mockReturnGrnRepo.getReturnableItems.mockResolvedValue([]);
+            mockReturnGrnRepo.getReturnableItems.mockResolvedValue([
+                {
+                    productId: 'p1',
+                    productName: 'Item',
+                    returnedQuantity: 0,
+                    returnableQuantity: 10,
+                    consumedQuantity: 0,
+                    returnBlockReason: null,
+                },
+            ]);
 
             const r = await correctionEligibilityService.eligibilityReverseUninvoicedReceipt(
                 mockPool,
                 'gr-2',
             );
+            expect(r.allowed).toBe(true);
+            expect(r.route).toBe('REVERSE_UNINVOICED_RECEIPT');
+            expect(r.warnings.some((w) => w.includes('SBILL-1'))).toBe(true);
+        });
+
+        it('blocks full reverse when linked bill has payments', async () => {
+            mockRepo.getGrnHeader.mockResolvedValue({
+                id: 'gr-3',
+                grNumber: 'GR-2026-0102',
+                status: 'COMPLETED',
+                supplierId: 'sup-1',
+                supplierName: 'Vendor',
+                purchaseOrderId: 'po-1',
+            });
+            mockRepo.getGrnReversalMetadata.mockResolvedValue({
+                reversedByReturnGrnId: null,
+                reversedByReturnGrnNumber: null,
+                reversalTimestamp: null,
+                reversalReason: null,
+            });
+            mockRepo.getSupplierInvoicesDirectlyLinkedToGrn.mockResolvedValue([
+                {
+                    id: 'inv-paid',
+                    invoiceNumber: 'SBILL-PAID',
+                    status: 'PAID',
+                    documentType: 'SUPPLIER_INVOICE',
+                    amountPaid: 100,
+                    outstandingBalance: 0,
+                    totalAmount: 100,
+                    isPostedToGl: true,
+                    creditsApplied: 0,
+                },
+            ]);
+            mockRepo.getReturnGrnsForGrn.mockResolvedValue([]);
+            mockReturnGrnRepo.getReturnableItems.mockResolvedValue([
+                {
+                    productId: 'p1',
+                    productName: 'Item',
+                    returnedQuantity: 0,
+                    returnableQuantity: 10,
+                    consumedQuantity: 0,
+                    returnBlockReason: null,
+                },
+            ]);
+
+            const r = await correctionEligibilityService.eligibilityReverseUninvoicedReceipt(
+                mockPool,
+                'gr-3',
+            );
             expect(r.allowed).toBe(false);
             expect(r.route).toBe('BLOCKED');
-            expect(r.blockers.some((b) => b.includes('Supplier invoice'))).toBe(true);
+            expect(r.blockers.some((b) => /payments applied/i.test(b))).toBe(true);
+        });
+
+        it('blocks full reverse when stock is sold or consumed', async () => {
+            mockRepo.getGrnHeader.mockResolvedValue({
+                id: 'gr-4',
+                grNumber: 'GR-2026-0103',
+                status: 'COMPLETED',
+                supplierId: 'sup-1',
+                supplierName: 'Vendor',
+                purchaseOrderId: 'po-1',
+            });
+            mockRepo.getGrnReversalMetadata.mockResolvedValue({
+                reversedByReturnGrnId: null,
+                reversedByReturnGrnNumber: null,
+                reversalTimestamp: null,
+                reversalReason: null,
+            });
+            mockRepo.getSupplierInvoicesDirectlyLinkedToGrn.mockResolvedValue([]);
+            mockRepo.getReturnGrnsForGrn.mockResolvedValue([]);
+            mockRepo.getConsumedBatchesForGrn.mockResolvedValue([
+                {
+                    batchId: 'b-9',
+                    batchNumber: 'LOT-9',
+                    productId: 'p1',
+                    productName: 'Syrup',
+                    receivedQty: 10,
+                    remainingQty: 3,
+                    consumedQty: 7,
+                },
+            ]);
+            mockReturnGrnRepo.getReturnableItems.mockResolvedValue([
+                {
+                    productId: 'p1',
+                    productName: 'Syrup',
+                    returnedQuantity: 0,
+                    returnableQuantity: 3,
+                    consumedQuantity: 7,
+                    returnBlockReason: null,
+                },
+            ]);
+
+            const r = await correctionEligibilityService.eligibilityReverseUninvoicedReceipt(
+                mockPool,
+                'gr-4',
+            );
+            expect(r.allowed).toBe(false);
+            expect(r.route).toBe('BLOCKED');
+            expect(r.blockers.some((b) => /sold or consumed/i.test(b))).toBe(true);
         });
     });
 });
