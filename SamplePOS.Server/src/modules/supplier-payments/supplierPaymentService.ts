@@ -2213,8 +2213,8 @@ export type CancelSupplierInvoiceForCorrectionOptions = {
     grnId?: string;
     /** SAP/Odoo: unapply payment allocations before reversing the bill (reassignment wizard). */
     unallocatePaymentsFirst?: boolean;
-    /** GL audit tag — USER_CANCEL for UI cancel; default REASSIGN GR for wizard. */
-    glReasonTag?: 'USER_CANCEL' | 'REASSIGN GR';
+    /** GL audit tag — USER_CANCEL for UI cancel; GR_FULL_REVERSE for receipt reverse; default REASSIGN GR for wizard. */
+    glReasonTag?: 'USER_CANCEL' | 'REASSIGN GR' | 'GR_FULL_REVERSE';
 };
 
 /**
