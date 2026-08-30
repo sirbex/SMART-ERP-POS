@@ -53,8 +53,19 @@ describe('purchaseOrderNetReceived SQL helpers', () => {
       '../../../../shared/domain/poReceiptWorkflowSsot.js'
     );
     expect(
-      resolveTargetPOWorkflowStatus('PENDING', { fullyReceived: false, fullyReversed: true }),
+      resolveTargetPOWorkflowStatus('COMPLETED', { fullyReceived: false, fullyReversed: true }),
     ).toBe('DRAFT');
+    expect(
+      resolveTargetPOWorkflowStatus('PENDING', { fullyReceived: false, fullyReversed: true }),
+    ).toBeNull();
+  });
+
+  it('list heal only targets COMPLETED (not PENDING after resubmit)', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync(new URL('./poReceiptStatusSync.ts', import.meta.url), 'utf8');
+    expect(src).toContain("po.status = 'COMPLETED'");
+    expect(src).not.toContain("po.status IN ('PENDING', 'COMPLETED')");
+    expect(src).toContain('cancelDraftGRsForPurchaseOrder');
   });
 
   it('derivePOReceiptStatusBadge shows Awaiting Receipt before first GR', () => {

@@ -40,6 +40,7 @@
     "proof:po-total-ssot": "cd samplepos.client && npx vitest run src/__tests__/po-total-ssot.evidence.test.ts src/__tests__/po-line-uom.spec.ts",
     "proof:po-receipt-workflow-ssot": "cd samplepos.client && npx vitest run src/__tests__/po-receipt-workflow-ssot.evidence.test.ts",
     "proof:procurement-integration-ssot": "cd samplepos.client && npx vitest run src/__tests__/procurement-integration-ssot.evidence.test.ts",
+    "proof:gr-reverse-journey-ssot": "cd samplepos.client && npx vitest run src/__tests__/gr-reverse-journey-ssot.evidence.test.ts src/__tests__/po-receipt-workflow-ssot.evidence.test.ts src/__tests__/supplier-return-worklist.evidence.test.ts && cd ../SamplePOS.Server && node --experimental-vm-modules ./node_modules/jest/bin/jest.js src/modules/goods-receipts/grFullReverseSsot.test.ts src/modules/corrections/correctionEligibilityService.test.ts src/modules/return-grn/returnGrnScnBilling.test.ts src/modules/purchase-orders/purchaseOrderNetReceived.test.ts --runInBand --forceExit",
     "proof:pos-search-display": "node scripts/proof-pos-product-search-display.mjs",
     "proof:sortable-tables": "node scripts/proof-sortable-tables-accounting.mjs",
     "proof:corrections": "node scripts/proof-pre-commit-corrections.mjs",

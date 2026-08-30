@@ -27,6 +27,7 @@ import {
   canCreateSupplierCreditNoteFromReturn,
   supplierReturnActionLabel,
 } from '@shared/domain/supplierReturnWorklist';
+import { poAllowsGoodsReceiptFinalize } from '@shared/domain/poReceiptWorkflowSsot';
 import {
   useGoodsReceipts,
   useFinalizeGoodsReceipt,
@@ -690,10 +691,10 @@ export default function GoodsReceiptsPage() {
 
   const canReceiveThisGR =
     selectedGR?.status === 'DRAFT' &&
-    linkedPoStatus !== 'CANCELLED';
+    poAllowsGoodsReceiptFinalize(linkedPoStatus);
 
   const isGrReceivable = (gr: GRRow) =>
-    gr.status === 'DRAFT' && (gr.poStatus ?? gr.po_status) !== 'CANCELLED';
+    gr.status === 'DRAFT' && poAllowsGoodsReceiptFinalize(gr.poStatus ?? gr.po_status);
 
   // DRAFT GR from PO with no lines — sync from PO (fixes GRs created before PO lines existed)
   useEffect(() => {
@@ -819,7 +820,7 @@ export default function GoodsReceiptsPage() {
 
   const handleFinalize = async (id: string) => {
     const validationErrors: string[] = [];
-    let anyReceived = false;
+    const zeroLines: string[] = [];
 
     items.forEach((it: GRItemRow) => {
       const es = editItems[it.id] || {};
@@ -828,16 +829,20 @@ export default function GoodsReceiptsPage() {
       const expiry = es.expiryDate ?? it.expiryDate ?? it.expiry_date ?? '';
       const trackExpiry = grItemTrackExpiry(it);
 
-      if (qty > 0) {
-        anyReceived = true;
-        if (!grLineExpirySatisfied(trackExpiry, qty, expiry)) {
-          validationErrors.push(`${productName}: Expiry date is required`);
-        }
+      if (!(qty > 0)) {
+        zeroLines.push(productName);
+        return;
+      }
+      if (!grLineExpirySatisfied(trackExpiry, qty, expiry)) {
+        validationErrors.push(`${productName}: Expiry date is required`);
       }
     });
 
-    if (!anyReceived) {
-      alert('Cannot finalize: At least one line must have a received quantity greater than zero.');
+    // Match server finalizeGR: every line must have received qty > 0
+    if (zeroLines.length > 0) {
+      alert(
+        `Cannot finalize: all lines must have received quantity > 0.\n\nFix: ${zeroLines.join(', ')}\n\nFor partial delivery, remove unreceived lines or set qty after the rest arrive.`,
+      );
       return;
     }
 
@@ -2163,6 +2168,15 @@ export default function GoodsReceiptsPage() {
                     The linked purchase order is cancelled. Receiving is blocked (open receipt cancelled with the PO).
                   </p>
                 )}
+                {selectedGR.status === 'DRAFT' &&
+                  linkedPoStatus &&
+                  linkedPoStatus !== 'CANCELLED' &&
+                  !poAllowsGoodsReceiptFinalize(linkedPoStatus) && (
+                  <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                    Purchase order is <strong>{linkedPoStatus}</strong> — submit and send it to the supplier before receiving.
+                    After a full reverse the PO returns to Draft; Finalize stays blocked until that cycle is open again.
+                  </p>
+                )}
                 {selectedGR.status === 'DRAFT' && (
                   <ResponsiveActionBar divider={false} className="sm:flex-row-reverse">
                     {canFinalizeGR && canReceiveThisGR && (
@@ -2261,7 +2275,7 @@ export default function GoodsReceiptsPage() {
                             return canCreateSupplierCreditNoteFromReturn({
                               status: r.status,
                               hasCreditNote: r.hasCreditNote,
-                              hasSupplierBill: supplierBillNum.length > 0 || !!r.hasSupplierBill,
+                              hasSupplierBill: !!r.hasSupplierBill,
                               reason: r.reason,
                             });
                           })

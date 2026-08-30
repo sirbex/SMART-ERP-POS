@@ -1,6 +1,12 @@
 /**
  * Sole auto-writer for PO workflow after GR finalize / Return GRN / reverse.
- * Fully reversed (net 0) → DRAFT so the user can manage the PO again.
+ *
+ * Contracts:
+ * - Fully received → COMPLETED (never from DRAFT).
+ * - Fully reversed from COMPLETED → DRAFT + cancel leftover draft GRs.
+ * - PENDING after intentional resubmit must stick (no idle sync yank).
+ * - Return/reverse event paths pass forceDraftIfFullyReversed so PENDING
+ *   that was economically unwound (full return) still returns to DRAFT.
  */
 import type { Pool, PoolClient } from 'pg';
 import {
@@ -16,9 +22,29 @@ import {
   poOrderedQtyTotalSql,
 } from './purchaseOrderNetReceived.js';
 
+function fullyReversedSql(poAlias = 'po'): string {
+  const netSql = poNetReceivedQtyTotalSql(poAlias);
+  const openSql = poOpenQtyTotalSql(poAlias);
+  const orderedSql = poOrderedQtyTotalSql(poAlias);
+  const grSql = poCompletedGrCountSql(poAlias);
+  return `(${grSql}) > 0
+    AND (${netSql})::numeric <= ${PO_RECEIPT_QTY_EPS}
+    AND (${openSql})::numeric > ${PO_RECEIPT_QTY_EPS}
+    AND (${orderedSql})::numeric > ${PO_RECEIPT_QTY_EPS}`;
+}
+
+export type SyncPOStatusOptions = {
+  /**
+   * When true (Return GRN post / full reverse), PENDING + fullyReversed → DRAFT.
+   * Idle reads must omit this so resubmit stays PENDING.
+   */
+  forceDraftIfFullyReversed?: boolean;
+};
+
 export async function syncPOStatusWithReceipts(
   pool: Pool | PoolClient,
   poId: string,
+  options: SyncPOStatusOptions = {},
 ): Promise<void> {
   const statusRes = await pool.query<{ status: string }>(
     `SELECT status FROM purchase_orders WHERE id = $1`,
@@ -55,34 +81,64 @@ export async function syncPOStatusWithReceipts(
     open > PO_RECEIPT_QTY_EPS &&
     ordered > PO_RECEIPT_QTY_EPS;
 
-  const target = resolveTargetPOWorkflowStatus(status, { fullyReceived, fullyReversed });
+  let target = resolveTargetPOWorkflowStatus(status, { fullyReceived, fullyReversed });
+
+  if (
+    options.forceDraftIfFullyReversed &&
+    fullyReversed &&
+    String(status).toUpperCase() === 'PENDING'
+  ) {
+    target = 'DRAFT';
+  }
+
+  // Never cancel drafts on an intentional PENDING cycle (new Send after resubmit).
+  if (fullyReversed && target === 'DRAFT') {
+    await goodsReceiptRepository.cancelDraftGRsForPurchaseOrder(pool, poId);
+  } else if (fullyReversed && String(status).toUpperCase() === 'DRAFT') {
+    await goodsReceiptRepository.cancelDraftGRsForPurchaseOrder(pool, poId);
+  }
+
   if (target) {
     await purchaseOrderRepository.updatePOStatus(pool, poId, target);
   }
 }
 
 /**
- * Batch heal: any PENDING/COMPLETED PO with net 0 after GR history → DRAFT.
- * Called from list so the UI does not show stale "Reopened" rows.
+ * Batch heal: COMPLETED POs with net 0 after GR history → DRAFT.
+ * Does not touch PENDING — resubmit after reverse must stay PENDING for Send.
+ * Cancels leftover DRAFT GRs on fully-reversed COMPLETED/DRAFT POs only.
  */
 export async function healFullyReversedPurchaseOrdersToDraft(
   pool: Pool | PoolClient,
 ): Promise<number> {
-  const netSql = poNetReceivedQtyTotalSql('po');
-  const openSql = poOpenQtyTotalSql('po');
-  const orderedSql = poOrderedQtyTotalSql('po');
-  const grSql = poCompletedGrCountSql('po');
-  const result = await pool.query(
+  const rev = fullyReversedSql('po');
+  const result = await pool.query<{ id: string }>(
     `UPDATE purchase_orders po
      SET status = 'DRAFT',
          version = version + 1,
          updated_at = CURRENT_TIMESTAMP
-     WHERE po.status IN ('PENDING', 'COMPLETED')
-       AND (${grSql}) > 0
-       AND (${netSql})::numeric <= ${PO_RECEIPT_QTY_EPS}
-       AND (${openSql})::numeric > ${PO_RECEIPT_QTY_EPS}
-       AND (${orderedSql})::numeric > ${PO_RECEIPT_QTY_EPS}
+     WHERE po.status = 'COMPLETED'
+       AND ${rev}
      RETURNING po.id`,
   );
+
+  const orphanPos = await pool.query<{ id: string }>(
+    `SELECT po.id
+     FROM purchase_orders po
+     WHERE po.status = 'DRAFT'
+       AND ${rev}
+       AND EXISTS (
+         SELECT 1 FROM goods_receipts gr
+         WHERE gr.purchase_order_id = po.id AND gr.status = 'DRAFT'
+       )`,
+  );
+
+  const poIds = new Set<string>([
+    ...result.rows.map((r) => r.id),
+    ...orphanPos.rows.map((r) => r.id),
+  ]);
+  for (const poId of poIds) {
+    await goodsReceiptRepository.cancelDraftGRsForPurchaseOrder(pool, poId);
+  }
   return result.rowCount ?? 0;
 }

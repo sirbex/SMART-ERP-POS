@@ -6,6 +6,7 @@
  * "Payments" = cash/bank/MoMo allocated to the bill (AmountPaid after ledger sync).
  * "Credits"  = applied supplier credit notes (SCN), including return credits.
  * Never treat credits as "Paid" — that is what confuses operators.
+ * Never treat Cancelled (zero outstanding) as "Paid".
  */
 
 export type SupplierBillSettlementInput = {
@@ -48,6 +49,12 @@ function isCreditNote(documentType?: string | null): boolean {
   return String(documentType || '').toUpperCase() === 'SUPPLIER_CREDIT_NOTE';
 }
 
+/** Terminal void states — no AP liability; never label as Paid. */
+export function isSupplierBillCancelledStatus(status?: string | null): boolean {
+  const s = String(status || '').toUpperCase();
+  return s === 'CANCELLED' || s === 'DELETED' || s === 'VOIDED';
+}
+
 /**
  * Derive credits when API did not send creditsApplied:
  * gap = total − payments − balanceDue (clamped ≥ 0).
@@ -65,19 +72,31 @@ export function buildSupplierBillSettlement(
 ): SupplierBillSettlement {
   const invoiceTotal = money(input.totalAmount);
   const payments = money(input.amountPaid);
-  const balanceDue = money(
-    input.outstandingBalance != null
-      ? input.outstandingBalance
-      : Math.max(0, invoiceTotal - payments - money(input.creditsApplied)),
-  );
+  const cancelled = isSupplierBillCancelledStatus(input.status);
 
-  const creditsApplied =
-    input.creditsApplied != null && Number.isFinite(Number(input.creditsApplied))
+  // Cancelled bills have no AP liability — do not invent credits from total−0 gap
+  // and never surface a residual outstanding as payable.
+  let balanceDue = cancelled
+    ? 0
+    : money(
+        input.outstandingBalance != null
+          ? input.outstandingBalance
+          : Math.max(0, invoiceTotal - payments - money(input.creditsApplied)),
+      );
+
+  const creditsApplied = cancelled
+    ? money(input.creditsApplied ?? 0)
+    : input.creditsApplied != null && Number.isFinite(Number(input.creditsApplied))
       ? money(input.creditsApplied)
       : deriveCreditsApplied(invoiceTotal, payments, balanceDue);
 
-  const settledByCreditsOnly = creditsApplied > 0.009 && payments <= 0.009 && balanceDue > 0.009;
-  const mixedSettlement = creditsApplied > 0.009 && payments > 0.009;
+  if (!cancelled && input.outstandingBalance == null) {
+    balanceDue = money(Math.max(0, invoiceTotal - payments - creditsApplied));
+  }
+
+  const settledByCreditsOnly =
+    !cancelled && creditsApplied > 0.009 && payments <= 0.009 && balanceDue > 0.009;
+  const mixedSettlement = !cancelled && creditsApplied > 0.009 && payments > 0.009;
 
   return {
     invoiceTotal,
@@ -93,7 +112,9 @@ export function buildSupplierBillSettlement(
       creditsApplied,
       balanceDue,
     }),
-    equationHint: 'Balance due = Invoice total − Payments − Credits applied',
+    equationHint: cancelled
+      ? 'Cancelled — no balance due (not paid)'
+      : 'Balance due = Invoice total − Payments − Credits applied',
   };
 }
 
@@ -104,17 +125,17 @@ export function formatSupplierBillDisplayStatus(input: {
   creditsApplied: number;
   balanceDue: number;
 }): string {
+  const s = String(input.status || '').toUpperCase();
+  // Terminal first — zero balance after cancel must never become "Paid" / "Applied"
+  if (isSupplierBillCancelledStatus(s)) return 'Cancelled';
+
   if (isCreditNote(input.documentType)) {
-    const s = String(input.status || '').toUpperCase();
     if (s === 'APPLIED' || input.balanceDue <= 0.009) return 'Applied';
     if (s === 'POSTED') return 'On account — apply to bill';
     if (s === 'DRAFT') return 'Draft';
-    if (s === 'CANCELLED') return 'Cancelled';
     return String(input.status || 'Credit note');
   }
 
-  const s = String(input.status || '').toUpperCase();
-  if (s === 'CANCELLED' || s === 'DELETED' || s === 'VOIDED') return 'Cancelled';
   if (s === 'DRAFT') return 'Draft';
   if (input.balanceDue <= 0.009 || s === 'PAID') return 'Paid';
 

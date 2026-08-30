@@ -21,6 +21,7 @@ import {
   isSupplierBillCancelledStatus,
 } from '@shared/utils/supplierBillSettlement';
 import {
+  canCreateSupplierCreditNoteFromReturn,
   isSupplierReturnNeedsAttention,
   mustBillBeforeSupplierCreditNote,
   resolveSupplierReturnActionStatus,
@@ -114,8 +115,12 @@ describe('PROOF: Procurement integration SSOT (shared across modules)', () => {
       resolveSupplierReturnActionStatus(uninvoicedReturn) === 'COMPLETE' &&
         !isSupplierReturnNeedsAttention(uninvoicedReturn) &&
         !mustBillBeforeSupplierCreditNote(uninvoicedReturn) &&
+        !canCreateSupplierCreditNoteFromReturn({
+          ...uninvoicedReturn,
+          hasSupplierBill: true,
+        }) &&
         supplierReturnActionLabel(uninvoicedReturn).includes('Reversal'),
-      'uninvoiced reverse → Done/Reversal complete — not Need bill',
+      'uninvoiced reverse → Done — no SCN even if sibling bill flag true',
     );
 
     const invoicedReturn = {
@@ -260,6 +265,7 @@ describe('PROOF: Procurement integration SSOT (shared across modules)', () => {
     const scripts = [
       'proof:po-total-ssot',
       'proof:po-receipt-workflow-ssot',
+      'proof:gr-reverse-journey-ssot',
       'proof:grn-bill-prompt-defaults',
       'proof:supplier-invoice-grn-bounds',
       'proof:supplier-bill-cancel',

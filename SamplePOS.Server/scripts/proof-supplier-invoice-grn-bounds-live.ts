@@ -198,10 +198,10 @@ async function main(): Promise<void> {
     gate('REJECT_OVER_DISCOUNT', false, 'over-bill with SUPPLIER_DISCOUNT was accepted');
   }
 
-  // Over-bill with PRICE_VARIANCE — accept
-  let invoiceId: string | null = null;
+  // Over-bill with PRICE_VARIANCE — must reject (AP cannot exceed received value)
+  let rejectOverPv = false;
   try {
-    const created = await createInvoiceFromGRN(
+    await createInvoiceFromGRN(
       pool,
       {
         grnId,
@@ -211,32 +211,12 @@ async function main(): Promise<void> {
       },
       userId,
     );
-    invoiceId = created.id;
-    const row = await pool.query<{
-      total: string;
-      grn_total: string | null;
-      variance_reason: string | null;
-      posted: boolean;
-    }>(
-      `SELECT "TotalAmount"::text AS total,
-              grn_computed_total::text AS grn_total,
-              variance_reason,
-              COALESCE(is_posted_to_gl, false) AS posted
-       FROM supplier_invoices WHERE "Id" = $1`,
-      [invoiceId],
-    );
-    const total = Number(row.rows[0]?.total ?? 0);
-    const grnStored = Number(row.rows[0]?.grn_total ?? 0);
-    gate(
-      'ACCEPT_OVER_PV',
-      total === OVER_TOTAL &&
-        Math.abs(grnStored - GRN_TOTAL) < 0.02 &&
-        row.rows[0]?.variance_reason === 'PRICE_VARIANCE' &&
-        row.rows[0]?.posted === true,
-      `invoice=${created.invoiceNumber ?? invoiceId} AP=${total} grnStored=${grnStored} reason=${row.rows[0]?.variance_reason} posted=${row.rows[0]?.posted}`,
-    );
+    gate('REJECT_OVER_PV', false, 'over-bill with PRICE_VARIANCE was accepted — AP must not exceed GR');
   } catch (err) {
-    gate('ACCEPT_OVER_PV', false, err instanceof Error ? err.message : String(err));
+    rejectOverPv = /cannot exceed goods received value/i.test(
+      err instanceof Error ? err.message : String(err),
+    );
+    gate('REJECT_OVER_PV', rejectOverPv, (err instanceof Error ? err.message : String(err)).slice(0, 160));
   }
 
   // Manual inflate path — second GR
@@ -306,8 +286,8 @@ async function main(): Promise<void> {
     stamp,
     sku: SKU,
     contract:
-      'LIVE: over-GRN bill rejected without reason and with wrong reason; accepted only with PRICE_VARIANCE; manual grnIds inflate rejected; fake GR rejected; exact match accepted',
-    fixture: { productId, grnId, grNumber, supplierId, GRN_TOTAL, OVER_TOTAL, invoiceId },
+      'LIVE: over-GRN bill always rejected (even PRICE_VARIANCE); favorable variance only; manual grnIds inflate rejected; exact match accepted',
+    fixture: { productId, grnId, grNumber, supplierId, GRN_TOTAL, OVER_TOTAL },
     gates,
     summary: {
       total: gates.length,

@@ -55,12 +55,12 @@ describe('PROOF: PO receipt workflow SSOT', () => {
         resolveTargetPOWorkflowStatus('PENDING', {
           fullyReceived: false,
           fullyReversed: true,
-        }) === 'DRAFT' &&
+        }) === null &&
         resolveTargetPOWorkflowStatus('DRAFT', {
           fullyReceived: false,
           fullyReversed: true,
         }) === null,
-      'full reverse → DRAFT (editable), not Pending/Reopened',
+      'full reverse: COMPLETED→DRAFT; PENDING stays (resubmit) unless event forces draft',
     );
 
     gate(
@@ -148,13 +148,17 @@ describe('PROOF: PO receipt workflow SSOT', () => {
       'WIRE_SYNC_TO_DRAFT',
       sync.includes('fullyReversed') &&
         sync.includes("'DRAFT'") &&
-        sync.includes('healFullyReversedPurchaseOrdersToDraft'),
-      'sync + batch heal write DRAFT on full reverse',
+        sync.includes('healFullyReversedPurchaseOrdersToDraft') &&
+        sync.includes("po.status = 'COMPLETED'") &&
+        !sync.includes("po.status IN ('PENDING', 'COMPLETED')"),
+      'sync writes DRAFT on reverse; list heal only COMPLETED (not PENDING)',
     );
     gate(
       'WIRE_LIST_HEALS',
-      poSvc.includes('healFullyReversedPurchaseOrdersToDraft'),
-      'PO list heals stale PENDING reversed rows to DRAFT',
+      poSvc.includes('healFullyReversedPurchaseOrdersToDraft') &&
+        domain.includes('resubmits') &&
+        domain.includes('PENDING'),
+      'PO list heals stuck COMPLETED; resubmit PENDING stays for Send',
     );
     gate(
       'WIRE_RETURN_USES_SYNC',

@@ -1,8 +1,8 @@
 {
   "feature": "SUPPLIER_BILL_CANCEL",
   "verdict": "PASS",
-  "gateCount": 14,
-  "passed": 14,
+  "gateCount": 15,
+  "passed": 15,
   "failed": 0,
   "gates": [
     {
@@ -51,6 +51,11 @@
       "detail": "Suppliers invoice detail cancel"
     },
     {
+      "id": "UI_SUPPLIERS_DASHBOARD_REFRESH",
+      "ok": true,
+      "detail": "cancel refreshes Outstanding cards + supplier balances immediately"
+    },
+    {
       "id": "NO_SWALLOW_SUMMARY",
       "ok": true,
       "detail": "no silent catch on post-cancel summary refresh"
@@ -80,5 +85,5 @@
     "ran": true,
     "verdict": "PASS"
   },
-  "generatedAt": "2026-08-27T05:56:49.002Z"
+  "generatedAt": "2026-08-29T19:21:15.043Z"
 }

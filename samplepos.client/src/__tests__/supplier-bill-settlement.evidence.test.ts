@@ -71,4 +71,38 @@ describe('supplierBillSettlement — stop Paid vs Outstanding confusion', () => 
       }),
     ).toBe('On account — apply to bill');
   });
+
+  it('cancelled bill with zero outstanding is Cancelled — never Paid (SBILL-2026-0020)', () => {
+    const s = buildSupplierBillSettlement({
+      totalAmount: 272_800.04,
+      amountPaid: 0,
+      creditsApplied: 0,
+      outstandingBalance: 0,
+      status: 'Cancelled',
+    });
+    expect(s.displayStatus).toBe('Cancelled');
+    expect(s.balanceDue).toBe(0);
+    expect(s.creditsApplied).toBe(0);
+    expect(s.equationHint).toMatch(/not paid/i);
+    expect(
+      formatSupplierBillDisplayStatus({
+        status: 'CANCELLED',
+        payments: 0,
+        creditsApplied: 0,
+        balanceDue: 0,
+      }),
+    ).toBe('Cancelled');
+  });
+
+  it('cancelled credit note with zero balance is Cancelled — not Applied', () => {
+    expect(
+      formatSupplierBillDisplayStatus({
+        status: 'CANCELLED',
+        documentType: 'SUPPLIER_CREDIT_NOTE',
+        payments: 0,
+        creditsApplied: 0,
+        balanceDue: 0,
+      }),
+    ).toBe('Cancelled');
+  });
 });

@@ -442,7 +442,9 @@ export const returnGrnService = {
             );
             const linkedPoId = grPoRow.rows[0]?.purchase_order_id;
             if (linkedPoId) {
-              await syncPOStatusWithReceipts(client, linkedPoId);
+              await syncPOStatusWithReceipts(client, linkedPoId, {
+                forceDraftIfFullyReversed: true,
+              });
             }
 
             // 5. GL posting — INSIDE transaction (SAP LUW: issue from subledger valuation)
@@ -648,6 +650,17 @@ export const returnGrnService = {
             if (!rgrn) throw new Error('Return GRN not found');
             if (rgrn.status !== 'POSTED') throw new Error('Return GRN must be POSTED before creating a Credit Note');
 
+            const { isFullReceiptReverseReason } = await import(
+                '../../../../shared/domain/grFullReverseSsot.js'
+            );
+            if (isFullReceiptReverseReason(rgrn.reason)) {
+                throw new BusinessError(
+                    'This return fully reversed the goods receipt — stock and GR/IR are already cleared. No supplier credit note is required (and sibling bills must not be credited from this return).',
+                    'ERR_SCN_FULL_REVERSE',
+                    { returnGrnId: rgrnId, returnGrnNumber: rgrn.returnGrnNumber, reason: rgrn.reason },
+                );
+            }
+
             // 2. Prevent duplicate: active SCN only (list/hasCreditNote SSOT).
             // Cancelled/void notes keep return_grn_id for audit but must not block re-create
             // after cancel reverses GL (POSTED/APPLIED → CANCELLED with ledger reverse).
@@ -696,11 +709,10 @@ export const returnGrnService = {
             const supplierId: string = grResult.rows[0]?.supplier_id || rgrn.supplierId || '';
             const supplierName: string = grResult.rows[0]?.supplier_name || 'Unknown Supplier';
 
-            // 5. Find the original Supplier Invoice (to reduce its outstanding balance).
-            //    Look-up order (most specific first):
-            //      a) supplier_invoice_grn_links junction (set by createInvoiceFromGRN)
-            //      b) InternalReferenceNumber = GR receipt_number (set by from-GR flow)
-            //      c) PurchaseOrderId = GR's PO (legacy path / single-bill-per-PO)
+            // 5. Find the original Supplier Invoice for THIS goods receipt only.
+            //    Never fall back to PurchaseOrderId — that credits a sibling GR's bill.
+            //    Prefer InternalReferenceNumber = this GR; allow junction only when
+            //    InternalReference is null or also matches this receipt.
             let referenceInvoiceId: string | undefined = knownReferenceInvoiceId;
             if (!referenceInvoiceId) {
                 const siResult = await client.query(
@@ -710,15 +722,15 @@ export const returnGrnService = {
                        AND si.deleted_at IS NULL
                        AND UPPER(COALESCE(si."Status",'')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
                        AND (
-                         si."Id" IN (
-                           SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl
-                           WHERE sigl.grn_id = $1
-                         )
-                         OR si."InternalReferenceNumber" = (
+                         si."InternalReferenceNumber" = (
                            SELECT receipt_number FROM goods_receipts WHERE id = $1
                          )
-                         OR si."PurchaseOrderId" = (
-                           SELECT purchase_order_id FROM goods_receipts WHERE id = $1
+                         OR (
+                           COALESCE(si."InternalReferenceNumber", '') = ''
+                           AND si."Id" IN (
+                             SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl
+                             WHERE sigl.grn_id = $1
+                           )
                          )
                        )
                      ORDER BY si."CreatedAt" DESC LIMIT 1`,

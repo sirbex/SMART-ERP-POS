@@ -299,15 +299,18 @@ export const returnGrnRepository = {
                  WHERE sigl.grn_id = r.grn_id
                )
                OR si."InternalReferenceNumber" = g.receipt_number
-               OR si."PurchaseOrderId" = g.purchase_order_id
              )
          )`;
 
         if (options.needsAttention) {
-            // Invoiced returns still waiting for Supplier Credit Note (not uninvoiced reverses)
+            // Invoiced returns still waiting for SCN — exclude full/uninvoiced reverse
             conditions.push(`r.status = 'POSTED'`);
             conditions.push(`NOT (${hasActiveScnSql})`);
             conditions.push(`(${hasSupplierBillSql})`);
+            conditions.push(
+              `COALESCE(r.reason, '') NOT LIKE '%[Full reverse]%'`
+              + ` AND COALESCE(r.reason, '') NOT LIKE '%[Uninvoiced reversal]%'`,
+            );
         }
 
         const where = conditions.join(' AND ');
@@ -345,6 +348,8 @@ export const returnGrnRepository = {
          bill."SupplierInvoiceNumber" AS "supplierBillNumber",
          CASE
            WHEN r.status = 'DRAFT' THEN 'DRAFT'
+           WHEN COALESCE(r.reason, '') LIKE '%[Full reverse]%'
+             OR COALESCE(r.reason, '') LIKE '%[Uninvoiced reversal]%' THEN 'COMPLETE'
            WHEN NOT (${hasActiveScnSql}) AND NOT (${hasSupplierBillSql}) THEN 'COMPLETE'
            WHEN NOT (${hasActiveScnSql}) THEN 'NEED_SCN'
            WHEN UPPER(COALESCE(scn."Status",'')) IN ('POSTED', 'OPEN', 'DRAFT') THEN 'HAS_SCN'
@@ -380,7 +385,6 @@ export const returnGrnRepository = {
                WHERE sigl.grn_id = r.grn_id
              )
              OR si."InternalReferenceNumber" = g.receipt_number
-             OR si."PurchaseOrderId" = g.purchase_order_id
            )
          ORDER BY si."CreatedAt" DESC
          LIMIT 1
@@ -597,7 +601,6 @@ export const returnGrnRepository = {
                  WHERE sigl.grn_id = r.grn_id
                )
                OR si."InternalReferenceNumber" = g.receipt_number
-               OR si."PurchaseOrderId" = g.purchase_order_id
              )
          ) AS "hasSupplierBill"
        FROM return_grn r

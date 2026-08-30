@@ -101,7 +101,8 @@ const CreateInvoiceSchema = z.object({
     grnIds: z.array(z.string().uuid()).optional(),
     /**
      * Required when bill total linked to grnIds differs from received value.
-     * PRICE_VARIANCE only when supplier billed MORE than received.
+     * SUPPLIER_DISCOUNT or ROUNDING_DIFFERENCE only when supplier billed less.
+     * Over-billing is always rejected regardless of reason.
      */
     varianceReason: z
         .enum(['SUPPLIER_DISCOUNT', 'ROUNDING_DIFFERENCE', 'PRICE_VARIANCE', 'EDIT_LINE_PRICES'])
@@ -122,8 +123,7 @@ const CreateInvoiceFromGRNSchema = z.object({
     /**
      * Why the supplier total differs from the GRN computed total.
      * Required when supplierReportedTotal is present and variance > 0.005.
-     * 'EDIT_LINE_PRICES' causes the system to reject posting with a message
-     * to fix the GRN costs first.
+     * Over-billing is always rejected — only favorable variance (discount/rounding) allowed.
      */
     varianceReason: z
         .enum(['SUPPLIER_DISCOUNT', 'ROUNDING_DIFFERENCE', 'PRICE_VARIANCE', 'EDIT_LINE_PRICES'])
@@ -592,6 +592,17 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
             res.status(201).json({ success: true, data: invoice });
         })
+    );
+
+    // Authoritative GR billable total (PricingEngine SSOT — UI must not compute locally)
+    router.get(
+        '/grns/:grnId/billable-total',
+        requirePermission('purchasing.create'),
+        asyncHandler(async (req, res) => {
+            const { grnId } = z.object({ grnId: z.string().uuid() }).parse(req.params);
+            const preview = await supplierPaymentService.getGrnBillableTotalPreview(p(req), grnId);
+            res.json({ success: true, data: preview });
+        }),
     );
 
     // Create supplier invoice from a Goods Receipt (3-way match one-click bill)

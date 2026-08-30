@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, Fragment } from 'react';
+import { useState, useMemo, useEffect, useCallback, Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import Decimal from 'decimal.js';
 import Layout from '../components/Layout';
@@ -9,6 +9,7 @@ import {
   useUpdateSupplier,
   useDeleteSupplier,
   useReactivateSupplier,
+  supplierKeys,
 } from '../hooks/useSuppliers';
 import { supplierInvoiceService } from '../services/comprehensive-accounting';
 import { formatCurrency } from '../utils/currency';
@@ -28,6 +29,7 @@ import {
 } from '../components/adaptive';
 import { SortableTableHeader } from '../components/ui/SortableTableHeader';
 import { useServerTableSort } from '../hooks/useServerTableSort';
+import { useQueryClient } from '@tanstack/react-query';
 import { WorkflowHelpTrigger } from '../components/inventory/shared';
 import { useWhtTypes } from '../hooks/useAccountingModules';
 import { useBankAccounts } from '../hooks/useBanking';
@@ -277,6 +279,7 @@ interface SmartStatementData {
 
 export default function SuppliersPage() {
   // State
+  const queryClient = useQueryClient();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [viewingSupplier, setViewingSupplier] = useState<Supplier | null>(null);
@@ -311,7 +314,6 @@ export default function SuppliersPage() {
   const canManageOpeningBalance = useCanAccess([], ['accounting.opening_balance']);
   const canUpdateSupplier = useCanAccess([], ['suppliers.update']);
   const canDeleteSupplier = useCanAccess([], ['suppliers.delete']);
-  const canCancelBill = useCanAccess([], ['purchasing.cancel_bill']);
 
   // Invoice summary stats for top cards
   const [invoiceSummary, setInvoiceSummary] = useState<{
@@ -362,6 +364,26 @@ export default function SuppliersPage() {
         /* keep defaults */
       });
   }, []);
+
+  /** After bill cancel / payment / OB — refresh cards + supplier outstanding immediately. */
+  const refreshApDashboard = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: supplierKeys.all });
+    const summary = await supplierInvoiceService.getInvoiceSummary();
+    setInvoiceSummary(summary);
+  }, [queryClient]);
+
+  // Keep open supplier row in sync when list outstanding changes (no full page reload)
+  useEffect(() => {
+    setViewingSupplier((prev) => {
+      if (!prev) return prev;
+      const fresh = suppliers.find((s: Supplier) => s.id === prev.id);
+      if (!fresh) return prev;
+      if (Number(fresh.outstandingBalance ?? 0) === Number(prev.outstandingBalance ?? 0)) {
+        return prev;
+      }
+      return { ...prev, outstandingBalance: fresh.outstandingBalance };
+    });
+  }, [suppliers]);
 
   // Calculate statistics — use API-level aggregates to avoid pagination skewing totals
   const stats = useMemo(() => {
@@ -1129,7 +1151,8 @@ export default function SuppliersPage() {
               setViewingSupplier(null);
             } : undefined}
             canPostOpeningBalance={canManageOpeningBalance}
-            onOpeningBalancePosted={() => refetch()}
+            onOpeningBalancePosted={() => { void refreshApDashboard(); }}
+            onApChanged={refreshApDashboard}
           />
         )}
 
@@ -1156,6 +1179,8 @@ interface SupplierDetailModalProps {
   onEdit?: () => void;
   canPostOpeningBalance?: boolean;
   onOpeningBalancePosted?: () => void;
+  /** Refresh parent Outstanding / unpaid cards + supplier list balances. */
+  onApChanged?: () => void | Promise<void>;
 }
 
 function SupplierDetailModal({
@@ -1163,7 +1188,16 @@ function SupplierDetailModal({
   onClose,
   onEdit,
   canPostOpeningBalance = false,
+  onOpeningBalancePosted,
+  onApChanged,
 }: SupplierDetailModalProps) {
+  const notifyApChanged = async () => {
+    if (onApChanged) {
+      await onApChanged();
+      return;
+    }
+    onOpeningBalancePosted?.();
+  };
   const [activeTab, setActiveTab] = useState<
     'info' | 'performance' | 'orders' | 'products' | 'invoices' | 'ledger'
   >('info');
@@ -1211,8 +1245,9 @@ function SupplierDetailModal({
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [showGlModal, setShowGlModal] = useState(false);
 
-  // Permission check for recording payments
+  // Permission check for recording payments / cancelling bills
   const canCreatePayment = useCanAccess([], ['suppliers.create']);
+  const canCancelBill = useCanAccess([], ['purchasing.cancel_bill']);
 
   // Single-invoice payment modal state
   const [payingInvoice, setPayingInvoice] = useState<SupplierInvoiceSummary | null>(null);
@@ -1351,8 +1386,12 @@ function SupplierDetailModal({
       setMultiSelected(new Map());
       setMultiPayRef('');
       setMultiPayNotes('');
-      setInvoices([]);
-      loadInvoices();
+      await loadInvoices();
+      try {
+        await notifyApChanged();
+      } catch {
+        setMultiError('Payment posted, but dashboard outstanding did not refresh — use Refresh.');
+      }
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { error?: string; message?: string } } };
       const apiError = axiosErr.response?.data?.error || axiosErr.response?.data?.message;
@@ -1517,6 +1556,19 @@ function SupplierDetailModal({
       setSelectedInvoice(null);
       setInvoiceDetails(null);
       await loadInvoices();
+      try {
+        await notifyApChanged();
+      } catch (summaryError: unknown) {
+        const summaryMsg =
+          summaryError instanceof Error ? summaryError.message : 'Summary refresh failed';
+        window.alert(`Bill cancelled, but summary refresh failed: ${summaryMsg}`);
+      }
+      if (activeTab === 'performance') {
+        void loadPerformance();
+      }
+      if (activeTab === 'ledger') {
+        void loadSmartLedger(ledgerStartDate, ledgerEndDate);
+      }
     } catch (error) {
       handleApiError(error, { fallback: 'Failed to cancel bill' });
     } finally {
@@ -1724,14 +1776,16 @@ function SupplierDetailModal({
       setPaymentSuccess(
         `Payment of ${formatCurrency(amount, true, 0)} recorded successfully (${data.data?.paymentNumber || ''})`
       );
-      // Refresh invoices after short delay
+      await loadInvoices();
+      try {
+        await notifyApChanged();
+      } catch {
+        window.alert('Payment recorded, but dashboard outstanding did not refresh — use Refresh.');
+      }
       setTimeout(() => {
         setPayingInvoice(null);
         setPaymentSuccess(null);
-        // Force reload invoices
-        setInvoices([]);
-        loadInvoices();
-      }, 2000);
+      }, 1200);
     } catch (error: unknown) {
       const raw =
         error && typeof error === 'object' && 'response' in error

@@ -7,10 +7,15 @@
  * 3. Fully net-received → COMPLETED.
  * 4. Fully reversed (net≈0 after posted GR history) → DRAFT so the user can edit/cancel/resubmit.
  *    No "Reopened (reversed)" noise — the economic document is unwound.
+ *    After the user resubmits (DRAFT→PENDING), status stays PENDING for Send to supplier —
+ *    list heal must not force PENDING back to DRAFT from historical reversed GRs.
  * 5. Partial open with remaining net → PENDING (Partially Received).
  * 6. Submitted, never received → PENDING (Awaiting Receipt).
  *
- * Server: syncPOStatusWithReceipts is the sole auto-writer for 3–4.
+ * Server: syncPOStatusWithReceipts is the sole auto-writer for 3–4 (event path).
+ *         healFullyReversedPurchaseOrdersToDraft only heals stuck COMPLETED → DRAFT.
+ *         Both cancel leftover DRAFT GRs so Finalize cannot run until Submit → Send.
+ * 7. Finalize goods receipt only when PO is PENDING (`poAllowsGoodsReceiptFinalize`).
  */
 
 export const PO_RECEIPT_QTY_EPS = 0.0001;
@@ -68,7 +73,10 @@ export interface POWorkflowReceiptFlags {
 
 /**
  * Target workflow after receipt events.
- * CANCELLED never auto-moved. Fully reversed → DRAFT (manage again).
+ * CANCELLED never auto-moved.
+ * Fully reversed → DRAFT only from COMPLETED (posted cycle unwound).
+ * PENDING is never auto-drafted here — intentional resubmit must stick until
+ * the reverse/return event path passes `{ forceDraftIfFullyReversed: true }`.
  * Returns null when no status write is needed.
  */
 export function resolveTargetPOWorkflowStatus(
@@ -88,7 +96,9 @@ export function resolveTargetPOWorkflowStatus(
   }
 
   if (fullyReversed) {
-    return st === 'DRAFT' ? null : 'DRAFT';
+    // Only unwind a completed receipt cycle. Do not yank PENDING after resubmit.
+    if (st === 'COMPLETED') return 'DRAFT';
+    return null;
   }
 
   // Partial: reopen Completed so remaining qty can be received
@@ -175,4 +185,14 @@ export function classifyPOReceiptLane(
 export function shouldShowPOReceiptProgressLine(progress: POReceiptProgress): boolean {
   const { netReceivedQtyTotal } = readPOReceiptProgress(progress);
   return netReceivedQtyTotal > PO_RECEIPT_QTY_EPS;
+}
+
+/**
+ * Finalize GR only when PO is PENDING (submitted / sent cycle).
+ * After full reverse PO is DRAFT — Submit → Send creates a fresh draft GR.
+ */
+export function poAllowsGoodsReceiptFinalize(
+  poStatus: string | null | undefined,
+): boolean {
+  return String(poStatus || '').toUpperCase() === 'PENDING';
 }

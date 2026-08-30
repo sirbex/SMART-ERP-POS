@@ -1,0 +1,164 @@
+{
+  "at": "2026-08-30T20:40:09.678Z",
+  "feature": "GR_REVERSE_JOURNEY_SSOT",
+  "summary": {
+    "pass": 29,
+    "fail": 0,
+    "total": 29,
+    "verdict": "PASS"
+  },
+  "scope": "Cross-surface GR reverse: paid/consumed block, PO Draft then Pending sticks, reversed UI, no SCN on full reverse, no sibling bill lookup, unique More nav keys",
+  "sharedModules": [
+    "shared/domain/grFullReverseSsot.ts",
+    "shared/domain/poReceiptWorkflowSsot.ts",
+    "shared/domain/grBillingStatusSsot.ts",
+    "shared/domain/supplierReturnWorklist.ts"
+  ],
+  "gates": [
+    {
+      "id": "FILE_shared_domain_grFullReverseSsot_ts",
+      "ok": true,
+      "detail": "shared/domain/grFullReverseSsot.ts"
+    },
+    {
+      "id": "FILE_shared_domain_poReceiptWorkflowSsot_ts",
+      "ok": true,
+      "detail": "shared/domain/poReceiptWorkflowSsot.ts"
+    },
+    {
+      "id": "FILE_shared_domain_grBillingStatusSsot_ts",
+      "ok": true,
+      "detail": "shared/domain/grBillingStatusSsot.ts"
+    },
+    {
+      "id": "FILE_shared_domain_supplierReturnWorklist_ts",
+      "ok": true,
+      "detail": "shared/domain/supplierReturnWorklist.ts"
+    },
+    {
+      "id": "FILE_SamplePOS_Server_src_modules_purchase-orders_poReceiptStatusSync_ts",
+      "ok": true,
+      "detail": "SamplePOS.Server/src/modules/purchase-orders/poReceiptStatusSync.ts"
+    },
+    {
+      "id": "FILE_SamplePOS_Server_src_modules_return-grn_returnGrnService_ts",
+      "ok": true,
+      "detail": "SamplePOS.Server/src/modules/return-grn/returnGrnService.ts"
+    },
+    {
+      "id": "FILE_samplepos_client_src_pages_inventory_GoodsReceiptsPage_tsx",
+      "ok": true,
+      "detail": "samplepos.client/src/pages/inventory/GoodsReceiptsPage.tsx"
+    },
+    {
+      "id": "FILE_samplepos_client_src_components_inventory_GrReceiptStatusBadge_tsx",
+      "ok": true,
+      "detail": "samplepos.client/src/components/inventory/GrReceiptStatusBadge.tsx"
+    },
+    {
+      "id": "FILE_samplepos_client_src_components_InventoryLayout_tsx",
+      "ok": true,
+      "detail": "samplepos.client/src/components/InventoryLayout.tsx"
+    },
+    {
+      "id": "BEH_UNPAID_BILL_CANCEL_OK",
+      "ok": true,
+      "detail": "unpaid linked bill may auto-cancel on full reverse"
+    },
+    {
+      "id": "BEH_PAID_BILL_BLOCKS_REVERSE",
+      "ok": true,
+      "detail": "paid/partial bill blocks full reverse — no silent unallocate"
+    },
+    {
+      "id": "BEH_PO_REVERSE_TO_DRAFT",
+      "ok": true,
+      "detail": "COMPLETED→DRAFT on reverse; PENDING not yanked (resubmit sticks)"
+    },
+    {
+      "id": "BEH_PO_FULLY_REVERSED_PROGRESS",
+      "ok": true,
+      "detail": "net≈0 with GR history detects full reverse"
+    },
+    {
+      "id": "BEH_FINALIZE_ONLY_PENDING_PO",
+      "ok": true,
+      "detail": "Finalize GR only when PO is PENDING — Draft after reverse is blocked"
+    },
+    {
+      "id": "BEH_REVERSED_GR_NOT_BILLABLE",
+      "ok": true,
+      "detail": "reversed GR never billable even with sibling bill number"
+    },
+    {
+      "id": "BEH_FULL_REVERSE_NO_SCN_BUTTON",
+      "ok": true,
+      "detail": "full/uninvoiced reverse: Done — never Create Credit Note despite sibling bill flag"
+    },
+    {
+      "id": "BEH_INVOICED_RETURN_STILL_NEED_SCN",
+      "ok": true,
+      "detail": "normal invoiced return still offers SCN"
+    },
+    {
+      "id": "WIRE_REVERSED_GR_UI",
+      "ok": true,
+      "detail": "reversed detail: historical posting + Completed/Reversed badge; actions gated"
+    },
+    {
+      "id": "WIRE_HEAL_NOT_PENDING",
+      "ok": true,
+      "detail": "list heal COMPLETED only; getPOById read-only; return/reverse force draft"
+    },
+    {
+      "id": "WIRE_BILL_DIRECT_GR_ONLY",
+      "ok": true,
+      "detail": "bill/SCN attribution is this-GR only; billable qty nets returns; reversed blocked"
+    },
+    {
+      "id": "WIRE_FINALIZE_REQUIRES_PENDING_PO",
+      "ok": true,
+      "detail": "UI + server: Finalize blocked unless PO PENDING (Draft after reverse is not receivable)"
+    },
+    {
+      "id": "WIRE_PO_DELETE_AFTER_REVERSE",
+      "ok": true,
+      "detail": "Draft PO delete/cancel allowed when only reversed/cancelled GRs remain (audit kept)"
+    },
+    {
+      "id": "WIRE_SCN_FULL_REVERSE_BLOCK",
+      "ok": true,
+      "detail": "server blocks SCN on full reverse; no PO sibling bill fallback in SCN lookup"
+    },
+    {
+      "id": "WIRE_PAID_AND_CONSUMED_BLOCK",
+      "ok": true,
+      "detail": "eligibility shares paid-bill + consumed-stock reverse blocks"
+    },
+    {
+      "id": "WIRE_MORE_NAV_UNIQUE_KEYS",
+      "ok": true,
+      "detail": "overflow primary tabs use distinct key from More→operations group"
+    },
+    {
+      "id": "SCRIPT_proof_gr-reverse-journey-ssot",
+      "ok": true,
+      "detail": "proof:gr-reverse-journey-ssot"
+    },
+    {
+      "id": "SCRIPT_proof_po-receipt-workflow-ssot",
+      "ok": true,
+      "detail": "proof:po-receipt-workflow-ssot"
+    },
+    {
+      "id": "SCRIPT_proof_procurement-integration-ssot",
+      "ok": true,
+      "detail": "proof:procurement-integration-ssot"
+    },
+    {
+      "id": "SCRIPT_proof_gr-full-reverse_live",
+      "ok": true,
+      "detail": "proof:gr-full-reverse:live"
+    }
+  ]
+}

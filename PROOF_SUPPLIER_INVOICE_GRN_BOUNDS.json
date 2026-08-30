@@ -1,12 +1,12 @@
 {
   "feature": "SUPPLIER_INVOICE_GRN_BOUNDS",
-  "provenAt": "2026-08-26T18:02:48.808Z",
-  "contract": "GR-linked supplier invoices cannot exceed received billable value unless PRICE_VARIANCE; linked GRs must be COMPLETED with billable qty; postInvoiceToGL re-validates; manual GR-note bills blocked in UI",
+  "provenAt": "2026-08-30T20:40:20.476Z",
+  "contract": "GR-linked supplier invoices cannot exceed PricingEngine billable total; one SSOT path for validation, billing, GL, and UI preview; linked GRs must be COMPLETED with billable qty",
   "gates": [
     {
-      "id": "OVER_PV",
+      "id": "OVER_NO_PV",
       "ok": true,
-      "detail": "over-GRN + PRICE_VARIANCE ok"
+      "detail": "over-GRN rejects even with PRICE_VARIANCE"
     },
     {
       "id": "OVER_NO_DISCOUNT",
@@ -21,7 +21,7 @@
     {
       "id": "MODULE",
       "ok": true,
-      "detail": "validation module enforces GR ready + direction"
+      "detail": "validation module enforces GR ready + PricingEngine SSOT + no over-billing AP"
     },
     {
       "id": "CREATE_WIRE",
@@ -41,7 +41,32 @@
     {
       "id": "ROUTES",
       "ok": true,
-      "detail": "API accepts varianceReason on create + from-grn"
+      "detail": "API: from-grn + billable-total preview + varianceReason"
+    },
+    {
+      "id": "ROUTES_CANCEL",
+      "ok": true,
+      "detail": "cancel unpaid bill route + service wired"
+    },
+    {
+      "id": "BLOCK_BILL_REVERSED_GR",
+      "ok": true,
+      "detail": "UI + from-grn block Create Supplier Bill after reverse"
+    },
+    {
+      "id": "FULL_REVERSE_AUTO_CANCEL_BILLS",
+      "ok": true,
+      "detail": "Full reverse: unpaid cancel OK; paid + consumed blocked"
+    },
+    {
+      "id": "UI_CANCEL_BILL",
+      "ok": true,
+      "detail": "Supplier Payments cancel bill button gated"
+    },
+    {
+      "id": "CANCEL_SSOT",
+      "ok": true,
+      "detail": "Cancel eligibility shared SSOT + server pre-checks"
     },
     {
       "id": "UI_BLOCK_MANUAL_GR",
@@ -51,12 +76,12 @@
     {
       "id": "UI_FROM_GRN",
       "ok": true,
-      "detail": "GR billing UI uses from-grn + variance modal"
+      "detail": "GR billing UI uses server billable total + blocks bill > received value"
     }
   ],
   "summary": {
-    "total": 10,
-    "passed": 10,
+    "total": 15,
+    "passed": 15,
     "failed": 0,
     "verdict": "PASS"
   }

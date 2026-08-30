@@ -1,7 +1,7 @@
 {
   "proof": "SUPPLIER_RETURN_WORKLIST_CLIENT",
   "passed": true,
-  "asOf": "2026-08-11T11:59:45.435Z",
+  "asOf": "2026-08-30T20:40:10.893Z",
   "gates": [
     {
       "id": "UI_SSOT_NEED_SCN",
@@ -11,7 +11,12 @@
     {
       "id": "UI_SSOT_NEED_BILL",
       "ok": true,
-      "detail": "no SCN without bill"
+      "detail": "uninvoiced return is Done — no bill-first drama"
+    },
+    {
+      "id": "UI_SSOT_FULL_REVERSE_NO_SCN",
+      "ok": true,
+      "detail": "full/uninvoiced reverse never offers Create Credit Note (even if sibling bill linked)"
     },
     {
       "id": "LABELS",
@@ -56,7 +61,7 @@
     {
       "id": "USES_MUST_BILL",
       "ok": true,
-      "detail": "gates Bill CTA via SSOT"
+      "detail": "never renders Bill-on-GR-first CTA (mustBillBefore is always false)"
     },
     {
       "id": "USES_RESOLVE_STATUS",
@@ -111,7 +116,7 @@
     {
       "id": "SSOT_GATES_ONLY",
       "ok": true,
-      "detail": "create SCN / bill / open count use domain SSOT only"
+      "detail": "create SCN / attention use domain SSOT; no bill-first fork"
     },
     {
       "id": "NAV_NO_TOP_TAB",

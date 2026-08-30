@@ -112,6 +112,18 @@ describe('returnGrnService — SCN requires supplier bill', () => {
         });
     });
 
+    it('throws ERR_SCN_FULL_REVERSE for orchestrated full/uninvoiced reverse', async () => {
+        const { returnGrnRepository } = await import('./returnGrnRepository.js');
+        (returnGrnRepository.getById as AnyMock).mockResolvedValueOnce({
+            ...mockRgrn,
+            reason: '[Uninvoiced reversal] test reverse',
+        });
+
+        await expect(
+            returnGrnService.createCreditNoteFromReturn(pool, 'rgrn-uuid'),
+        ).rejects.toMatchObject({ errorCode: 'ERR_SCN_FULL_REVERSE' });
+    });
+
     it('throws BusinessError ERR_RETURN_GRN_001 when GR has no supplier bill', async () => {
         await expect(
             returnGrnService.createCreditNoteFromReturn(pool, 'rgrn-uuid'),

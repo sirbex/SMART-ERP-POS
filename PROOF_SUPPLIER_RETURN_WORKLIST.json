@@ -1,7 +1,7 @@
 {
   "proof": "SUPPLIER_RETURN_WORKLIST",
   "passed": true,
-  "asOf": "2026-08-11T11:59:41.463Z",
+  "asOf": "2026-08-29T22:08:45.040Z",
   "gates": [
     {
       "id": "SSOT_DRAFT",
@@ -11,7 +11,7 @@
     {
       "id": "SSOT_NEED_BILL",
       "ok": true,
-      "detail": "no bill no scn"
+      "detail": "uninvoiced return/reversal is Done — not Need bill"
     },
     {
       "id": "SSOT_NEED_SCN",
@@ -31,7 +31,12 @@
     {
       "id": "ATTN_POSTED_NO_SCN",
       "ok": true,
-      "detail": "needs attention"
+      "detail": "invoiced return needs attention"
+    },
+    {
+      "id": "ATTN_NOT_UNINVOICED",
+      "ok": true,
+      "detail": "uninvoiced reverse not attention"
     },
     {
       "id": "ATTN_NOT_WITH_SCN",
@@ -46,7 +51,7 @@
     {
       "id": "CANNOT_SCN_NO_BILL",
       "ok": true,
-      "detail": "must bill first"
+      "detail": "no SCN without AP; never force bill-first for uninvoiced"
     },
     {
       "id": "LIST_TOTAL",
@@ -89,6 +94,11 @@
       "detail": "search bind"
     },
     {
+      "id": "SQL_NEEDS_HAS_BILL",
+      "ok": true,
+      "detail": "attention SQL requires active supplier bill (excludes uninvoiced reverse)"
+    },
+    {
       "id": "SQL_TOTAL_AMOUNT",
       "ok": true,
       "detail": "amount column"
@@ -111,7 +121,7 @@
     {
       "id": "SQL_ACTION_CASE",
       "ok": true,
-      "detail": "CASE matches domain SSOT labels"
+      "detail": "CASE: uninvoiced → COMPLETE; invoiced open → NEED_SCN"
     },
     {
       "id": "SQL_ORDER_ATTN_FIRST",
@@ -126,7 +136,7 @@
     {
       "id": "ROW_RGRN-2026-0002_SSOT",
       "ok": true,
-      "detail": "actionStatus=NEED_BILL derived=NEED_BILL"
+      "detail": "actionStatus=COMPLETE derived=COMPLETE"
     },
     {
       "id": "ROW1_CAN_SCN",
@@ -134,9 +144,9 @@
       "detail": "NEED_SCN can create"
     },
     {
-      "id": "ROW2_MUST_BILL",
+      "id": "ROW2_UNINVOICED_DONE",
       "ok": true,
-      "detail": "NEED_BILL gates SCN"
+      "detail": "uninvoiced reverse is Done — never bill-first"
     },
     {
       "id": "FILTER_DRAFT_BIND",
@@ -224,9 +234,9 @@
       "detail": "create SCN CTA"
     },
     {
-      "id": "PAGE_BILL_FIRST",
+      "id": "PAGE_NO_BILL_FIRST_DRAMA",
       "ok": true,
-      "detail": "bill CTA"
+      "detail": "uninvoiced returns never force Bill on GR first"
     },
     {
       "id": "PAGE_SSOT",
@@ -318,7 +328,7 @@
   "defaultFilter": "attention",
   "claims": [
     "All-supplier RGRN list API with needsAttention + search",
-    "actionStatus SSOT shared with UI (DRAFT|NEED_BILL|NEED_SCN|HAS_SCN|COMPLETE)",
+    "actionStatus SSOT shared with UI (DRAFT|NEED_SCN|HAS_SCN|COMPLETE; uninvoiced=COMPLETE)",
     "UI nested under Goods Receipts → Returns (/inventory/goods-receipts/returns); legacy /supplier-returns redirects",
     "Create SCN gated by supplier bill (product + UI)"
   ]

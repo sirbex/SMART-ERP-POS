@@ -1,5 +1,5 @@
 {
-  "at": "2026-08-30T06:28:25.016Z",
+  "at": "2026-08-30T20:40:24.161Z",
   "feature": "PO_RECEIPT_WORKFLOW_SSOT",
   "summary": {
     "pass": 15,
@@ -32,7 +32,7 @@
     {
       "id": "SYNC_FULL_REVERSE_TO_DRAFT",
       "ok": true,
-      "detail": "full reverse → DRAFT (editable), not Pending/Reopened"
+      "detail": "full reverse: COMPLETED→DRAFT; PENDING stays (resubmit) unless event forces draft"
     },
     {
       "id": "SYNC_COMPLETE_AND_PARTIAL",
@@ -67,12 +67,12 @@
     {
       "id": "WIRE_SYNC_TO_DRAFT",
       "ok": true,
-      "detail": "sync + batch heal write DRAFT on full reverse"
+      "detail": "sync writes DRAFT on reverse; list heal only COMPLETED (not PENDING)"
     },
     {
       "id": "WIRE_LIST_HEALS",
       "ok": true,
-      "detail": "PO list heals stale PENDING reversed rows to DRAFT"
+      "detail": "PO list heals stuck COMPLETED; resubmit PENDING stays for Send"
     },
     {
       "id": "WIRE_RETURN_USES_SYNC",

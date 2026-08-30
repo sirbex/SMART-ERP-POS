@@ -54,6 +54,11 @@ export function resolveSupplierReturnActionStatus(
   const hasBill = Boolean(row.hasSupplierBill);
   const scnSt = String(row.creditNoteStatus || '').toUpperCase();
 
+  // Uninvoiced / full reverse: stock + GR/IR done — never NEED_SCN
+  if (isUninvoicedReceiptReversal(row)) {
+    if (status === 'DRAFT') return 'DRAFT';
+    return hasScn ? (['POSTED', 'OPEN', 'DRAFT'].includes(scnSt) ? 'HAS_SCN' : 'COMPLETE') : 'COMPLETE';
+  }
   if (status === 'DRAFT') return 'DRAFT';
   // Uninvoiced return / reverse: nothing left to bill or credit
   if (!hasScn && !hasBill) return 'COMPLETE';
@@ -67,6 +72,7 @@ export function resolveSupplierReturnActionStatus(
  * Uninvoiced reversals must not clutter this list.
  */
 export function isSupplierReturnNeedsAttention(row: SupplierReturnWorklistRow): boolean {
+  if (isUninvoicedReceiptReversal(row)) return false;
   return (
     String(row.status || '').toUpperCase() === 'POSTED' &&
     !row.hasCreditNote &&
@@ -75,6 +81,8 @@ export function isSupplierReturnNeedsAttention(row: SupplierReturnWorklistRow): 
 }
 
 export function canCreateSupplierCreditNoteFromReturn(row: SupplierReturnWorklistRow): boolean {
+  // Full / uninvoiced reverse already cleared GR/IR (and cancelled bills if any) — no SCN.
+  if (isUninvoicedReceiptReversal(row)) return false;
   return (
     String(row.status || '').toUpperCase() === 'POSTED' &&
     !row.hasCreditNote &&

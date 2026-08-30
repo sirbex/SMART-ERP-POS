@@ -396,7 +396,6 @@ export const goodsReceiptRepository = {
                  WHERE sigl.grn_id = gr.id
                )
                OR si."InternalReferenceNumber" = gr.receipt_number
-               OR (gr.purchase_order_id IS NOT NULL AND si."PurchaseOrderId" = gr.purchase_order_id)
              )
            ORDER BY si."CreatedAt" DESC
            LIMIT 1) AS "supplierBillNumber"
@@ -786,7 +785,6 @@ export const goodsReceiptRepository = {
             WHERE sigl.grn_id = gr.id
           )
           OR si."InternalReferenceNumber" = gr.receipt_number
-          OR (gr.purchase_order_id IS NOT NULL AND si."PurchaseOrderId" = gr.purchase_order_id)
         )
     )`;
 
@@ -825,7 +823,6 @@ export const goodsReceiptRepository = {
             WHERE sigl.grn_id = gr.id
           )
           OR si."InternalReferenceNumber" = gr.receipt_number
-          OR (gr.purchase_order_id IS NOT NULL AND si."PurchaseOrderId" = gr.purchase_order_id)
         )
       ORDER BY si."CreatedAt" DESC
       LIMIT 1
@@ -932,6 +929,26 @@ export const goodsReceiptRepository = {
        FROM goods_receipts
        WHERE purchase_order_id = $1 AND status = $2`,
       [purchaseOrderId, status]
+    );
+    return Number(result.rows[0]?.count ?? 0);
+  },
+
+  /**
+   * GRs that still block PO delete/cancel: open drafts or completed receipts not fully reversed.
+   * Cancelled + fully reversed GRs are audit-only and do not block closing a Draft PO.
+   */
+  async countActiveGoodsReceiptsBlockingPoClose(
+    pool: Pool | PoolClient,
+    purchaseOrderId: string,
+  ): Promise<number> {
+    const fullyReversedSql = await grFullyReversedConditionSql(pool, 'gr');
+    const result = await pool.query(
+      `SELECT COUNT(*)::int AS count
+       FROM goods_receipts gr
+       WHERE gr.purchase_order_id = $1
+         AND gr.status <> 'CANCELLED'
+         AND NOT (${fullyReversedSql})`,
+      [purchaseOrderId],
     );
     return Number(result.rows[0]?.count ?? 0);
   },

@@ -695,18 +695,25 @@ export const purchaseOrderRepository = {
   },
 
   /**
-   * Delete PO (only if DRAFT)
+   * Delete PO (only if DRAFT). Soft-cancels the PO.
+   * Fully reversed / cancelled GRs are audit history and do not block —
+   * otherwise Draft-after-reverse POs could neither Delete nor Cancel.
    */
   async deletePO(pool: Pool, id: string): Promise<void> {
     await UnitOfWork.run(pool, async (client) => {
-      // Check if there are any goods receipts for this PO
-      const grCheck = await client.query(
-        'SELECT COUNT(*) FROM goods_receipts WHERE purchase_order_id = $1',
-        [id]
+      const { goodsReceiptRepository } = await import(
+        '../goods-receipts/goodsReceiptRepository.js'
       );
+      await goodsReceiptRepository.cancelDraftGRsForPurchaseOrder(client, id);
 
-      if (parseInt(grCheck.rows[0].count) > 0) {
-        throw new Error('Cannot delete purchase order with existing goods receipts. Delete goods receipts first.');
+      const blocking = await goodsReceiptRepository.countActiveGoodsReceiptsBlockingPoClose(
+        client,
+        id,
+      );
+      if (blocking > 0) {
+        throw new Error(
+          'Cannot delete purchase order: it still has open or posted (not reversed) goods receipts. Reverse or cancel those receipts first.',
+        );
       }
 
       // Soft delete: Update status to CANCELLED instead of hard delete

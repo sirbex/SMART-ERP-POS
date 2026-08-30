@@ -60,6 +60,20 @@ describe('Supplier return worklist domain SSOT (client)', () => {
       'uninvoiced return is Done — no bill-first drama',
     );
 
+    const fullReverse = {
+      status: 'POSTED' as const,
+      hasCreditNote: false,
+      hasSupplierBill: true,
+      reason: '[Uninvoiced reversal] wrong delivery',
+    };
+    gate(
+      'UI_SSOT_FULL_REVERSE_NO_SCN',
+      resolveSupplierReturnActionStatus(fullReverse) === 'COMPLETE' &&
+        !canCreateSupplierCreditNoteFromReturn(fullReverse) &&
+        !isSupplierReturnNeedsAttention(fullReverse),
+      'full/uninvoiced reverse never offers Create Credit Note (even if sibling bill linked)',
+    );
+
     gate(
       'LABELS',
       SUPPLIER_RETURN_ACTION_LABELS.NEED_SCN === 'Need credit note' &&

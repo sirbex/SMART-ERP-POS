@@ -3,7 +3,7 @@ import {
   AdaptiveDataGrid,
   type AdaptiveDataColumn,
 } from '../adaptive/AdaptiveDataGrid';
-import { buildSupplierBillSettlement } from '@shared/utils/supplierBillSettlement';
+import { buildSupplierBillSettlement, isSupplierBillCancelledStatus } from '@shared/utils/supplierBillSettlement';
 import { formatCurrency } from '../../utils/currency';
 import { isSupplierCreditNote } from '../../utils/supplierOpenItemSummary';
 
@@ -40,6 +40,9 @@ type SupplierInvoicesAdaptiveGridProps<T extends SupplierInvoiceGridRow> = {
 function statusBadgeClass(inv: SupplierInvoiceGridRow): string {
   const settlement = buildSupplierBillSettlement(inv);
   const isCn = isSupplierCreditNote(inv);
+  if (isSupplierBillCancelledStatus(inv.status) || settlement.displayStatus === 'Cancelled') {
+    return 'bg-gray-200 text-gray-700';
+  }
   if (isCn) return 'bg-teal-100 text-teal-800';
   if (settlement.displayStatus === 'Paid') return 'bg-green-100 text-green-800';
   if (
@@ -180,6 +183,14 @@ export function SupplierInvoicesAdaptiveGrid<T extends SupplierInvoiceGridRow>({
           const settlement = buildSupplierBillSettlement(inv);
           const balance = settlement.balanceDue;
           const isCn = isSupplierCreditNote(inv);
+          const cancelled = isSupplierBillCancelledStatus(inv.status);
+          if (cancelled) {
+            return (
+              <span className="font-semibold text-gray-500" title={settlement.equationHint}>
+                {formatCurrency(0)}
+              </span>
+            );
+          }
           if (balance > 0) {
             return (
               <span className={`font-semibold ${isCn ? 'text-teal-700' : 'text-red-600'}`}>
@@ -278,7 +289,9 @@ export function SupplierInvoicesAdaptiveGrid<T extends SupplierInvoiceGridRow>({
         const isExpanded = selectedInvoiceId === inv.id;
         const checked = multiSelected.has(inv.id);
         const canPay =
-          balance > 0 && !['Cancelled', 'CANCELLED', 'DRAFT'].includes(inv.status || '');
+          balance > 0 &&
+          !isSupplierBillCancelledStatus(inv.status) &&
+          !['DRAFT', 'Draft'].includes(inv.status || '');
 
         return (
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-center sm:gap-1">

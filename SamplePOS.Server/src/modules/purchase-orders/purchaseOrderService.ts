@@ -366,10 +366,11 @@ export const purchaseOrderService = {
   },
 
   /**
-   * Get PO by ID
+   * Get PO by ID (read-only — do not sync status here).
+   * Status writes happen on finalize / return / reverse / list heal only,
+   * so intentional PENDING after resubmit is never yanked back to DRAFT.
    */
   async getPOById(pool: Pool, id: string): Promise<{ po: PurchaseOrder; items: PurchaseOrderItem[] }> {
-    await this.syncPOStatusWithReceipts(pool, id);
     const result = await purchaseOrderRepository.getPOById(pool, id);
 
     if (!result) {
@@ -450,14 +451,13 @@ export const purchaseOrderService = {
         throw new Error(`Cannot change status from ${po.status} to CANCELLED`);
       }
 
-      const completedGRs = await goodsReceiptRepository.countGRsByPOAndStatus(
+      const blocking = await goodsReceiptRepository.countActiveGoodsReceiptsBlockingPoClose(
         client,
         id,
-        'COMPLETED'
       );
-      if (completedGRs > 0) {
+      if (blocking > 0) {
         throw new Error(
-          'Cannot cancel purchase order: goods have already been received. Use Return to supplier to reverse posted receipts.'
+          'Cannot cancel purchase order: it still has open or posted (not reversed) goods receipts. Use Return / Reverse Receipt first.',
         );
       }
 

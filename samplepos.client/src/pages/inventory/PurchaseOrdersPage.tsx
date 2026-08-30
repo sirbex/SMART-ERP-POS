@@ -1431,7 +1431,7 @@ export default function PurchaseOrdersPage() {
   const handleSubmitPO = async (id: string) => {
     if (
       !confirm(
-        'Submit this purchase order?\n\nThis will:\n• Submit PO for approval\n• Send to supplier\n• Create goods receipt draft for receiving department'
+        'Submit this purchase order?\n\nThis will:\n• Mark PO as Pending\n• Send to supplier\n• Create a draft goods receipt for receiving'
       )
     )
       return;
@@ -1471,7 +1471,12 @@ export default function PurchaseOrdersPage() {
 
   // Handle delete PO
   const handleDeletePO = async (id: string) => {
-    if (!confirm('Delete this draft purchase order? This action cannot be undone.')) return;
+    if (
+      !confirm(
+        'Delete this draft purchase order?\n\nThis cancels the PO. Fully reversed receipt history (if any) is kept for audit.',
+      )
+    )
+      return;
     try {
       await deletePOMutation.mutateAsync(id);
       alert('Purchase order deleted');
@@ -1630,7 +1635,7 @@ export default function PurchaseOrdersPage() {
             Purchase Orders
             <WorkflowHelpTrigger title="Purchase Order Workflow">
               <ul className="space-y-1 text-sm">
-                <li>• <strong>Status Flow:</strong> DRAFT → PENDING → APPROVED → COMPLETED</li>
+                <li>• <strong>Status Flow:</strong> DRAFT → PENDING → COMPLETED (Cancel anytime before goods stay posted)</li>
                 <li>• <strong>Goods Receipts:</strong> Create GR when items are received</li>
               </ul>
             </WorkflowHelpTrigger>
@@ -1808,7 +1813,7 @@ export default function PurchaseOrdersPage() {
                         )}
                       </>
                     )}
-                    {(po.status === 'PENDING' || po.status === 'APPROVED') && canCancelPO && (
+                    {(po.status === 'DRAFT' || po.status === 'PENDING') && canCancelPO && (
                       <button onClick={(e) => { e.stopPropagation(); handleCancelPO(po.id); }} className="text-xs text-orange-600 font-medium">Cancel</button>
                     )}
                   </div>
@@ -1939,7 +1944,7 @@ export default function PurchaseOrdersPage() {
                                 )}
                               </>
                             )}
-                            {(po.status === 'PENDING' || po.status === 'APPROVED') && canCancelPO && (
+                            {(po.status === 'DRAFT' || po.status === 'PENDING') && canCancelPO && (
                               <button
                                 onClick={() => handleCancelPO(po.id)}
                                 className="text-orange-600 hover:text-orange-900"

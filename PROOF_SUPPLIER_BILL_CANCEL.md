@@ -1,6 +1,6 @@
 # PROOF — Supplier bill cancel
 
-**Verdict:** PASS (14/14)
+**Verdict:** PASS (15/15)
 **Live proof:** PASS
 
 ## Gates
@@ -14,6 +14,7 @@
 - **PASS** REPO_CREDITS: cancel context includes applied SCN credits
 - **PASS** UI_PAYMENTS: Supplier Payments cancel button + shared SSOT
 - **PASS** UI_SUPPLIERS: Suppliers invoice detail cancel
+- **PASS** UI_SUPPLIERS_DASHBOARD_REFRESH: cancel refreshes Outstanding cards + supplier balances immediately
 - **PASS** NO_SWALLOW_SUMMARY: no silent catch on post-cancel summary refresh
 - **PASS** CANCEL_ERRORS_SURFACE: cancel + summary errors surfaced to user
 - **PASS** SHARED_SSOT: shared eligibility includes credits

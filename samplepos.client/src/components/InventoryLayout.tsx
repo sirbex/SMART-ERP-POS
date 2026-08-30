@@ -140,9 +140,10 @@ export default function InventoryLayout({ children }: InventoryLayoutProps) {
     const sections = groupInventoryMoreNav(staticMoreTabs);
     if (overflowPrimaryTabs.length === 0) return sections;
 
+    // Distinct key from InventoryMoreNavGroup 'operations' (overflow vs More tools)
     return [
       {
-        group: 'operations' as const,
+        group: 'overflow' as const,
         label: 'Navigation',
         items: overflowPrimaryTabs,
       },
