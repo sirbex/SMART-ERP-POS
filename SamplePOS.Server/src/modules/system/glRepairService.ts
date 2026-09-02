@@ -1144,11 +1144,12 @@ export async function recalcAllCustomerBalances(
 }
 
 // ============================================================================
-// HEAL: REBASE accounts.CurrentBalance FROM posted ledger_entries
+// HEAL: REBASE accounts.CurrentBalance FROM net-active ledger_entries
 // ----------------------------------------------------------------------------
 // Fixes STORED_BALANCE drift (e.g. Henber 2100 cache −20M vs GL +17M).
-// Only POSTED transactions; respects NormalBalance (DEBIT vs CREDIT).
-// Idempotent.
+// Uses LEDGER_NET_ACTIVE_SQL (exclude both reverse-pair legs) — same SSOT as
+// Banking / funds guard. Bare Status=POSTED orphans reverse credits (Henber 1015).
+// Respects NormalBalance (DEBIT vs CREDIT). Idempotent.
 // ============================================================================
 
 export interface RebaseAccountBalancesResult {
@@ -1183,7 +1184,7 @@ export async function rebaseAccountBalances(
             SUM(le."CreditAmount") - SUM(le."DebitAmount") AS net_credit
           FROM ledger_entries le
           JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-          WHERE lt."Status" = 'POSTED'
+          WHERE ${LEDGER_NET_ACTIVE_SQL}
           GROUP BY le."AccountId"
         ),
         targets AS (

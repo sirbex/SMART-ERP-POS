@@ -265,6 +265,10 @@ export async function getLiquidityAccountBalances(
     available: number;
   }>
 > {
+  const { postedLedgerBalanceLateralForList } = await import(
+    '../treasury/postedLedgerBalance.js'
+  );
+  const { availableFromPostedTotals } = await import('../treasury/postedLedgerBalance.js');
   const result = await pool.query<{
     AccountCode: string;
     AccountName: string;
@@ -282,15 +286,7 @@ export async function getLiquidityAccountBalances(
       COALESCE(bal.debit_total, 0)::text AS "debitTotal",
       COALESCE(bal.credit_total, 0)::text AS "creditTotal"
     FROM accounts a
-    LEFT JOIN LATERAL (
-      SELECT
-        SUM(le."DebitAmount") AS debit_total,
-        SUM(le."CreditAmount") AS credit_total
-      FROM ledger_entries le
-      INNER JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-      WHERE le."AccountId" = a."Id"
-        AND lt."Status" = 'POSTED'
-    ) bal ON TRUE
+    ${postedLedgerBalanceLateralForList()}
     WHERE a."IsActive" = true
       AND (
         a."AccountCode" = ANY($1::text[])
@@ -302,15 +298,16 @@ export async function getLiquidityAccountBalances(
   );
 
   return result.rows.map((r) => {
-    const debit = Number(r.debitTotal);
-    const credit = Number(r.creditTotal);
-    const available =
-      r.NormalBalance === 'DEBIT' ? debit - credit : credit - debit;
+    const available = availableFromPostedTotals(
+      Number(r.debitTotal),
+      Number(r.creditTotal),
+      r.NormalBalance,
+    );
     return {
       accountCode: r.AccountCode,
       accountName: r.AccountName,
       systemAccountTag: r.SystemAccountTag,
-      available: Math.round(available * 100) / 100,
+      available,
     };
   });
 }

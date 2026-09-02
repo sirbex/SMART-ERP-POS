@@ -1,13 +1,14 @@
 /**
  * E2E proof: supplier payment funds check matches Banking UI after reversals.
  *
- * Incident: STELLA STORES payment UGX 476,500 gross / 447,910 net from GL 1030
- * showed Pay-from balance 1,071,000 but guard blocked with 118,000 available.
+ * Incident history:
+ * - LEFT JOIN + Status in ON counted REVERSED payment credits → understated bank.
+ * - Bare Status=POSTED kept reverse-journal legs after originals were REVERSED →
+ *   correct for some bank restores, but orphaned CR 1015 after AR receipt reverse
+ *   (Henber −5.03M overdraft).
  *
- * Root cause chain:
- * 1. UI (Banking getAllAccounts): INNER JOIN POSTED → correct 1,071,000
- * 2. Funds guard (before fix): LEFT JOIN + Status in ON → counted REVERSED credits → 118,000
- * 3. LEDGER_NET_ACTIVE_SQL: excludes POSTED reversal debits too → also 118,000 (wrong for liquidity)
+ * SSOT now: LEDGER_NET_ACTIVE_SQL — both legs of a reverse pair excluded
+ * (“document never posted”). Matches AccountingCore.reverseTransaction semantics.
  */
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { splitSupplierPaymentCredits } from '../supplier-payments/supplierPaymentWht.js';
@@ -22,7 +23,6 @@ describe('postedLedgerBalance SSOT', () => {
   });
 
   it('LEFT JOIN bug understates after REVERSED supplier payments', () => {
-    // Real GL 1030 numbers after PAY-000001/002 reversed
     const debitsPostedOnly = 1_073_000;
     const creditsPostedOnly = 2_000;
     const creditsLeftJoinBug = 955_000; // includes 953k from REVERSED originals
@@ -35,10 +35,12 @@ describe('postedLedgerBalance SSOT', () => {
     );
   });
 
-  it('SQL fragment uses INNER JOIN POSTED (never LEFT JOIN Status in ON)', () => {
+  it('SQL fragment uses INNER JOIN + net-active reverse-pair exclusion', () => {
     const sql = postedLedgerBalanceLateral('$2');
     expect(sql).toMatch(/INNER JOIN ledger_transactions/i);
     expect(sql).toMatch(/lt\."Status"\s*=\s*'POSTED'/);
+    expect(sql).toMatch(/ReversedByTransactionId/);
+    expect(sql).toMatch(/IsReversed/);
     expect(sql).not.toMatch(
       /LEFT JOIN ledger_transactions\s+lt\s+ON[\s\S]*Status\s*=\s*'POSTED'/i,
     );
@@ -88,6 +90,7 @@ describe('liquidityFundsGuard integration contract', () => {
 
     const sql = String(mockQuery.mock.calls[0]?.[0] ?? '');
     expect(sql).toMatch(/INNER JOIN ledger_transactions/i);
+    expect(sql).toMatch(/ReversedByTransactionId/);
 
     await expect(
       assertSufficientLiquidityFunds(conn, '1030', 447_910, {

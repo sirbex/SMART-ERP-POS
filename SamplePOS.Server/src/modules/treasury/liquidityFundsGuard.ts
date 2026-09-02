@@ -1,6 +1,6 @@
 /**
- * Liquidity funds guard — SSOT = posted ledger (same formula as Banking getAllAccounts).
- * See postedLedgerBalance.ts for why INNER POSTED is required.
+ * Liquidity funds guard — SSOT = net-active posted ledger (same as Banking / Move Money).
+ * See postedLedgerBalance.ts — reverse pairs must not orphan a single leg.
  */
 import type { Pool, PoolClient } from 'pg';
 import { ValidationError } from '../../middleware/errorHandler.js';

@@ -1,0 +1,114 @@
+{
+  "ok": true,
+  "account1015": {
+    "postedOnly": {
+      "d": 29902482,
+      "c": 34933124,
+      "bal": -5030642
+    },
+    "netActive": {
+      "d": 29902482,
+      "c": 29902484,
+      "bal": -2
+    },
+    "reverseLegs": {
+      "d": 0,
+      "c": 5030640,
+      "signed": -5030640,
+      "txnCount": 4
+    },
+    "orphanCrps": [
+      {
+        "payment": "CRP-000006",
+        "origDr": 9400,
+        "revCr": 9400,
+        "origTxn": "TXN-024516",
+        "revTxn": "TXN-024936"
+      },
+      {
+        "payment": "CRP-000007",
+        "origDr": 940000,
+        "revCr": 940000,
+        "origTxn": "TXN-024517",
+        "revTxn": "TXN-026006"
+      },
+      {
+        "payment": "CRP-000012",
+        "origDr": 127600,
+        "revCr": 127600,
+        "origTxn": "TXN-027881",
+        "revTxn": "TXN-029093"
+      },
+      {
+        "payment": "CRP-000014",
+        "origDr": 3953640,
+        "revCr": 3953640,
+        "origTxn": "TXN-028953",
+        "revTxn": "TXN-028960"
+      }
+    ],
+    "orphanCrTotal": 5030640
+  },
+  "bankChecks": [
+    {
+      "code": "1031",
+      "name": "HENBER MAWANDA",
+      "pairCount": 0,
+      "postedOnly": 100,
+      "netActive": 100,
+      "reverseLegSigned": 0
+    },
+    {
+      "code": "1032",
+      "name": "HENBER PHARM CO.LTD",
+      "pairCount": 0,
+      "postedOnly": 10631970,
+      "netActive": 10631970,
+      "reverseLegSigned": 0
+    },
+    {
+      "code": "1010",
+      "name": "Cash Drawer",
+      "pairCount": 7,
+      "postedOnly": 1591094.99,
+      "netActive": 1627594.99,
+      "reverseLegSigned": -36500
+    }
+  ],
+  "currentBalanceChecks": [
+    {
+      "code": "1010",
+      "cur": 1591094.99,
+      "netActive": 1627594.99,
+      "postedOnly": 1591094.99,
+      "curEqualsPostedOnly": true,
+      "curEqualsNetActive": false
+    },
+    {
+      "code": "1015",
+      "cur": -5030642,
+      "netActive": -2,
+      "postedOnly": -5030642,
+      "curEqualsPostedOnly": true,
+      "curEqualsNetActive": false
+    },
+    {
+      "code": "1031",
+      "cur": 100,
+      "netActive": 100,
+      "postedOnly": 100,
+      "curEqualsPostedOnly": true,
+      "curEqualsNetActive": true
+    },
+    {
+      "code": "1032",
+      "cur": 10631970,
+      "netActive": 10631970,
+      "postedOnly": 10631970,
+      "curEqualsPostedOnly": true,
+      "curEqualsNetActive": true
+    }
+  ],
+  "note": "Liquidity SSOT = LEDGER_NET_ACTIVE_SQL on ledger_entries. accounts.CurrentBalance is not used by Banking/Move Money/funds guard.",
+  "failures": []
+}

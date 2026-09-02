@@ -8,6 +8,7 @@ import {
   assertSettlementCeiling,
   roundMoney,
 } from '@shared/treasury/index.js';
+import { LEDGER_NET_ACTIVE_SQL } from '../../utils/ledgerNetActive.js';
 
 export type DbConn = Pool | PoolClient;
 
@@ -365,11 +366,16 @@ export async function getClearingGlBalance(
   conn: DbConn,
   accountCode = '1015',
 ): Promise<number> {
+  // SSOT = LEDGER_NET_ACTIVE (same as Banking / Move Money / funds guard).
+  // Bare POSTED orphans reverse-journal credits after AR receipt reverse (Henber −5.03M).
+  // Unfiltered SUM of all entries can coincidentally net pairs, but includes DRAFT noise.
   const result = await conn.query<{ balance: string }>(
     `SELECT COALESCE(SUM(le."DebitAmount" - le."CreditAmount"), 0)::text AS balance
      FROM ledger_entries le
+     JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
      JOIN accounts a ON a."Id" = le."AccountId"
-     WHERE a."AccountCode" = $1`,
+     WHERE a."AccountCode" = $1
+       AND ${LEDGER_NET_ACTIVE_SQL}`,
     [accountCode],
   );
   return Number(result.rows[0]?.balance ?? 0);

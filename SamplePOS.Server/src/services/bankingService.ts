@@ -23,6 +23,27 @@ import logger from '../utils/logger.js';
 import { UnitOfWork } from '../db/unitOfWork.js';
 import { SYSTEM_USER_ID } from '../utils/constants.js';
 import { ensureBankGlLiquidityTag, assertBankBookGlEligible, isEligibleBankBookLiquidity } from '../modules/banking/ensureBankGlLiquidityTag.js';
+import { LEDGER_NET_ACTIVE_SQL } from '../utils/ledgerNetActive.js';
+
+/** GL book balance for a bank_accounts.gl_account_id — net-active reverse pairs. */
+const BANK_GL_BALANCE_SQL = `
+  COALESCE((
+    SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
+    FROM ledger_entries le
+    JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+    WHERE le."AccountId" = ba.gl_account_id
+      AND ${LEDGER_NET_ACTIVE_SQL}
+  ), 0)`;
+
+const BANK_GL_BALANCE_AS_OF_SQL = `
+  COALESCE((
+    SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
+    FROM ledger_entries le
+    JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+    WHERE le."AccountId" = ba.gl_account_id
+      AND ${LEDGER_NET_ACTIVE_SQL}
+      AND lt."TransactionDate" <= $1
+  ), 0)`;
 
 import type {
     BankAccount,
@@ -192,14 +213,8 @@ export class BankingService {
         a."AccountCode" as gl_account_code,
         a."AccountName" as gl_account_name,
         a."SystemAccountTag" as gl_system_account_tag,
-        -- Calculate current_balance from GL (DEBIT minus CREDIT for asset accounts)
-        COALESCE((
-          SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
-          FROM ledger_entries le
-          JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-          WHERE le."AccountId" = ba.gl_account_id
-            AND lt."Status" = 'POSTED'
-        ), 0) as current_balance
+        -- Calculate current_balance from GL (net-active reverse pairs)
+        ${BANK_GL_BALANCE_SQL} as current_balance
       FROM bank_accounts ba
       JOIN accounts a ON a."Id" = ba.gl_account_id
       WHERE ($1 = TRUE OR ba.is_active = TRUE)
@@ -233,14 +248,8 @@ export class BankingService {
         ba.*,
         a."AccountCode" as gl_account_code,
         a."AccountName" as gl_account_name,
-        -- Calculate current_balance from GL (DEBIT minus CREDIT for asset accounts)
-        COALESCE((
-          SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
-          FROM ledger_entries le
-          JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-          WHERE le."AccountId" = ba.gl_account_id
-            AND lt."Status" = 'POSTED'
-        ), 0) as current_balance
+        -- Calculate current_balance from GL (net-active reverse pairs)
+        ${BANK_GL_BALANCE_SQL} as current_balance
       FROM bank_accounts ba
       JOIN accounts a ON a."Id" = ba.gl_account_id
       WHERE ba.id = $1
@@ -1883,14 +1892,7 @@ export class BankingService {
             // Book (GL) balance — informational; recon gate uses cleared balance, not GL vs statement.
             const balanceResult = await client.query<{ current_balance: string }>(
                 `
-        SELECT COALESCE(
-          (SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
-           FROM ledger_entries le
-           JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-           WHERE le."AccountId" = ba.gl_account_id
-             AND lt."Status" = 'POSTED'),
-          0
-        )::text as current_balance
+        SELECT ${BANK_GL_BALANCE_SQL}::text as current_balance
         FROM bank_accounts ba
         WHERE ba.id = $1
       `,
@@ -2349,13 +2351,7 @@ export class BankingService {
         ba.id,
         ba.name,
         ba.low_balance_threshold,
-        COALESCE((
-          SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
-          FROM ledger_entries le
-          JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-          WHERE le."AccountId" = ba.gl_account_id
-            AND lt."Status" = 'POSTED'
-        ), 0) as current_balance
+        ${BANK_GL_BALANCE_SQL} as current_balance
       FROM bank_accounts ba
       WHERE ba.is_active = TRUE
         AND ba.low_balance_alert_enabled = TRUE
@@ -2415,14 +2411,8 @@ export class BankingService {
         ba.id,
         ba.name,
         ba.bank_name,
-        -- Current balance from GL
-        COALESCE((
-          SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
-          FROM ledger_entries le
-          JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-          WHERE le."AccountId" = ba.gl_account_id
-            AND lt."Status" = 'POSTED'
-        ), 0) as current_balance,
+        -- Current balance from GL (net-active reverse pairs)
+        ${BANK_GL_BALANCE_SQL} as current_balance,
         ba.last_reconciled_balance,
         ba.last_reconciled_at,
         -- Unreconciled count
@@ -2579,15 +2569,8 @@ export class BankingService {
         ba.name,
         ba.bank_name,
         ba.last_reconciled_at,
-        -- Balance as of date from GL
-        COALESCE((
-          SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
-          FROM ledger_entries le
-          JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-          WHERE le."AccountId" = ba.gl_account_id
-            AND lt."Status" = 'POSTED'
-            AND lt."TransactionDate" <= $1
-        ), 0) as balance,
+        -- Balance as of date from GL (net-active reverse pairs)
+        ${BANK_GL_BALANCE_AS_OF_SQL} as balance,
         -- Unreconciled amount
         COALESCE((
           SELECT SUM(CASE WHEN bt.type IN ('DEPOSIT', 'TRANSFER_IN', 'INTEREST') THEN bt.amount ELSE -bt.amount END)

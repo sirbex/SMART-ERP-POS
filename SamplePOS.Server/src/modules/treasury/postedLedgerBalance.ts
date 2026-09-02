@@ -1,15 +1,22 @@
 /**
- * Posted ledger balance — SSOT for spendable cash/bank (matches Banking UI).
+ * Posted ledger balance — SSOT for spendable cash/bank/undeposited (Banking + funds guard).
  *
- * Use INNER JOIN on POSTED transactions only. Never use:
- *   LEFT JOIN ledger_transactions lt ON ... AND lt."Status" = 'POSTED'
- * because REVERSED originals still contribute their ledger_entries to SUM().
+ * After AccountingCore.reverseTransaction:
+ *   - original → Status=REVERSED
+ *   - mirror reverse journal → Status=POSTED, Id stored as original.ReversedByTransactionId
  *
- * Do NOT use LEDGER_NET_ACTIVE_SQL for liquidity/funds checks: it excludes POSTED
- * reversal debits that restore bank balance after a supplier payment reverse, which
- * understates spendable funds (e.g. 118,000 vs 1,071,000 on GL 1030).
+ * Liquidity must exclude **both** legs of every reverse pair (LEDGER_NET_ACTIVE_SQL).
+ * That yields “as if the document never posted” — correct for bank AND Undeposited Funds.
+ *
+ * Do NOT use Status='POSTED' alone: it drops the original but keeps the reverse journal.
+ * That orphans reverse credits on 1015 after AR receipt reverse → false overdraft
+ * (Henber −5,030,642 = sum of REV-CRP test reversals).
+ *
+ * Do NOT use LEFT JOIN … AND Status='POSTED' in the ON clause: REVERSED originals can
+ * still leak into SUM() (STELLA understatement incident).
  */
 import { roundMoney } from '@shared/treasury/index.js';
+import { LEDGER_NET_ACTIVE_SQL } from '../../utils/ledgerNetActive.js';
 
 /** Compute signed available balance from debit/credit totals. */
 export function availableFromPostedTotals(
@@ -23,7 +30,7 @@ export function availableFromPostedTotals(
 }
 
 /**
- * SQL fragment: LATERAL subquery summing POSTED ledger entries for account alias `a`.
+ * SQL fragment: LATERAL subquery summing net-active ledger entries for account alias `a`.
  * Optional asOfDate adds param $N — pass placeholder like `$2` when embedding.
  */
 export function postedLedgerBalanceLateral(dateParamRef?: string): string {
@@ -38,7 +45,7 @@ export function postedLedgerBalanceLateral(dateParamRef?: string): string {
       FROM ledger_entries le
       INNER JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
       WHERE le."AccountId" = a."Id"
-        AND lt."Status" = 'POSTED'
+        AND ${LEDGER_NET_ACTIVE_SQL}
         ${dateFilter}
     ) bal ON TRUE`;
 }
@@ -59,6 +66,6 @@ export function postedLedgerBalanceLateralForList(): string {
       FROM ledger_entries le
       INNER JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
       WHERE le."AccountId" = a."Id"
-        AND lt."Status" = 'POSTED'
+        AND ${LEDGER_NET_ACTIVE_SQL}
     ) bal ON TRUE`;
 }

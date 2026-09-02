@@ -76,12 +76,39 @@ export async function getPettyCashBalance(pool: Pool): Promise<{
   cashDrawer: number;
   undepositedFunds: number;
 }> {
-  const result = await pool.query<{ code: string; balance: string }>(
-    `SELECT "AccountCode" AS code, COALESCE("CurrentBalance", 0)::text AS balance
-     FROM accounts
-     WHERE "AccountCode" IN ('1010', '1012', '1015')`,
+  // Do NOT use accounts.CurrentBalance — bare POSTED / cache drift shows false
+  // Undeposited overdraft after AR reverse. Liquidity SSOT = net-active ledger.
+  const {
+    postedLedgerBalanceLateralForList,
+    availableFromPostedTotals,
+  } = await import('./postedLedgerBalance.js');
+  const result = await pool.query<{
+    AccountCode: string;
+    NormalBalance: string;
+    debitTotal: string;
+    creditTotal: string;
+  }>(
+    `
+    SELECT
+      a."AccountCode",
+      a."NormalBalance",
+      COALESCE(bal.debit_total, 0)::text AS "debitTotal",
+      COALESCE(bal.credit_total, 0)::text AS "creditTotal"
+    FROM accounts a
+    ${postedLedgerBalanceLateralForList()}
+    WHERE a."AccountCode" = ANY($1::text[])
+      AND a."IsActive" = true
+    `,
+    [['1010', '1012', '1015']],
   );
-  const map = Object.fromEntries(result.rows.map((r) => [r.code, Number(r.balance)]));
+  const map: Record<string, number> = {};
+  for (const r of result.rows) {
+    map[r.AccountCode] = availableFromPostedTotals(
+      Number(r.debitTotal),
+      Number(r.creditTotal),
+      r.NormalBalance,
+    );
+  }
   return {
     cashDrawer: map['1010'] ?? 0,
     pettyCash: map['1012'] ?? 0,

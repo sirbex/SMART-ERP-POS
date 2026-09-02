@@ -1,0 +1,24 @@
+{
+  "proofId": "HENBER_UNDEPOSITED_1015_NET_ACTIVE_SSOT",
+  "tenant": "pos_tenant_henber_pharmacy",
+  "accountCode": "1015",
+  "verified": {
+    "postedOnlyBal": -5030642,
+    "netActiveBal": -2,
+    "orphanReverseCredits": 5030640,
+    "integrityScriptOk": true,
+    "treasuryTestsPassed": 81
+  },
+  "fixFiles": [
+    "SamplePOS.Server/src/modules/treasury/postedLedgerBalance.ts",
+    "SamplePOS.Server/src/modules/treasury/liquidityFundsGuard.ts",
+    "SamplePOS.Server/src/modules/reports/liquidityMovementsReportService.ts",
+    "SamplePOS.Server/src/services/bankingService.ts",
+    "SamplePOS.Server/src/modules/treasury/receiptSettlementRepository.ts",
+    "SamplePOS.Server/src/modules/treasury/pettyCashService.ts",
+    "SamplePOS.Server/src/modules/system/glRepairService.ts"
+  ],
+  "ssot": "LEDGER_NET_ACTIVE_SQL",
+  "residualNoiseUgx": -2,
+  "note": "accounts.CurrentBalance still equals postedOnly until rebase heal; spendable UI paths no longer use that cache for 1015."
+}

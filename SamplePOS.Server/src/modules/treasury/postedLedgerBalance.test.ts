@@ -12,6 +12,7 @@ describe('postedLedgerBalance', () => {
 
   it('postedLedgerBalanceLateral embeds date param when provided', () => {
     expect(postedLedgerBalanceLateral('$2')).toContain('$2');
+    expect(postedLedgerBalanceLateral('$2')).toContain('ReversedByTransactionId');
     expect(postedLedgerBalanceLateral()).not.toContain('$2');
   });
 });

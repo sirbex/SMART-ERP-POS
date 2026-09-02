@@ -92,6 +92,8 @@ describe('liquidityFundsGuard', () => {
     const sql = String(mockQuery.mock.calls[0]?.[0] ?? '');
     expect(sql).toMatch(/INNER JOIN ledger_transactions/i);
     expect(sql).toMatch(/lt\."Status"\s*=\s*'POSTED'/);
+    expect(sql).toMatch(/ReversedByTransactionId/);
+    expect(sql).toMatch(/IsReversed/);
     // Must not put Status only on a LEFT JOIN ON clause (classic understate bug)
     expect(sql).not.toMatch(
       /LEFT JOIN ledger_transactions\s+lt\s+ON[\s\S]*Status\s*=\s*'POSTED'/i,
