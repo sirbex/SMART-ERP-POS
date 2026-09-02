@@ -101,17 +101,18 @@ jobs:
           echo "  Reason : ${{ github.event.inputs.reason || 'Auto-deploy on push' }}"
           echo "  Time   : $(date -u)"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          
-          # Pull with bearer token (HTTPS origin has no credentials on the box),
-          # then run deploy with DEPLOY_SELF_REEXEC=1 so the script skips a second pull.
+
+          # Embed token in remote URL for the pull only, then scrub credentials from origin.
+          # DEPLOY_SELF_REEXEC=1 skips deploy-update.sh's unauthenticated git pull.
           ssh -i ~/.ssh/prod_key \
               -o ConnectTimeout=30 \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
               root@209.38.203.138 \
-              "cd /opt/smarterp && git stash --include-untracked 2>/dev/null || true && \
-               git remote set-url origin https://github.com/wizard-digital/SMART-ERP-POS.git && \
-               git -c http.extraHeader=\"AUTHORIZATION: bearer ${GH_PULL_TOKEN}\" pull origin main && \
+              "set -e; cd /opt/smarterp; git stash --include-untracked 2>/dev/null || true; \
+               git remote set-url origin \"https://x-access-token:${GH_PULL_TOKEN}@github.com/wizard-digital/SMART-ERP-POS.git\"; \
+               git pull origin main; \
+               git remote set-url origin https://github.com/wizard-digital/SMART-ERP-POS.git; \
                DEPLOY_SELF_REEXEC=1 bash scripts/deploy-update.sh"
 
       - name: Cleanup SSH key
