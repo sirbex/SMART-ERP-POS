@@ -106,4 +106,22 @@ describe('AR reverse ↔ Undeposited Funds liquidity SSOT', () => {
     expect(rebase).toMatch(/LEDGER_NET_ACTIVE_SQL/);
     expect(rebase).not.toMatch(/WHERE lt\."Status" = 'POSTED'/);
   });
+
+  it('cash flow + expense payment balances use LEDGER_NET_ACTIVE / postedLedgerBalance', () => {
+    const cf = readFileSync(join(root, 'src/services/cashFlowService.ts'), 'utf8');
+    expect(cf).toMatch(/LEDGER_NET_ACTIVE_SQL/);
+    expect(cf).toMatch(/fetchCashBalance/);
+    const fetchBal = cf.slice(cf.indexOf('async function fetchCashBalance'));
+    expect(fetchBal).toMatch(/LEDGER_NET_ACTIVE_SQL/);
+    expect(fetchBal).not.toMatch(/lt\."Status" = 'POSTED'/);
+
+    const expRepo = readFileSync(join(root, 'src/repositories/expenseRepository.ts'), 'utf8');
+    const payFn = expRepo.slice(expRepo.indexOf('export const getPaymentAccounts'));
+    expect(payFn).toMatch(/postedLedgerBalanceLateralForList/);
+    expect(payFn).not.toMatch(/COALESCE\("CurrentBalance"/);
+
+    const expSvc = readFileSync(join(root, 'src/services/expenseService.ts'), 'utf8');
+    expect(expSvc).toMatch(/getLiquidityAvailable/);
+    expect(expSvc).not.toMatch(/current_balance.*ERR_EXPENSE_011|ERR_EXPENSE_011[\s\S]{0,200}current_balance/i);
+  });
 });

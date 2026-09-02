@@ -388,8 +388,7 @@ export const markExpensePaid = async (
 
     if (paymentAccountId) {
       const acctCheck = await dbPool.query(
-        `SELECT "AccountCode", "AccountName", "AllowedSources", "SystemAccountTag",
-                COALESCE("CurrentBalance", 0)::numeric(15,2) AS current_balance
+        `SELECT "AccountCode", "AccountName", "AllowedSources", "SystemAccountTag"
          FROM accounts WHERE "Id" = $1`,
         [paymentAccountId],
       );
@@ -412,7 +411,10 @@ export const markExpensePaid = async (
           },
         );
       }
-      const available = parseFloat(acct.current_balance || '0');
+      const { getLiquidityAvailable } = await import(
+        '../modules/treasury/liquidityFundsGuard.js'
+      );
+      const { available } = await getLiquidityAvailable(dbPool, acct.AccountCode);
       if (available + 0.0001 < existingExpense.amount) {
         throw new BusinessError(
           `Insufficient funds in ${acct.AccountCode} (${acct.AccountName}). Available ${available.toFixed(2)}, required ${Number(existingExpense.amount).toFixed(2)}.`,

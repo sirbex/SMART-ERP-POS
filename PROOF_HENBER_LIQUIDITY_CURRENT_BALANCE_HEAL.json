@@ -1,0 +1,20 @@
+{
+  "proofId": "HENBER_LIQUIDITY_CURRENT_BALANCE_HEAL",
+  "tenant": "pos_tenant_henber_pharmacy",
+  "ssot": "LEDGER_NET_ACTIVE_SQL",
+  "ok": true,
+  "updates": [
+    { "code": "1010", "old": 1591094.99, "newBal": 1627594.99 },
+    { "code": "1015", "old": -5030642, "newBal": -2 },
+    { "code": "1040", "old": 481383, "newBal": -518617 }
+  ],
+  "verified": [
+    { "code": "1010", "currentBalance": 1627594.99, "netActive": 1627594.99, "postedOnly": 1591094.99, "consistent": true },
+    { "code": "1012", "currentBalance": 0, "netActive": 0, "postedOnly": 0, "consistent": true },
+    { "code": "1015", "currentBalance": -2, "netActive": -2, "postedOnly": -5030642, "consistent": true },
+    { "code": "1031", "currentBalance": 100, "netActive": 100, "postedOnly": 100, "consistent": true },
+    { "code": "1032", "currentBalance": 10631970, "netActive": 10631970, "postedOnly": 10631970, "consistent": true },
+    { "code": "1040", "currentBalance": -518617, "netActive": -518617, "postedOnly": 481383, "consistent": true }
+  ],
+  "note": "1015 false overdraft cleared. 1040 net-active is genuinely negative after excluding reverse-pair legs (posted-only had been inflated)."
+}

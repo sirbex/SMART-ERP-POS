@@ -231,9 +231,8 @@ assert(
   { clearing: money(clearing.rows[0].bal), naBal },
 );
 
-// OBSERVED (not SSOT): accounts.CurrentBalance currently tracks bare POSTED on Henber
-// 1015/1010 — it is NOT the liquidity/Banking spendable formula. Do not assert equality
-// to net-active; liquidity must read ledger via LEDGER_NET_ACTIVE_SQL.
+// After heal: accounts.CurrentBalance for liquidity codes must match net-active.
+// (Bare POSTED cache was the remaining inconsistency; heal-henber-liquidity-current-balance.mjs.)
 const curRows = await pool.query(
   `SELECT a."AccountCode" AS code, a."CurrentBalance"::float8 AS cur
    FROM accounts a
@@ -256,13 +255,19 @@ for (const row of curRows.rows) {
   const na = money(gl.rows[0].na);
   const po = money(gl.rows[0].po);
   const cur = money(row.cur);
+  const curEqualsNetActive = Math.abs(cur - na) < 0.02;
   currentBalanceChecks.push({
     code: row.code,
     cur,
     netActive: na,
     postedOnly: po,
     curEqualsPostedOnly: Math.abs(cur - po) < 0.02,
-    curEqualsNetActive: Math.abs(cur - na) < 0.02,
+    curEqualsNetActive,
+  });
+  assert(curEqualsNetActive, `${row.code} CurrentBalance matches net-active after heal`, {
+    cur,
+    na,
+    po,
   });
 }
 
@@ -278,7 +283,7 @@ const report = {
   bankChecks,
   currentBalanceChecks,
   note:
-    'Liquidity SSOT = LEDGER_NET_ACTIVE_SQL on ledger_entries. accounts.CurrentBalance is not used by Banking/Move Money/funds guard.',
+    'Liquidity SSOT = LEDGER_NET_ACTIVE_SQL. CurrentBalance healed to match net-active on Henber liquidity codes.',
   failures,
 };
 

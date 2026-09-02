@@ -21,6 +21,7 @@
 import type pg from 'pg';
 import Decimal from 'decimal.js';
 import { Money } from '../utils/money.js';
+import { LEDGER_NET_ACTIVE_SQL } from '../utils/ledgerNetActive.js';
 
 // ============================================================================
 // TYPES
@@ -234,8 +235,7 @@ async function fetchClassifiedCashMovements(
         JOIN dominant dc ON dc."TransactionId" = cl."TransactionId"
         JOIN ledger_transactions lt ON lt."Id" = cl."TransactionId"
         WHERE lt."TransactionDate"::DATE BETWEEN $2 AND $3
-          AND lt."Status" = 'POSTED'
-          AND (lt."IsReversed" IS NULL OR lt."IsReversed" = FALSE)
+          AND ${LEDGER_NET_ACTIVE_SQL}
         ORDER BY lt."TransactionDate"::DATE, dc.section
         `,
         [CASH_BANK_CODES, startDate, endDate]
@@ -331,7 +331,7 @@ async function fetchUnclassifiedMovements(
         FROM combined c
         JOIN ledger_transactions lt ON lt."Id" = c."TransactionId"
         WHERE lt."TransactionDate"::DATE BETWEEN $2 AND $3
-          AND lt."Status" = 'POSTED'
+          AND ${LEDGER_NET_ACTIVE_SQL}
         ORDER BY lt."TransactionDate"::DATE
         `,
         [CASH_BANK_CODES, startDate, endDate]
@@ -370,8 +370,7 @@ async function fetchCashBalance(
             WHERE a."AccountCode" = ANY($1)
               AND a."CashFlowClass" IS NULL
               AND lt."TransactionDate"::DATE < $2
-              AND lt."Status" = 'POSTED'
-              AND (lt."IsReversed" IS NULL OR lt."IsReversed" = FALSE)
+              AND ${LEDGER_NET_ACTIVE_SQL}
         `;
         params = [CASH_BANK_CODES as unknown as string, endDateExclusive];
     } else {
@@ -383,8 +382,7 @@ async function fetchCashBalance(
             WHERE a."AccountCode" = ANY($1)
               AND a."CashFlowClass" IS NULL
               AND lt."TransactionDate"::DATE <= $2
-              AND lt."Status" = 'POSTED'
-              AND (lt."IsReversed" IS NULL OR lt."IsReversed" = FALSE)
+              AND ${LEDGER_NET_ACTIVE_SQL}
         `;
         params = [CASH_BANK_CODES as unknown as string, endDateInclusive!];
     }

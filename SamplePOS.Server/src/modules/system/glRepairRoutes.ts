@@ -134,7 +134,7 @@ router.post('/recalc-customer-balances', asyncHandler(async (req, res) => {
 
 // ============================================================================
 // POST /api/system/gl/rebase-account-balances
-// Recompute accounts.CurrentBalance from POSTED ledger_entries (no GL JEs).
+// Recompute accounts.CurrentBalance from LEDGER_NET_ACTIVE ledger_entries (no GL JEs).
 // Body: { accountCodes?: string[] } — default all active accounts.
 // ============================================================================
 router.post('/rebase-account-balances', asyncHandler(async (req, res) => {

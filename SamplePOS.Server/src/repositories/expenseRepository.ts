@@ -575,36 +575,47 @@ export const generateExpenseNumber = async (dbPool?: pg.Pool | pg.PoolClient): P
 
 /**
  * Get payment accounts (cash/bank/MoMo/petty) for expense payment source.
- * Includes CurrentBalance so the UI can hide / disable unfunded accounts.
+ * Available balance = net-active ledger SSOT (same as Banking / funds guard).
+ * Never use accounts.CurrentBalance — bare POSTED / cache drift after reverse.
  */
 export const getPaymentAccounts = async (dbPool?: pg.Pool | pg.PoolClient) => {
   const pool = dbPool || globalPool;
   try {
+    const { postedLedgerBalanceLateralForList, availableFromPostedTotals } = await import(
+      '../modules/treasury/postedLedgerBalance.js'
+    );
     // Only cash-out liquidity accounts that allow EXPENSE_PAYMENT (Rule B).
     // Exclude undeposited (1015) and card clearing (1020) — customer receipt lanes, not expense pay-from.
     const query = `
       SELECT 
-        "Id" as id,
-        "AccountCode" as account_code,
-        "AccountName" as account_name,
-        "AccountType" as account_type,
-        COALESCE("SystemAccountTag", '') as system_account_tag,
-        COALESCE("CurrentBalance", 0)::numeric(15,2) as current_balance
-      FROM accounts 
-      WHERE "AccountType" = 'ASSET' 
-        AND "IsActive" = true
-        AND "IsPostingAccount" = true
+        a."Id" as id,
+        a."AccountCode" as account_code,
+        a."AccountName" as account_name,
+        a."AccountType" as account_type,
+        COALESCE(a."SystemAccountTag", '') as system_account_tag,
+        a."NormalBalance" as normal_balance,
+        COALESCE(bal.debit_total, 0)::text as debit_total,
+        COALESCE(bal.credit_total, 0)::text as credit_total
+      FROM accounts a
+      ${postedLedgerBalanceLateralForList()}
+      WHERE a."AccountType" = 'ASSET' 
+        AND a."IsActive" = true
+        AND a."IsPostingAccount" = true
         AND (
-          "SystemAccountTag" IN ('CASH', 'BANK', 'MOBILE_MONEY', 'PETTY_CASH')
-          OR "AccountCode" IN ('1010', '1012', '1030', '1040')
+          a."SystemAccountTag" IN ('CASH', 'BANK', 'MOBILE_MONEY', 'PETTY_CASH')
+          OR a."AccountCode" IN ('1010', '1012', '1030', '1040')
         )
-        AND 'EXPENSE_PAYMENT' = ANY(COALESCE("AllowedSources", ARRAY[]::text[]))
-      ORDER BY "AccountCode"
+        AND 'EXPENSE_PAYMENT' = ANY(COALESCE(a."AllowedSources", ARRAY[]::text[]))
+      ORDER BY a."AccountCode"
     `;
 
     const result = await pool.query(query);
     return result.rows.map((row) => {
-      const balance = parseFloat(row.current_balance || '0');
+      const balance = availableFromPostedTotals(
+        Number(row.debit_total || 0),
+        Number(row.credit_total || 0),
+        row.normal_balance || 'DEBIT',
+      );
       return {
         id: row.id,
         account_code: row.account_code,
