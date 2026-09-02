@@ -74,6 +74,21 @@ describe('Supplier return worklist domain SSOT (client)', () => {
       'full/uninvoiced reverse never offers Create Credit Note (even if sibling bill linked)',
     );
 
+    const grReversedReturn = {
+      status: 'POSTED' as const,
+      hasCreditNote: false,
+      hasSupplierBill: true,
+      reason: 'Return all stock',
+      sourceGrIsReversed: true,
+    };
+    gate(
+      'UI_SSOT_GR_REVERSED_NO_SCN',
+      resolveSupplierReturnActionStatus(grReversedReturn) === 'COMPLETE' &&
+        !canCreateSupplierCreditNoteFromReturn(grReversedReturn) &&
+        !isSupplierReturnNeedsAttention(grReversedReturn),
+      'parent GR reversed — never Create Credit Note even without reason prefix',
+    );
+
     gate(
       'LABELS',
       SUPPLIER_RETURN_ACTION_LABELS.NEED_SCN === 'Need credit note' &&

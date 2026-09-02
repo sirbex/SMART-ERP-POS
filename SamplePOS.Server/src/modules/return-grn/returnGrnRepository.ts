@@ -309,7 +309,8 @@ export const returnGrnRepository = {
             conditions.push(`(${hasSupplierBillSql})`);
             conditions.push(
               `COALESCE(r.reason, '') NOT LIKE '%[Full reverse]%'`
-              + ` AND COALESCE(r.reason, '') NOT LIKE '%[Uninvoiced reversal]%'`,
+              + ` AND COALESCE(r.reason, '') NOT LIKE '%[Uninvoiced reversal]%'`
+              + ` AND g.reversed_by_return_grn_id IS NULL`,
             );
         }
 
@@ -346,10 +347,12 @@ export const returnGrnRepository = {
          scn."SupplierInvoiceNumber" AS "creditNoteNumber",
          scn."Status"::text AS "creditNoteStatus",
          bill."SupplierInvoiceNumber" AS "supplierBillNumber",
+         (g.reversed_by_return_grn_id IS NOT NULL) AS "sourceGrIsReversed",
          CASE
            WHEN r.status = 'DRAFT' THEN 'DRAFT'
            WHEN COALESCE(r.reason, '') LIKE '%[Full reverse]%'
              OR COALESCE(r.reason, '') LIKE '%[Uninvoiced reversal]%' THEN 'COMPLETE'
+           WHEN g.reversed_by_return_grn_id IS NOT NULL THEN 'COMPLETE'
            WHEN NOT (${hasActiveScnSql}) AND NOT (${hasSupplierBillSql}) THEN 'COMPLETE'
            WHEN NOT (${hasActiveScnSql}) THEN 'NEED_SCN'
            WHEN UPPER(COALESCE(scn."Status",'')) IN ('POSTED', 'OPEN', 'DRAFT') THEN 'HAS_SCN'
@@ -602,7 +605,8 @@ export const returnGrnRepository = {
                )
                OR si."InternalReferenceNumber" = g.receipt_number
              )
-         ) AS "hasSupplierBill"
+         ) AS "hasSupplierBill",
+         (g.reversed_by_return_grn_id IS NOT NULL) AS "sourceGrIsReversed"
        FROM return_grn r
        JOIN suppliers s ON s."Id" = r.supplier_id
        JOIN goods_receipts g ON g.id = r.grn_id

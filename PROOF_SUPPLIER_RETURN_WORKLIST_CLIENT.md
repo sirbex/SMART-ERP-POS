@@ -5,6 +5,7 @@
 - ✅ `UI_SSOT_NEED_SCN` — open return → create SCN
 - ✅ `UI_SSOT_NEED_BILL` — uninvoiced return is Done — no bill-first drama
 - ✅ `UI_SSOT_FULL_REVERSE_NO_SCN` — full/uninvoiced reverse never offers Create Credit Note (even if sibling bill linked)
+- ✅ `UI_SSOT_GR_REVERSED_NO_SCN` — parent GR reversed — never Create Credit Note even without reason prefix
 - ✅ `LABELS` — labels locked
 - ✅ `DEFAULTS` — nested under GR + default filter
 - ✅ `UNWRAP_STANDARD` — rows=1 total=8

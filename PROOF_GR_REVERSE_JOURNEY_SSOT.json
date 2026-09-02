@@ -1,5 +1,5 @@
 {
-  "at": "2026-08-30T20:40:09.678Z",
+  "at": "2026-09-02T18:19:44.454Z",
   "feature": "GR_REVERSE_JOURNEY_SSOT",
   "summary": {
     "pass": 29,
@@ -128,7 +128,7 @@
     {
       "id": "WIRE_SCN_FULL_REVERSE_BLOCK",
       "ok": true,
-      "detail": "server blocks SCN on full reverse; no PO sibling bill fallback in SCN lookup"
+      "detail": "server + UI block SCN on full reverse / reversed GR"
     },
     {
       "id": "WIRE_PAID_AND_CONSUMED_BLOCK",

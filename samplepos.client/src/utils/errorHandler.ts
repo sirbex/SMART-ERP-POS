@@ -583,6 +583,13 @@ function formatByErrorCode(parsed: ParsedApiError): string {
       'Credit notes reduce accounts payable against a bill — they cannot be created while the receipt is still unbilled.'
     );
   }
+  if (code === 'ERR_SCN_FULL_REVERSE') {
+    return (
+      'No credit note needed — this goods receipt was fully reversed.\n\n' +
+      'Stock, GR/IR, and any unpaid supplier bill were already cleared when the return posted. ' +
+      'Credit notes only apply to partial returns against an open supplier bill.'
+    );
+  }
 
   // Accounting / governance / inventory rule violations
   if (

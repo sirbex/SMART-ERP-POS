@@ -1,7 +1,7 @@
 {
   "proof": "SUPPLIER_RETURN_WORKLIST_CLIENT",
   "passed": true,
-  "asOf": "2026-08-30T20:40:10.893Z",
+  "asOf": "2026-09-02T18:19:48.532Z",
   "gates": [
     {
       "id": "UI_SSOT_NEED_SCN",
@@ -17,6 +17,11 @@
       "id": "UI_SSOT_FULL_REVERSE_NO_SCN",
       "ok": true,
       "detail": "full/uninvoiced reverse never offers Create Credit Note (even if sibling bill linked)"
+    },
+    {
+      "id": "UI_SSOT_GR_REVERSED_NO_SCN",
+      "ok": true,
+      "detail": "parent GR reversed — never Create Credit Note even without reason prefix"
     },
     {
       "id": "LABELS",

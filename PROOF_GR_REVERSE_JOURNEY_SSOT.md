@@ -1,6 +1,6 @@
 # PROOF — GR reverse journey SSOT
 
-**Generated:** 2026-08-30T20:40:09.678Z  
+**Generated:** 2026-09-02T18:19:44.454Z  
 **Verdict:** **PASS** (29/29)  
 **Scope:** Cross-surface GR reverse: paid/consumed block, PO Draft then Pending sticks, reversed UI, no SCN on full reverse, no sibling bill lookup, unique More nav keys
 
@@ -27,7 +27,7 @@
 - PASS `WIRE_BILL_DIRECT_GR_ONLY` — bill/SCN attribution is this-GR only; billable qty nets returns; reversed blocked
 - PASS `WIRE_FINALIZE_REQUIRES_PENDING_PO` — UI + server: Finalize blocked unless PO PENDING (Draft after reverse is not receivable)
 - PASS `WIRE_PO_DELETE_AFTER_REVERSE` — Draft PO delete/cancel allowed when only reversed/cancelled GRs remain (audit kept)
-- PASS `WIRE_SCN_FULL_REVERSE_BLOCK` — server blocks SCN on full reverse; no PO sibling bill fallback in SCN lookup
+- PASS `WIRE_SCN_FULL_REVERSE_BLOCK` — server + UI block SCN on full reverse / reversed GR
 - PASS `WIRE_PAID_AND_CONSUMED_BLOCK` — eligibility shares paid-bill + consumed-stock reverse blocks
 - PASS `WIRE_MORE_NAV_UNIQUE_KEYS` — overflow primary tabs use distinct key from More→operations group
 - PASS `SCRIPT_proof_gr-reverse-journey-ssot` — proof:gr-reverse-journey-ssot

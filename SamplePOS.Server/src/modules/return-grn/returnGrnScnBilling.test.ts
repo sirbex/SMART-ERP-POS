@@ -112,6 +112,28 @@ describe('returnGrnService — SCN requires supplier bill', () => {
         });
     });
 
+    it('throws ERR_SCN_FULL_REVERSE when parent GR links this RGRN as counter-document', async () => {
+        const { returnGrnRepository } = await import('./returnGrnRepository.js');
+        (returnGrnRepository.getById as AnyMock).mockResolvedValueOnce({
+            ...mockRgrn,
+            reason: 'Damaged goods return',
+        });
+        mockClientQuery.mockImplementation(async (sql: unknown) => {
+            const s = String(sql);
+            if (s.includes('reversed_by_return_grn_id')) {
+                return { rows: [{ reversed_by_return_grn_id: 'rgrn-uuid' }] };
+            }
+            if (isActiveScnExistenceSql(s)) {
+                return { rows: [] };
+            }
+            return { rows: [] };
+        });
+
+        await expect(
+            returnGrnService.createCreditNoteFromReturn(pool, 'rgrn-uuid'),
+        ).rejects.toMatchObject({ errorCode: 'ERR_SCN_FULL_REVERSE' });
+    });
+
     it('throws ERR_SCN_FULL_REVERSE for orchestrated full/uninvoiced reverse', async () => {
         const { returnGrnRepository } = await import('./returnGrnRepository.js');
         (returnGrnRepository.getById as AnyMock).mockResolvedValueOnce({

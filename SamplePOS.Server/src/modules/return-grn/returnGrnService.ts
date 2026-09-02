@@ -661,6 +661,25 @@ export const returnGrnService = {
                 );
             }
 
+            const grReverseLink = await client.query<{ reversed_by_return_grn_id: string | null }>(
+                `SELECT reversed_by_return_grn_id::text
+                 FROM goods_receipts
+                 WHERE id = $1
+                 LIMIT 1`,
+                [rgrn.grnId],
+            );
+            if (grReverseLink.rows[0]?.reversed_by_return_grn_id === rgrnId) {
+                throw new BusinessError(
+                    'This goods receipt was fully reversed by this return — stock, GR/IR, and any unpaid bill were already cleared. No supplier credit note is required.',
+                    'ERR_SCN_FULL_REVERSE',
+                    {
+                        returnGrnId: rgrnId,
+                        returnGrnNumber: rgrn.returnGrnNumber,
+                        grnId: rgrn.grnId,
+                    },
+                );
+            }
+
             // 2. Prevent duplicate: active SCN only (list/hasCreditNote SSOT).
             // Cancelled/void notes keep return_grn_id for audit but must not block re-create
             // after cancel reverses GL (POSTED/APPLIED → CANCELLED with ledger reverse).

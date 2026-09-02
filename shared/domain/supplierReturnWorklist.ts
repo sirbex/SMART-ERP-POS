@@ -1,3 +1,5 @@
+import { isFullReceiptReverseReason } from './grFullReverseSsot.js';
+
 /**
  * Supplier return (RGRN) worklist SSOT.
  *
@@ -40,6 +42,14 @@ export interface SupplierReturnWorklistRow {
   creditNoteStatus?: string | null;
   /** Optional: reason or flag from uninvoiced reverse orchestration */
   reason?: string | null;
+  /** Parent GR marked reversed by this (or another) counter-document */
+  sourceGrIsReversed?: boolean | null;
+}
+
+/** True when SCN must not be created for this return (full reverse / GR unwound). */
+export function isSupplierReturnScnBlocked(row: SupplierReturnWorklistRow): boolean {
+  if (row.sourceGrIsReversed) return true;
+  return isUninvoicedReceiptReversal(row);
 }
 
 /**
@@ -55,7 +65,7 @@ export function resolveSupplierReturnActionStatus(
   const scnSt = String(row.creditNoteStatus || '').toUpperCase();
 
   // Uninvoiced / full reverse: stock + GR/IR done — never NEED_SCN
-  if (isUninvoicedReceiptReversal(row)) {
+  if (isSupplierReturnScnBlocked(row)) {
     if (status === 'DRAFT') return 'DRAFT';
     return hasScn ? (['POSTED', 'OPEN', 'DRAFT'].includes(scnSt) ? 'HAS_SCN' : 'COMPLETE') : 'COMPLETE';
   }
@@ -72,7 +82,7 @@ export function resolveSupplierReturnActionStatus(
  * Uninvoiced reversals must not clutter this list.
  */
 export function isSupplierReturnNeedsAttention(row: SupplierReturnWorklistRow): boolean {
-  if (isUninvoicedReceiptReversal(row)) return false;
+  if (isSupplierReturnScnBlocked(row)) return false;
   return (
     String(row.status || '').toUpperCase() === 'POSTED' &&
     !row.hasCreditNote &&
@@ -82,7 +92,7 @@ export function isSupplierReturnNeedsAttention(row: SupplierReturnWorklistRow): 
 
 export function canCreateSupplierCreditNoteFromReturn(row: SupplierReturnWorklistRow): boolean {
   // Full / uninvoiced reverse already cleared GR/IR (and cancelled bills if any) — no SCN.
-  if (isUninvoicedReceiptReversal(row)) return false;
+  if (isSupplierReturnScnBlocked(row)) return false;
   return (
     String(row.status || '').toUpperCase() === 'POSTED' &&
     !row.hasCreditNote &&
@@ -100,8 +110,7 @@ export function mustBillBeforeSupplierCreditNote(_row: SupplierReturnWorklistRow
 
 /** True when this RGRN was the orchestrated full reverse (with or without prior bill). */
 export function isUninvoicedReceiptReversal(row: Pick<SupplierReturnWorklistRow, 'reason'>): boolean {
-  const r = String(row.reason || '');
-  return r.includes('[Full reverse]') || r.includes('[Uninvoiced reversal]');
+  return isFullReceiptReverseReason(row.reason);
 }
 
 export const SUPPLIER_RETURN_ACTION_LABELS: Record<SupplierReturnActionStatus, string> = {
@@ -116,7 +125,7 @@ export function supplierReturnActionLabel(
   row: SupplierReturnWorklistRow,
   status: SupplierReturnActionStatus = resolveSupplierReturnActionStatus(row),
 ): string {
-  if (status === 'COMPLETE' && isUninvoicedReceiptReversal(row)) {
+  if (status === 'COMPLETE' && isSupplierReturnScnBlocked(row)) {
     return 'Reversal complete';
   }
   if (status === 'COMPLETE' && !row.hasSupplierBill) {

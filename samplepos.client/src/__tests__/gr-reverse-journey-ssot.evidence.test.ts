@@ -269,11 +269,14 @@ describe('PROOF: GR reverse journey SSOT (cross-surface)', () => {
       'WIRE_SCN_FULL_REVERSE_BLOCK',
       returnSvc.includes('ERR_SCN_FULL_REVERSE') &&
         returnSvc.includes('isFullReceiptReverseReason') &&
+        returnSvc.includes('reversed_by_return_grn_id') &&
         !returnSvc.includes('si."PurchaseOrderId"') &&
         returnSvc.includes('Never fall back to PurchaseOrderId') &&
-        returnWorklist.includes('isUninvoicedReceiptReversal') &&
-        returnWorklist.includes('canCreateSupplierCreditNoteFromReturn'),
-      'server blocks SCN on full reverse; no PO sibling bill fallback in SCN lookup',
+        returnWorklist.includes('isSupplierReturnScnBlocked') &&
+        returnWorklist.includes('canCreateSupplierCreditNoteFromReturn') &&
+        grPage.includes('if (isGrReversed) return false') &&
+        grPage.includes('Reversal complete — no credit note needed'),
+      'server + UI block SCN on full reverse / reversed GR',
     );
 
     gate(

@@ -2225,14 +2225,24 @@ export default function GoodsReceiptsPage() {
                     {(() => {
                       const supplierBillNum =
                         (grDetail?.gr as { supplierBillNumber?: string } | undefined)?.supplierBillNumber || '';
-                      const uninvoicedPosted = existingReturns.filter((r) => {
+                      const postedReturns = existingReturns.filter(
+                        (r) => String(r.status || '').toUpperCase() === 'POSTED',
+                      );
+                      const uninvoicedPosted = postedReturns.filter((r) => {
                         const hasBill = supplierBillNum.length > 0 || !!r.hasSupplierBill;
-                        return (
-                          String(r.status || '').toUpperCase() === 'POSTED' &&
-                          !r.hasCreditNote &&
-                          !hasBill
-                        );
+                        return !r.hasCreditNote && !hasBill;
                       });
+                      if (isGrReversed && postedReturns.length > 0) {
+                        return (
+                          <div className="text-sm rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-900 px-3 py-2">
+                            <span className="font-semibold">Reversal complete — no credit note needed.</span>
+                            {' '}
+                            Stock and GR/IR were cleared when{' '}
+                            <strong>{reversedByRgrnNumber || postedReturns[0]?.returnGrnNumber || 'the return'}</strong>
+                            {' '}posted. Supplier credit notes apply only to partial invoiced returns, not a full receipt reverse.
+                          </div>
+                        );
+                      }
                       if (uninvoicedPosted.length > 0) {
                         return (
                           <div className="text-sm rounded-lg border border-slate-200 bg-slate-50 text-slate-800 px-3 py-2">
@@ -2269,14 +2279,16 @@ export default function GoodsReceiptsPage() {
                         <div className="flex flex-col gap-2 w-full sm:flex-row sm:flex-wrap">
                         {existingReturns
                           .filter((r) => {
+                            if (isGrReversed) return false;
                             const supplierBillNum =
                               (grDetail?.gr as { supplierBillNumber?: string } | undefined)
                                 ?.supplierBillNumber || '';
                             return canCreateSupplierCreditNoteFromReturn({
                               status: r.status,
                               hasCreditNote: r.hasCreditNote,
-                              hasSupplierBill: !!r.hasSupplierBill,
+                              hasSupplierBill: !!r.hasSupplierBill || supplierBillNum.length > 0,
                               reason: r.reason,
+                              sourceGrIsReversed: isGrReversed || r.sourceGrIsReversed,
                             });
                           })
                           .map((r) => (

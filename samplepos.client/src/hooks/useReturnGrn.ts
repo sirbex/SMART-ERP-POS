@@ -67,6 +67,7 @@ export interface ReturnGrnRecord {
     updatedAt: string;
     hasCreditNote?: boolean;
     hasSupplierBill?: boolean;
+    sourceGrIsReversed?: boolean;
     creditNoteNumber?: string | null;
     creditNoteStatus?: string | null;
     supplierBillNumber?: string | null;
