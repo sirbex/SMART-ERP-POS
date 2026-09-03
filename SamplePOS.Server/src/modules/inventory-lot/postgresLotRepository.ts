@@ -118,6 +118,41 @@ export const postgresLotRepository: ILotRepository = {
     }
     const expiry = normalizeLotDate(data.expiryDate);
 
+    // Prefer the existing projection for this batch. Heal scripts historically used
+    // lot_number = batch_number + short-id (e.g. MAIN-399acb3a1a) while masters use
+    // batch_number (MAIN). Upserting only on (product_id, lot_number) would INSERT a
+    // second product_lots row for the same inventory_batch_id and break coupling
+    // (Lot MAIN: balances=0, batch=N).
+    const existing = await db.query<{ id: string }>(
+      `SELECT id FROM product_lots
+       WHERE inventory_batch_id = $1
+       ORDER BY created_at ASC
+       LIMIT 1`,
+      [data.inventoryBatchId],
+    );
+
+    if (existing.rows[0]?.id) {
+      await db.query(
+        `UPDATE product_lots SET
+           expiry_date = $2,
+           cost_price = $3,
+           goods_receipt_id = COALESCE($4, goods_receipt_id),
+           is_bonus = $5,
+           status = $6,
+           updated_at = NOW()
+         WHERE id = $1`,
+        [
+          existing.rows[0].id,
+          expiry,
+          data.costPrice,
+          data.goodsReceiptId ?? null,
+          data.isBonus ?? false,
+          data.status ?? 'ACTIVE',
+        ],
+      );
+      return;
+    }
+
     await db.query(
       `INSERT INTO product_lots (
          product_id, lot_number, expiry_date, cost_price,
@@ -344,7 +379,10 @@ export async function getProductLotIdByBatchId(
   inventoryBatchId: string,
 ): Promise<string | null> {
   const result = await db.query<{ id: string }>(
-    `SELECT id FROM product_lots WHERE inventory_batch_id = $1 LIMIT 1`,
+    `SELECT id FROM product_lots
+     WHERE inventory_batch_id = $1
+     ORDER BY created_at ASC
+     LIMIT 1`,
     [inventoryBatchId],
   );
   return result.rows[0]?.id ?? null;

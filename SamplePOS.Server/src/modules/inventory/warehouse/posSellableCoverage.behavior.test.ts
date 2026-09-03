@@ -1,32 +1,32 @@
 /**
- * Behavioral unit proof: INV-POS receipt store resolution + gap classification.
- * Run: npx vitest run src/modules/inventory/warehouse/posSellableCoverage.behavior.test.ts
+ * Behavioral unit proof: INV-POS gap classification + projection assert policy.
+ * Run: npm test -- --runInBand src/modules/inventory/warehouse/posSellableCoverage.behavior.test.ts
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-vi.mock('./multistoreSettings.js', () => ({
-  isMultistoreEnabled: vi.fn(async () => true),
+jest.unstable_mockModule('./multistoreSettings.js', () => ({
+  isMultistoreEnabled: jest.fn(async () => true),
 }));
 
-vi.mock('../../../utils/logger.js', () => ({
-  default: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+jest.unstable_mockModule('../../../utils/logger.js', () => ({
+  default: { info: jest.fn(), error: jest.fn(), warn: jest.fn() },
 }));
 
-import {
+const {
   findPosSellableCoverageGaps,
   assertPosSellableProjectionConsistent,
   assertPosSellableCoverageConsistent,
-} from './posSellableCoverage.js';
+} = await import('./posSellableCoverage.js');
 
 function mockConn(rows: Record<string, unknown>[]) {
   return {
-    query: vi.fn(async () => ({ rows, rowCount: rows.length })),
+    query: jest.fn(async () => ({ rows, rowCount: rows.length })),
   } as unknown as import('pg').Pool;
 }
 
 describe('INV-POS behavioral', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it('classifies NO_LOT when batch has qty but no projection', async () => {
@@ -39,6 +39,7 @@ describe('INV-POS behavioral', () => {
         batch_remaining: '10',
         selling_sellable: '0',
         main_on_hand: '0',
+        quarantine_on_hand: '0',
         has_lot: false,
       },
     ]);
@@ -57,6 +58,7 @@ describe('INV-POS behavioral', () => {
         batch_remaining: '5',
         selling_sellable: '0',
         main_on_hand: '5',
+        quarantine_on_hand: '0',
         has_lot: true,
       },
     ]);
@@ -74,6 +76,7 @@ describe('INV-POS behavioral', () => {
         batch_remaining: '8',
         selling_sellable: '8',
         main_on_hand: '0',
+        quarantine_on_hand: '0',
         has_lot: true,
       },
     ]);
@@ -91,6 +94,7 @@ describe('INV-POS behavioral', () => {
         batch_remaining: '1',
         selling_sellable: '0',
         main_on_hand: '0',
+        quarantine_on_hand: '0',
         has_lot: false,
       },
     ]);
@@ -107,11 +111,34 @@ describe('INV-POS behavioral', () => {
         batch_remaining: '1',
         selling_sellable: '0',
         main_on_hand: '1',
+        quarantine_on_hand: '0',
         has_lot: true,
       },
     ]);
     await expect(assertPosSellableProjectionConsistent(mainOnly, 'test')).resolves.toBeUndefined();
     await expect(assertPosSellableCoverageConsistent(mainOnly, 'test')).rejects.toMatchObject({
+      errorCode: 'ERR_POS_SELLABLE_COVERAGE',
+    });
+  });
+
+  it('projection assert allows RETURN-store quarantine (customer return path)', async () => {
+    const returnOnly = mockConn([
+      {
+        product_id: 'p1',
+        sku: 'SKU-3273',
+        product_name: 'Holder',
+        inventory_batch_id: 'b',
+        batch_remaining: '1',
+        selling_sellable: '0',
+        main_on_hand: '0',
+        quarantine_on_hand: '1',
+        has_lot: true,
+      },
+    ]);
+    const gaps = await findPosSellableCoverageGaps(returnOnly);
+    expect(gaps[0].reason).toBe('SELLING_ZERO_QUARANTINE_HAS');
+    await expect(assertPosSellableProjectionConsistent(returnOnly, 'test')).resolves.toBeUndefined();
+    await expect(assertPosSellableCoverageConsistent(returnOnly, 'test')).rejects.toMatchObject({
       errorCode: 'ERR_POS_SELLABLE_COVERAGE',
     });
   });

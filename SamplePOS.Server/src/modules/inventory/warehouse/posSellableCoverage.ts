@@ -21,7 +21,12 @@ export interface PosSellableGap {
   batchRemaining: number;
   sellingSellable: number;
   mainOnHand: number;
-  reason: 'NO_LOT' | 'SELLING_ZERO_MAIN_HAS' | 'SELLING_ZERO_NO_BALANCES';
+  reason:
+    | 'NO_LOT'
+    | 'SELLING_ZERO_MAIN_HAS'
+    | 'SELLING_ZERO_QUARANTINE_HAS'
+    | 'SELLING_ZERO_NO_BALANCES';
+  quarantineOnHand: number;
 }
 
 /**
@@ -46,6 +51,7 @@ export async function findPosSellableCoverageGaps(
     batch_remaining: string;
     selling_sellable: string;
     main_on_hand: string;
+    quarantine_on_hand: string;
     has_lot: boolean;
   }>(
     `WITH selling AS (
@@ -82,6 +88,15 @@ export async function findPosSellableCoverageGaps(
          WHERE pl.inventory_batch_id = b.id
            AND ib.store_location_id = (SELECT id FROM main)
        ), 0)::text AS main_on_hand,
+       COALESCE((
+         SELECT SUM(ib.quantity_on_hand)
+         FROM inventory_balances ib
+         JOIN product_lots pl ON pl.id = ib.product_lot_id
+         JOIN store_locations sl ON sl.id = ib.store_location_id
+         WHERE pl.inventory_batch_id = b.id
+           AND sl.is_active = true
+           AND sl.store_type IN ('RETURN', 'DAMAGE', 'EXPIRED')
+       ), 0)::text AS quarantine_on_hand,
        EXISTS (SELECT 1 FROM product_lots pl WHERE pl.inventory_batch_id = b.id) AS has_lot
      FROM inventory_batches b
      JOIN products p ON p.id = b.product_id
@@ -98,11 +113,13 @@ export async function findPosSellableCoverageGaps(
     const batchRemaining = parseFloat(row.batch_remaining);
     const sellingSellable = parseFloat(row.selling_sellable);
     const mainOnHand = parseFloat(row.main_on_hand);
+    const quarantineOnHand = parseFloat(row.quarantine_on_hand);
     if (sellingSellable > POS_SELLABLE_TOLERANCE) continue;
 
     let reason: PosSellableGap['reason'];
     if (!row.has_lot) reason = 'NO_LOT';
     else if (mainOnHand > POS_SELLABLE_TOLERANCE) reason = 'SELLING_ZERO_MAIN_HAS';
+    else if (quarantineOnHand > POS_SELLABLE_TOLERANCE) reason = 'SELLING_ZERO_QUARANTINE_HAS';
     else reason = 'SELLING_ZERO_NO_BALANCES';
 
     gaps.push({
@@ -113,6 +130,7 @@ export async function findPosSellableCoverageGaps(
       batchRemaining,
       sellingSellable,
       mainOnHand,
+      quarantineOnHand,
       reason,
     });
   }
@@ -149,7 +167,8 @@ export async function assertPosSellableCoverageConsistent(
 
 /**
  * Hard fail for broken projections / zero balances (Bliss-class).
- * Does not fail when stock sits on MAIN by explicit warehouse receive (transfer pending).
+ * Does not fail when stock sits on MAIN (transfer pending) or RETURN/DAMAGE/EXPIRED
+ * (customer return quarantine — not POS-sellable until putaway/transfer).
  */
 export async function assertPosSellableProjectionConsistent(
   conn: DbConn,
@@ -159,7 +178,9 @@ export async function assertPosSellableProjectionConsistent(
   if (!(await isMultistoreEnabled(conn))) return;
 
   const gaps = (await findPosSellableCoverageGaps(conn, productId)).filter(
-    (g) => g.reason === 'NO_LOT' || g.reason === 'SELLING_ZERO_NO_BALANCES',
+    (g) =>
+      g.reason === 'NO_LOT' ||
+      g.reason === 'SELLING_ZERO_NO_BALANCES',
   );
   if (gaps.length === 0) return;
 

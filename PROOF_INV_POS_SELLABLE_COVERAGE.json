@@ -1,8 +1,8 @@
 {
   "feature": "INV_POS_SELLABLE_COVERAGE",
   "verdict": "PASS",
-  "passed": 8,
-  "total": 8,
+  "passed": 9,
+  "total": 9,
   "gates": [
     {
       "id": "RESOLVE_DEFAULT_SELLING",
@@ -27,7 +27,12 @@
     {
       "id": "COVERAGE_REASONS",
       "ok": true,
-      "detail": "INV-POS gap detector + projection assert exist"
+      "detail": "INV-POS gap detector + quarantine reason + projection assert exist"
+    },
+    {
+      "id": "PROJECTION_ALLOWS_QUARANTINE",
+      "ok": true,
+      "detail": "projection hard-fail is NO_LOT / SELLING_ZERO_NO_BALANCES only"
     },
     {
       "id": "COUPLING_WIRES_POS",
@@ -45,5 +50,5 @@
       "detail": "Goods Receipt default destination is SELLING"
     }
   ],
-  "generatedAt": "2026-08-27T21:51:41.046Z"
+  "generatedAt": "2026-09-03T20:52:16.595Z"
 }

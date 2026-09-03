@@ -36,6 +36,9 @@ export async function findWarehouseLayerMismatches(
         productFilter = `AND pl.product_id = $1`;
     }
 
+    // SSOT is per inventory_batch: SUM(balances across all product_lots for that batch)
+    // must equal batch.remaining_quantity. Never compare one orphan projection row alone —
+    // heal scripts may have created MAIN-{id} while upsert used batch_number MAIN.
     const result = await client.query<{
         product_id: string;
         product_lot_id: string;
@@ -46,19 +49,20 @@ export async function findWarehouseLayerMismatches(
     }>(
         `SELECT
            pl.product_id,
-           pl.id AS product_lot_id,
-           pl.lot_number,
+           (array_agg(pl.id ORDER BY pl.created_at ASC))[1] AS product_lot_id,
+           (array_agg(pl.lot_number ORDER BY pl.created_at ASC))[1] AS lot_number,
            pl.inventory_batch_id,
            COALESCE(SUM(ib.quantity_on_hand), 0)::numeric AS balance_total,
-           COALESCE(b.remaining_quantity, 0)::numeric AS batch_remaining
+           COALESCE(MAX(b.remaining_quantity), 0)::numeric AS batch_remaining
          FROM product_lots pl
          LEFT JOIN inventory_balances ib ON ib.product_lot_id = pl.id
          LEFT JOIN inventory_batches b ON b.id = pl.inventory_batch_id
          WHERE pl.inventory_batch_id IS NOT NULL
            ${productFilter}
-         GROUP BY pl.id, pl.product_id, pl.lot_number, pl.inventory_batch_id, b.remaining_quantity
+         GROUP BY pl.product_id, pl.inventory_batch_id
          HAVING ABS(
-           COALESCE(SUM(ib.quantity_on_hand), 0)::numeric - COALESCE(b.remaining_quantity, 0)::numeric
+           COALESCE(SUM(ib.quantity_on_hand), 0)::numeric
+           - COALESCE(MAX(b.remaining_quantity), 0)::numeric
          ) > ${WAREHOUSE_LAYER_TOLERANCE}`,
         params,
     );

@@ -1,0 +1,212 @@
+{
+  "feature": "WAREHOUSE_LAYER_POS_SELLABLE_SSOT",
+  "verdict": "PASS",
+  "passed": 16,
+  "total": 16,
+  "gates": [
+    {
+      "id": "COUPLING_GROUP_BY_BATCH",
+      "ok": true,
+      "detail": "findWarehouseLayerMismatches aggregates per batch (not orphan projection row)"
+    },
+    {
+      "id": "COUPLING_ALIGN_BY_BATCH",
+      "ok": true,
+      "detail": "alignBatchSubledgerToStoreBalances rebases batch from store balances"
+    },
+    {
+      "id": "COUPLING_ERR_CODE",
+      "ok": true,
+      "detail": "mismatch throws ERR_WAREHOUSE_LAYER_COUPLING and rolls back"
+    },
+    {
+      "id": "PROJECTION_BY_BATCH_ID",
+      "ok": true,
+      "detail": "upsertProjection updates existing row for inventory_batch_id before insert"
+    },
+    {
+      "id": "PROJECTION_NO_DUP_MAIN",
+      "ok": true,
+      "detail": "documents heal MAIN-{id} vs batch_number MAIN duplicate hazard"
+    },
+    {
+      "id": "GET_LOT_DETERMINISTIC",
+      "ok": true,
+      "detail": "getProductLotIdByBatchId is deterministic (oldest projection)"
+    },
+    {
+      "id": "SYNC_CALLS_COUPLING",
+      "ok": true,
+      "detail": "syncProductQuantity calls assertWarehouseLayerConsistent"
+    },
+    {
+      "id": "COUPLING_CALLS_POS_PROJECTION",
+      "ok": true,
+      "detail": "consistent layer then asserts POS projection"
+    },
+    {
+      "id": "REASON_QUARANTINE",
+      "ok": true,
+      "detail": "classifies RETURN/DAMAGE/EXPIRED as quarantine (not broken projection)"
+    },
+    {
+      "id": "PROJECTION_FILTER",
+      "ok": true,
+      "detail": "projection assert fails only NO_LOT / SELLING_ZERO_NO_BALANCES"
+    },
+    {
+      "id": "RETURN_PATH_USES_RETURN_STORE",
+      "ok": true,
+      "detail": "customer return lands on RETURN store via returnLot"
+    },
+    {
+      "id": "ADJUST_MULTISTORE",
+      "ok": true,
+      "detail": "adjustBatch delegates to adjustAtStore when multistore on"
+    },
+    {
+      "id": "ADJUST_ALIGN_BEFORE",
+      "ok": true,
+      "detail": "adjustAtStore aligns batch to balances before mutating"
+    },
+    {
+      "id": "ADJUST_IN_RETURN_LOT",
+      "ok": true,
+      "detail": "ADJUSTMENT_IN mutates via lotService.returnLot (projection + balance)"
+    },
+    {
+      "id": "BEHAVIOR_RETURN_CASE",
+      "ok": true,
+      "detail": "behavior test covers RETURN quarantine allow-path"
+    },
+    {
+      "id": "MULTISTORE_HELPER",
+      "ok": true,
+      "detail": "isMultistoreEnabled export present"
+    }
+  ],
+  "ssot": {
+    "batchSubledger": "inventory_batches.remaining_quantity",
+    "storeBalances": "SUM(inventory_balances.quantity_on_hand) per inventory_batch_id",
+    "projection": "product_lots keyed by inventory_batch_id (prefer existing; no MAIN vs MAIN-{id} dup)",
+    "posSellable": "SELLING store sellable qty; RETURN/DAMAGE/EXPIRED = quarantine not broken",
+    "syncHook": "syncProductQuantity → assertWarehouseLayerConsistent → assertPosSellableProjectionConsistent"
+  },
+  "liveProofScripts": {
+    "returnSku3273": true,
+    "adjustSku3730": true
+  },
+  "incidents": [
+    {
+      "id": "BLISS_SKU3273_RETURN",
+      "symptom": "POS sellable projection missing (syncProductQuantity …). SKU-3273: batch=1 (SELLING_ZERO_NO_BALANCES)",
+      "cause": "Customer return correctly parked qty on RETURN store; projection assert treated as broken",
+      "fix": "SELLING_ZERO_QUARANTINE_HAS excluded from hard-fail projection assert"
+    },
+    {
+      "id": "BLISS_SKU3730_ADJUST",
+      "symptom": "Warehouse inventory mismatch … Lot MAIN: balances=0, batch=14 (ERR_WAREHOUSE_LAYER_COUPLING)",
+      "cause": "upsertProjection inserted second product_lots row lot_number=MAIN while heal used MAIN-{id}",
+      "fix": "upsertProjection updates by inventory_batch_id; coupling groups by batch"
+    }
+  ],
+  "generatedAt": "2026-09-03T20:54:16.740Z",
+  "liveEvidence": {
+    "returnSku3273": {
+      "exitCode": 0,
+      "verdict": "PASS",
+      "result": {
+        "db": "pos_tenant_bliss_interior_ltd",
+        "productId": "67d3f2da-62e5-4416-b352-ccca5a32ceee",
+        "sku": "SKU-3273",
+        "steps": [
+          {
+            "step": "before",
+            "row": {
+              "sku": "SKU-3273",
+              "qoh": 0,
+              "batch_status": "DEPLETED",
+              "batch_qty": 0
+            }
+          },
+          {
+            "step": "restoreCustomerReturn",
+            "ok": true
+          },
+          {
+            "step": "after_sync",
+            "row": {
+              "qoh": 1,
+              "batch_status": "ACTIVE",
+              "batch_qty": 1
+            }
+          },
+          {
+            "step": "return_store_balance",
+            "rows": [
+              {
+                "code": "RETURN",
+                "qty": 1
+              }
+            ]
+          },
+          {
+            "step": "pos_gaps",
+            "gaps": [
+              {
+                "productId": "67d3f2da-62e5-4416-b352-ccca5a32ceee",
+                "sku": "SKU-3273",
+                "productName": "WOODEN BOTTLE&WINE GLASS HOLDER",
+                "inventoryBatchId": "07170a56-16d1-449b-8501-019c77491422",
+                "batchRemaining": 1,
+                "sellingSellable": 0,
+                "mainOnHand": 0,
+                "quarantineOnHand": 1,
+                "reason": "SELLING_ZERO_QUARANTINE_HAS"
+              }
+            ]
+          }
+        ],
+        "verdict": "PASS",
+        "rolledBack": true
+      }
+    },
+    "adjustSku3730": {
+      "exitCode": 0,
+      "verdict": "PASS",
+      "result": {
+        "db": "pos_tenant_bliss_interior_ltd",
+        "productId": "de04d835-0892-4477-a29a-e66aec097bb0",
+        "sku": "SKU-3730",
+        "steps": [
+          {
+            "step": "before",
+            "row": {
+              "batch_qty": 6,
+              "lot_count": 1,
+              "bal_total": 6
+            }
+          },
+          {
+            "step": "adjustAtStore",
+            "ok": true
+          },
+          {
+            "step": "after",
+            "row": {
+              "batch_qty": 14,
+              "lot_count": 1,
+              "lot_names": [
+                "MAIN-399acb3a1a"
+              ],
+              "bal_total": 14
+            }
+          }
+        ],
+        "verdict": "PASS",
+        "rolledBack": true
+      }
+    }
+  },
+  "liveVerdict": "PASS"
+}
