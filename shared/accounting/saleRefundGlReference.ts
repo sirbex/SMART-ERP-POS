@@ -8,7 +8,10 @@ export const SALE_REFUND_GL_REFERENCE = {
 } as const;
 
 export function assertSaleRefundGlReferenceTypesDistinct(): void {
-  if (SALE_REFUND_GL_REFERENCE.revenue === SALE_REFUND_GL_REFERENCE.inventory) {
+  // Compare as string so this remains a runtime safety net if constants are edited.
+  const revenue: string = SALE_REFUND_GL_REFERENCE.revenue;
+  const inventory: string = SALE_REFUND_GL_REFERENCE.inventory;
+  if (revenue === inventory) {
     throw new Error(
       'FATAL INV-GL-REFUND: revenue and inventory referenceType must differ ' +
         '(uq_ledger_transactions_reference)',
