@@ -2092,11 +2092,14 @@ export async function recordSaleRefundToGL(
     }
 
     // Post inventory-restoration journal (source: INVENTORY_MOVE) if applicable.
+    // referenceType MUST be SALE_REFUND_COGS (not SALE_REFUND): uq_ledger_transactions_reference
+    // is UNIQUE(ReferenceType, ReferenceId). Same pattern as SALE + SALE_COGS on the original sale.
+    // Bliss REF-2026-0005 failed with ERR_CONSTRAINT when both revenue + inventory used SALE_REFUND.
     if (inventoryEntries.length > 0) {
       const inventoryResult = await AccountingCore.createJournalEntry({
         entryDate: data.refundDate,
         description: `REFUND goods return: ${data.refundNumber} for Sale ${data.saleNumber}`,
-        referenceType: 'SALE_REFUND',
+        referenceType: 'SALE_REFUND_COGS',
         referenceId: data.refundId,
         referenceNumber: data.refundNumber,
         lines: inventoryEntries,
