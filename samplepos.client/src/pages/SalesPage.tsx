@@ -3,6 +3,11 @@ import Layout from '../components/Layout';
 import { useSales, useSalesSummary, useSalesSummaryByDate, useSalesByCashier } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import { shouldRestrictSalesToOwnUser, shouldLockSalesToBusinessDay } from '@shared/authorization/salesPolicy';
+import {
+  AGED_SALE_RETURN_DAYS,
+  canProcessAgedSaleReturn,
+  agedSaleReturnDeniedMessage,
+} from '@shared/authorization/agedSaleReturnPolicy';
 import { formatCurrency } from '../utils/currency';
 import { BUSINESS_TIMEZONE, getBusinessDate, formatTimestamp, formatTimestampDate } from '../utils/businessDate';
 import Decimal from 'decimal.js';
@@ -2192,12 +2197,31 @@ function PartialPaymentsView({ onSelectSale, startDate, endDate }: PartialPaymen
 
 // Sale Detail Modal Component with improved accessibility and design
 function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps) {
+  const { user } = useAuth();
   const canVoidSale = useBackendPermission('sales.void');
   const canRefundSale = useBackendPermission('sales.refund');
   const canExchangeSale = useBackendPermission('sales.exchange') || canRefundSale;
   const canReprintReceipt = useBackendPermission('sales.reprint');
   const canReassignCustomer = useBackendPermission('sales.reassign_customer');
   const canRestateTax = useBackendPermission('sales.tax_restatement');
+  const saleDateForAge = String(
+    (saleDetails as { saleDate?: string; sale_date?: string } | null)?.saleDate
+      ?? (saleDetails as { sale_date?: string } | null)?.sale_date
+      ?? (sale as { saleDate?: string; sale_date?: string }).saleDate
+      ?? (sale as { sale_date?: string }).sale_date
+      ?? '',
+  ).slice(0, 10);
+  const agedReturnGate = saleDateForAge
+    ? canProcessAgedSaleReturn({
+        saleDate: saleDateForAge,
+        asOfDate: getBusinessDate(),
+        actorRole: user?.role,
+      })
+    : { allowed: true, ageDays: 0, requiresAdmin: false };
+  const agedReturnBlocked = agedReturnGate.requiresAdmin && !agedReturnGate.allowed;
+  const agedReturnTitle = agedReturnBlocked
+    ? agedSaleReturnDeniedMessage(agedReturnGate.ageDays, AGED_SALE_RETURN_DAYS)
+    : undefined;
   const [saleDetails, setSaleDetails] = useState<SaleRow | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2798,9 +2822,17 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                   <>
                   {canExchangeSale && (
                   <button
-                    onClick={() => setShowExchangeModal(true)}
-                    title="Return wrong item(s) and sell the correct product with store credit (full ticket OK for single-item sales)."
-                    className="w-full sm:w-auto px-4 py-2 border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 transition-colors font-medium text-sm flex items-center justify-center gap-2"
+                    onClick={() => !agedReturnBlocked && setShowExchangeModal(true)}
+                    disabled={agedReturnBlocked}
+                    title={
+                      agedReturnTitle
+                      ?? 'Return wrong item(s) and sell the correct product with store credit (full ticket OK for single-item sales).'
+                    }
+                    className={`w-full sm:w-auto px-4 py-2 border rounded-lg transition-colors font-medium text-sm flex items-center justify-center gap-2 ${
+                      agedReturnBlocked
+                        ? 'border-gray-200 text-gray-400 cursor-not-allowed bg-gray-50'
+                        : 'border-indigo-300 text-indigo-700 hover:bg-indigo-50'
+                    }`}
                   >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
@@ -2810,15 +2842,28 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                   )}
                   {canRefundSale && (
                   <button
-                    onClick={() => setShowRefundModal(true)}
-                    title="Return items, restore stock, and issue a refund to the original payment method."
-                    className="w-full sm:w-auto px-4 py-2 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors font-medium text-sm flex items-center justify-center gap-2"
+                    onClick={() => !agedReturnBlocked && setShowRefundModal(true)}
+                    disabled={agedReturnBlocked}
+                    title={
+                      agedReturnTitle
+                      ?? 'Return items, restore stock, and issue a refund to the original payment method.'
+                    }
+                    className={`w-full sm:w-auto px-4 py-2 border rounded-lg transition-colors font-medium text-sm flex items-center justify-center gap-2 ${
+                      agedReturnBlocked
+                        ? 'border-gray-200 text-gray-400 cursor-not-allowed bg-gray-50'
+                        : 'border-amber-300 text-amber-700 hover:bg-amber-50'
+                    }`}
                   >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
                     </svg>
                     {(saleDetails?.status || sale.status) === 'PARTIALLY_RETURNED' ? 'Return More Items' : 'Return'}
                   </button>
+                  )}
+                  {agedReturnBlocked && (
+                    <span className="text-xs text-amber-700 self-center max-w-xs" title={agedReturnTitle}>
+                      Return/Exchange locked — sale older than {AGED_SALE_RETURN_DAYS} days (ADMIN only)
+                    </span>
                   )}
                   </>
                 )}

@@ -1998,6 +1998,12 @@ export async function recordSaleRefundToGL(
   txClient?: pg.PoolClient,
 ): Promise<string | undefined> {
   try {
+    const {
+      SALE_REFUND_GL_REFERENCE,
+      assertSaleRefundGlReferenceTypesDistinct,
+    } = await import('@shared/accounting/saleRefundGlReference.js');
+    assertSaleRefundGlReferenceTypesDistinct();
+
     const queryTarget = txClient || pool || globalPool;
 
     if (data.refundType === 'EXCHANGE') {
@@ -2080,7 +2086,7 @@ export async function recordSaleRefundToGL(
       const journalResult = await AccountingCore.createJournalEntry({
         entryDate: data.refundDate,
         description: `REFUND: ${data.refundNumber} for Sale ${data.saleNumber} — ${data.reason}`,
-        referenceType: 'SALE_REFUND',
+        referenceType: SALE_REFUND_GL_REFERENCE.revenue,
         referenceId: data.refundId,
         referenceNumber: data.refundNumber,
         lines: revenueEntries,
@@ -2099,7 +2105,7 @@ export async function recordSaleRefundToGL(
       const inventoryResult = await AccountingCore.createJournalEntry({
         entryDate: data.refundDate,
         description: `REFUND goods return: ${data.refundNumber} for Sale ${data.saleNumber}`,
-        referenceType: 'SALE_REFUND_COGS',
+        referenceType: SALE_REFUND_GL_REFERENCE.inventory,
         referenceId: data.refundId,
         referenceNumber: data.refundNumber,
         lines: inventoryEntries,

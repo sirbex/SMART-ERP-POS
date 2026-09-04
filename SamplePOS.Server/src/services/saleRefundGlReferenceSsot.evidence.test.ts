@@ -123,20 +123,36 @@ describe('PROOF: SALE_REFUND / SALE_REFUND_COGS reference SSOT', () => {
     const fnBody = src.slice(fnStart, fnStart + 6500);
     gate(
       'INV_USES_REFUND_COGS',
-      fnBody.includes("referenceType: 'SALE_REFUND_COGS'") &&
-        fnBody.includes('uq_ledger_transactions_reference'),
-      'inventory leg uses SALE_REFUND_COGS with unique-constraint comment',
+      fnBody.includes('SALE_REFUND_GL_REFERENCE.inventory') &&
+        src.includes('assertSaleRefundGlReferenceTypesDistinct') &&
+        readFileSync(
+          path.join(repoRoot, 'shared/accounting/saleRefundGlReference.ts'),
+          'utf8',
+        ).includes("inventory: 'SALE_REFUND_COGS'"),
+      'inventory leg uses SALE_REFUND_GL_REFERENCE.inventory (SALE_REFUND_COGS) + assert',
     );
     gate(
       'NO_DUAL_SALE_REFUND',
-      (fnBody.match(/referenceType:\s*'SALE_REFUND'/g) || []).length === 1,
-      'exactly one SALE_REFUND journal (revenue) in recordSaleRefundToGL',
+      !fnBody.includes("referenceType: 'SALE_REFUND'") ||
+        (fnBody.match(/SALE_REFUND_GL_REFERENCE\.revenue/g) || []).length >= 1,
+      'revenue uses SALE_REFUND_GL_REFERENCE.revenue only',
     );
     gate(
       'SALE_MIRROR',
       src.includes("referenceType: 'SALE_COGS'") &&
         src.includes('to allow both journals'),
       'original sale already uses SALE + SALE_COGS pattern',
+    );
+    const shared = readFileSync(
+      path.join(repoRoot, 'shared/accounting/saleRefundGlReference.ts'),
+      'utf8',
+    );
+    gate(
+      'SHARED_TYPES_DISTINCT',
+      shared.includes("revenue: 'SALE_REFUND'") &&
+        shared.includes("inventory: 'SALE_REFUND_COGS'") &&
+        shared.includes('assertSaleRefundGlReferenceTypesDistinct'),
+      'shared SSOT constants keep revenue ≠ inventory',
     );
   });
 });

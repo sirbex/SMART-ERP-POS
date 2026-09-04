@@ -1,0 +1,86 @@
+{
+  "feature": "AGED_SALE_RETURN_ADMIN_ONLY",
+  "verdict": "PASS",
+  "passed": 13,
+  "total": 13,
+  "gates": [
+    {
+      "id": "LIMIT_30",
+      "ok": true,
+      "detail": "days=30"
+    },
+    {
+      "id": "DAY_31_AGED",
+      "ok": true,
+      "detail": "31 days is aged"
+    },
+    {
+      "id": "DAY_30_NOT_AGED",
+      "ok": true,
+      "detail": "exactly 30 days still allowed for non-admin"
+    },
+    {
+      "id": "ADMIN_OK",
+      "ok": true,
+      "detail": "ADMIN"
+    },
+    {
+      "id": "SUPER_ADMIN_OK",
+      "ok": true,
+      "detail": "SUPER_ADMIN"
+    },
+    {
+      "id": "MANAGER_NOT_ADMIN",
+      "ok": true,
+      "detail": "MANAGER/CASHIER are not absolute admin"
+    },
+    {
+      "id": "CASHIER_AGED_DENY",
+      "ok": true,
+      "detail": "ageDays=74"
+    },
+    {
+      "id": "ADMIN_AGED_ALLOW",
+      "ok": true,
+      "detail": "ADMIN may return aged sales"
+    },
+    {
+      "id": "CASHIER_FRESH_ALLOW",
+      "ok": true,
+      "detail": "fresh sale"
+    },
+    {
+      "id": "SERVICE_USES_POLICY",
+      "ok": true,
+      "detail": "refundSale looks up users.role and applies aged policy"
+    },
+    {
+      "id": "EXCHANGE_USES_REFUND_SALE",
+      "ok": true,
+      "detail": "guided exchange goes through refundSale (same gate)"
+    },
+    {
+      "id": "UI_IMPORTS_POLICY",
+      "ok": true,
+      "detail": "SalesPage imports aged return policy"
+    },
+    {
+      "id": "UI_DISABLES_BUTTONS",
+      "ok": true,
+      "detail": "Return/Exchange disabled with ADMIN-only hint"
+    }
+  ],
+  "policy": {
+    "limitDays": 30,
+    "adminRoles": [
+      "ADMIN",
+      "SUPER_ADMIN"
+    ],
+    "errorCode": "ERR_REFUND_AGED_ADMIN_ONLY",
+    "enforcement": [
+      "salesService.refundSale",
+      "SalesPage Return/Exchange buttons"
+    ]
+  },
+  "generatedAt": "2026-09-04T04:51:25.165Z"
+}

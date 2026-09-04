@@ -24,6 +24,7 @@ import { ValidationError, BusinessError, NotFoundError } from '../../middleware/
 import logger from '../../utils/logger.js';
 import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
+import { assertAppliedEqualsRequested } from '@shared/domain/invoiceDepositPayment.js';
 import { SalesBusinessRules, InventoryBusinessRules } from '../../middleware/businessRules.js';
 import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
@@ -2161,6 +2162,7 @@ export const salesService = {
                 totalDepositsApplied: depositResult.totalApplied,
                 applicationsCount: depositResult.applications.length,
               });
+              assertAppliedEqualsRequested(depositResult.totalApplied, totalDepositAmount);
             } catch (depositError: unknown) {
               logger.error('Failed to apply customer deposits', {
                 saleId: sale.id,
@@ -3584,6 +3586,41 @@ export const salesService = {
       // Fiscal period guard — cannot refund sales in closed periods
       const saleDate = String(sale.sale_date).slice(0, 10);
       await checkAccountingPeriodOpen(client, saleDate);
+
+      // Aged sale return: > 30 days → ADMIN only (server authoritative)
+      {
+        const { getBusinessDate } = await import('../../utils/dateRange.js');
+        const {
+          canProcessAgedSaleReturn,
+          agedSaleReturnDeniedMessage,
+          ERR_REFUND_AGED_ADMIN_ONLY,
+          AGED_SALE_RETURN_DAYS,
+        } = await import('@shared/authorization/agedSaleReturnPolicy.js');
+        const roleRes = await client.query<{ role: string | null }>(
+          `SELECT role FROM users WHERE id = $1`,
+          [refundedById],
+        );
+        const actorRole = roleRes.rows[0]?.role ?? null;
+        const aged = canProcessAgedSaleReturn({
+          saleDate,
+          asOfDate: getBusinessDate(),
+          actorRole,
+        });
+        if (!aged.allowed) {
+          throw new BusinessError(
+            agedSaleReturnDeniedMessage(aged.ageDays, AGED_SALE_RETURN_DAYS),
+            ERR_REFUND_AGED_ADMIN_ONLY,
+            {
+              saleId,
+              saleDate,
+              ageDays: aged.ageDays,
+              limitDays: AGED_SALE_RETURN_DAYS,
+              actorRole,
+              requiresAdmin: true,
+            },
+          );
+        }
+      }
 
       // Validate reason
       if (!input.reason || input.reason.trim().length === 0) {

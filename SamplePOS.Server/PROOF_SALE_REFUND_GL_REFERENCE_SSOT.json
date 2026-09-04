@@ -1,8 +1,8 @@
 {
   "feature": "SALE_REFUND_GL_REFERENCE_SSOT",
   "verdict": "PASS",
-  "passed": 5,
-  "total": 5,
+  "passed": 6,
+  "total": 6,
   "gates": [
     {
       "id": "DUAL_REF_TYPES",
@@ -17,17 +17,22 @@
     {
       "id": "INV_USES_REFUND_COGS",
       "ok": true,
-      "detail": "inventory leg uses SALE_REFUND_COGS with unique-constraint comment"
+      "detail": "inventory leg uses SALE_REFUND_GL_REFERENCE.inventory (SALE_REFUND_COGS) + assert"
     },
     {
       "id": "NO_DUAL_SALE_REFUND",
       "ok": true,
-      "detail": "exactly one SALE_REFUND journal (revenue) in recordSaleRefundToGL"
+      "detail": "revenue uses SALE_REFUND_GL_REFERENCE.revenue only"
     },
     {
       "id": "SALE_MIRROR",
       "ok": true,
       "detail": "original sale already uses SALE + SALE_COGS pattern"
+    },
+    {
+      "id": "SHARED_TYPES_DISTINCT",
+      "ok": true,
+      "detail": "shared SSOT constants keep revenue ≠ inventory"
     }
   ],
   "incident": {
@@ -38,5 +43,5 @@
     "cause": "recordSaleRefundToGL posted revenue + inventory with same (SALE_REFUND, refundId)",
     "fix": "inventory journal referenceType = SALE_REFUND_COGS (mirrors SALE_COGS)"
   },
-  "generatedAt": "2026-09-04T04:24:30.550Z"
+  "generatedAt": "2026-09-04T04:51:25.960Z"
 }

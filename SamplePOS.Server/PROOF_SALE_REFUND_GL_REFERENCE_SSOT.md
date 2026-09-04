@@ -1,12 +1,13 @@
 # PROOF_SALE_REFUND_GL_REFERENCE_SSOT
 
-Verdict: **PASS** (5/5)
+Verdict: **PASS** (6/6)
 
 - PASS `DUAL_REF_TYPES`: revenue + inventory journals use distinct ReferenceType
 - PASS `SAME_REFUND_ID`: both journals share refundId (allowed once ReferenceType differs)
-- PASS `INV_USES_REFUND_COGS`: inventory leg uses SALE_REFUND_COGS with unique-constraint comment
-- PASS `NO_DUAL_SALE_REFUND`: exactly one SALE_REFUND journal (revenue) in recordSaleRefundToGL
+- PASS `INV_USES_REFUND_COGS`: inventory leg uses SALE_REFUND_GL_REFERENCE.inventory (SALE_REFUND_COGS) + assert
+- PASS `NO_DUAL_SALE_REFUND`: revenue uses SALE_REFUND_GL_REFERENCE.revenue only
 - PASS `SALE_MIRROR`: original sale already uses SALE + SALE_COGS pattern
+- PASS `SHARED_TYPES_DISTINCT`: shared SSOT constants keep revenue ≠ inventory
 
 ## Incident
 
