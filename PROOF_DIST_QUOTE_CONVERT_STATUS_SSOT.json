@@ -1,0 +1,44 @@
+{
+  "feature": "DIST_QUOTE_CONVERT_STATUS_SSOT",
+  "verdict": "PASS",
+  "passed": 5,
+  "total": 5,
+  "gates": [
+    {
+      "id": "POS_SET",
+      "ok": true,
+      "detail": "DRAFT,SENT,ACCEPTED"
+    },
+    {
+      "id": "UI_DRAFT_CONVERTIBLE",
+      "ok": true,
+      "detail": "UI shows Convert for DRAFT"
+    },
+    {
+      "id": "USES_POS_SET",
+      "ok": true,
+      "detail": "convertFromQuotation shares POS convertible statuses"
+    },
+    {
+      "id": "NO_DRAFT_BLOCK",
+      "ok": true,
+      "detail": "no longer blocks DRAFT-only path"
+    },
+    {
+      "id": "ALLOWS_DRAFT_MSG",
+      "ok": true,
+      "detail": "error message lists DRAFT"
+    }
+  ],
+  "incident": {
+    "tenant": "henber.wizarddigital-inv.com",
+    "quotationId": "2e9de83f-bcc0-4655-999a-e3594a9cab96",
+    "quoteNumber": "Q-2026-0299",
+    "status": "DRAFT",
+    "fulfillmentMode": "WHOLESALE",
+    "error": "ERR_DIST_QUOTE_STATUS",
+    "cause": "dist convert required ACCEPTED|SENT while UI/POS allow DRAFT",
+    "fix": "convertFromQuotation uses POS_CONVERTIBLE_QUOTE_STATUSES (DRAFT|SENT|ACCEPTED)"
+  },
+  "generatedAt": "2026-09-04T19:49:58.966Z"
+}

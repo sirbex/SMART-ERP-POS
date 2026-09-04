@@ -31,6 +31,7 @@ import { getBusinessDate } from '../../utils/dateRange.js';
 import { BusinessError, ConflictError, NotFoundError, ValidationError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 import { quotationRepository } from '../quotations/quotationRepository.js';
+import { POS_CONVERTIBLE_QUOTE_STATUSES } from '../sales/quoteConvertibilityGuard.js';
 
 const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -872,7 +873,8 @@ export async function getBackorders(pool: Pool, productId?: string) {
  *
  * Business rules:
  *   - Quotation must be WHOLESALE fulfillment_mode
- *   - Quotation must be in ACCEPTED status (not DRAFT, EXPIRED, CANCELLED, CONVERTED)
+ *   - Quotation must be convertible: DRAFT, SENT, or ACCEPTED
+ *     (same SSOT as POS retail quote conversion — not DRAFT-blocked)
  *   - ATP is checked and confirmed at conversion time
  *   - Quotation is marked as CONVERTED with reference to the new sales order
  */
@@ -897,12 +899,19 @@ export async function convertFromQuotation(
     );
   }
 
-  // Status check: must be ACCEPTED (or SENT if business allows)
-  if (quotation.status !== 'ACCEPTED' && quotation.status !== 'SENT') {
+  // Status check — same convertible set as POS / retail quote conversion (DRAFT|SENT|ACCEPTED).
+  // UI treats these as OPEN via normalizeStatus; rejecting DRAFT alone caused Henber Q-2026-0299 400s.
+  if (!(POS_CONVERTIBLE_QUOTE_STATUSES as readonly string[]).includes(quotation.status)) {
     throw new BusinessError(
       `Quotation ${quotation.quote_number} is ${quotation.status}. ` +
-      `Only ACCEPTED or SENT quotations can be converted.`,
-      'ERR_DIST_QUOTE_STATUS'
+      `Only DRAFT, SENT, or ACCEPTED quotations can be converted.`,
+      'ERR_DIST_QUOTE_STATUS',
+      {
+        quotationId,
+        quoteNumber: quotation.quote_number,
+        currentStatus: quotation.status,
+        allowedStatuses: [...POS_CONVERTIBLE_QUOTE_STATUSES],
+      },
     );
   }
 
