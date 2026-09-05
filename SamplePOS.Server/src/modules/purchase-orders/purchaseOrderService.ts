@@ -387,7 +387,13 @@ export const purchaseOrderService = {
     pool: Pool,
     page: number = 1,
     limit: number = 50,
-    filters?: { status?: string; supplierId?: string; sortBy?: string; sortOrder?: 'asc' | 'desc' }
+    filters?: {
+      status?: string;
+      supplierId?: string;
+      search?: string;
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
+    }
   ): Promise<{ pos: PurchaseOrder[]; total: number }> {
     const { healFullyReversedPurchaseOrdersToDraft } = await import('./poReceiptStatusSync.js');
     await healFullyReversedPurchaseOrdersToDraft(pool);

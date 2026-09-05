@@ -388,7 +388,13 @@ export const purchaseOrderRepository = {
     pool: Pool | PoolClient,
     page: number = 1,
     limit: number = 50,
-    filters?: { status?: string; supplierId?: string; sortBy?: string; sortOrder?: 'asc' | 'desc' }
+    filters?: {
+      status?: string;
+      supplierId?: string;
+      search?: string;
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
+    }
   ): Promise<{ pos: PurchaseOrder[]; total: number }> {
     const offset = (page - 1) * limit;
     const whereClauses: string[] = [];
@@ -413,6 +419,20 @@ export const purchaseOrderRepository = {
     if (filters?.supplierId) {
       whereClauses.push(`po.supplier_id = $${paramIndex++}`);
       values.push(filters.supplierId);
+    }
+
+    const search = filters?.search?.trim();
+    if (search) {
+      const searchParam = `%${search}%`;
+      whereClauses.push(
+        `(po.order_number ILIKE $${paramIndex} OR EXISTS (
+          SELECT 1 FROM suppliers s_search
+          WHERE s_search."Id" = po.supplier_id
+            AND s_search."CompanyName" ILIKE $${paramIndex}
+        ))`
+      );
+      values.push(searchParam);
+      paramIndex++;
     }
 
     // Default list hides cancelled POs; pass status=CANCELLED to audit voided orders.

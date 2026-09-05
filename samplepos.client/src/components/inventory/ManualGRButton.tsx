@@ -8,13 +8,16 @@ export default function ManualGRButton() {
 
   return (
     <>
-      <Button 
-        onClick={() => setOpen(true)} 
-        className="bg-primary hover:bg-primary/90 w-full sm:w-auto text-sm sm:text-base"
+      <Button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Create goods receipt manually"
+        className="inline-flex shrink-0 items-center justify-center gap-1.5 bg-primary hover:bg-primary/90 text-sm font-medium min-h-[var(--layout-touch-target)] px-3"
+        data-gr-manual-cta-btn="true"
       >
-        <Plus className="w-4 h-4 mr-2" />
-        <span className="hidden sm:inline">Create GR Manually</span>
-        <span className="inline sm:hidden">Manual GR</span>
+        <Plus className="w-4 h-4 shrink-0" aria-hidden />
+        <span className="hidden md:inline">+ Manual GR</span>
+        <span className="inline md:hidden">Manual</span>
       </Button>
 
       {open && <ManualGRModal open={open} onClose={() => setOpen(false)} />}

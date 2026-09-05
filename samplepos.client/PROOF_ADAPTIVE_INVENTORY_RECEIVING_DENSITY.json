@@ -1,0 +1,100 @@
+{
+  "proof": "ADAPTIVE_INVENTORY_RECEIVING_DENSITY",
+  "verdict": "PASS",
+  "generatedAt": "2026-09-05T11:49:51.599Z",
+  "passed": 18,
+  "total": 18,
+  "gates": [
+    {
+      "id": "HIDE_TITLE_PROP",
+      "ok": true,
+      "detail": "AdaptivePage exposes hideTitle for embedded workbenches"
+    },
+    {
+      "id": "DENSE_HEADER_COLUMN",
+      "ok": true,
+      "detail": "dense header stacks title then actions (no empty column beside tall CTAs)"
+    },
+    {
+      "id": "HUB_COMPACT_PAD",
+      "ok": true,
+      "detail": "Inventory hub uses tighter phone padding"
+    },
+    {
+      "id": "HUB_SUBTITLE_SM_ONLY",
+      "ok": true,
+      "detail": "hub subtitle hidden on phone"
+    },
+    {
+      "id": "WB_CHROME",
+      "ok": true,
+      "detail": "Receiving header compact on phone"
+    },
+    {
+      "id": "WB_TITLE_TABS_ROW",
+      "ok": true,
+      "detail": "Receipts/Returns tabs sit beside Receiving title — no empty header band"
+    },
+    {
+      "id": "EMBED_HIDE_TITLE",
+      "ok": true,
+      "detail": "embedded GR hides AdaptivePage title + uses pad-only SSOT"
+    },
+    {
+      "id": "NO_ALWAYS_ON_DATE_CARD",
+      "ok": true,
+      "detail": "no permanent on-canvas date filter card"
+    },
+    {
+      "id": "FILTERS_CLOSE_API",
+      "ok": true,
+      "detail": "date/status/billing in AdaptiveToolbar secondary with close()/Done; dense create-first"
+    },
+    {
+      "id": "BILLING_FACETS_ON_FILTERS_ROW",
+      "ok": true,
+      "detail": "billing chips live on AdaptiveToolbar facets row beside Filters (no 2×2 tower)"
+    },
+    {
+      "id": "CARD_ACTIONS_INLINE",
+      "ok": true,
+      "detail": "GR card taps to open detail — Finalize only as text link when needed"
+    },
+    {
+      "id": "DETAIL_META_DENSE",
+      "ok": true,
+      "detail": "GR detail meta uses AdaptiveMetaGrid (label|value same line on phone)"
+    },
+    {
+      "id": "COST_BASELINE_MORE",
+      "ok": true,
+      "detail": "cost baseline under AdaptiveToolbar More; Create CTAs on Filters row"
+    },
+    {
+      "id": "PRIMARY_CTAS_COMPACT",
+      "ok": true,
+      "detail": "primary actions densified: Manual GR + From PO (same toolbar row as facets)"
+    },
+    {
+      "id": "TOOLBAR_FACETS_SLOT",
+      "ok": true,
+      "detail": "create-first: facets share primary row with CTAs/Search — never a second tower"
+    },
+    {
+      "id": "FACET_CHIPS_HORIZONTAL",
+      "ok": true,
+      "detail": "AdaptiveFacetChips is content-sized horizontal scroll — never steals Search flex"
+    },
+    {
+      "id": "RETURNS_EMBED_HIDE_TITLE",
+      "ok": true,
+      "detail": "Returns embed uses hideTitle like Goods Receipts"
+    },
+    {
+      "id": "RETURNS_TOOLBAR_FACETS",
+      "ok": true,
+      "detail": "Returns uses AdaptiveToolbar + facets + More"
+    }
+  ],
+  "integrity": "Inventory Receiving phone density: densified hub + workbench, embedded hideTitle, AdaptiveToolbar Filters+billing facets, inline card actions, AdaptiveMetaGrid detail, AdaptivePage pad-only SSOT."
+}

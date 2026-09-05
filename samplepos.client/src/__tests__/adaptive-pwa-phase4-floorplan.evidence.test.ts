@@ -29,6 +29,11 @@ describe('Phase 4 floorplan wave 1 — Sales', () => {
     // Search still bound to existing state (same command path)
     expect(src).toContain('value={searchQuery}');
     expect(src).toContain('onChange={setSearchQuery}');
+    // Ops expense path — replace Export Report
+    expect(src).not.toContain('Export Report');
+    expect(src).toContain('data-sales-expense-cta="true"');
+    expect(src).toContain('CreateExpenseForm');
+    expect(src).toContain("['expenses.create']");
   });
 });
 

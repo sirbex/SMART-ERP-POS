@@ -21,9 +21,18 @@ export { AdaptiveActionBar } from './AdaptiveActionBar';
 export { AdaptiveReportSummary } from './AdaptiveReportSummary';
 export type { AdaptiveReportMetric } from './AdaptiveReportSummary';
 export { AdaptiveReportShell } from './AdaptiveReportShell';
+export { AdaptiveReportFilters } from './AdaptiveReportFilters';
 export { AdaptivePage } from './AdaptivePage';
 export { AdaptiveToolbar } from './AdaptiveToolbar';
 export { AdaptiveSearch } from './AdaptiveSearch';
+export { AdaptiveKpiStrip } from './AdaptiveKpiStrip';
+export type { AdaptiveKpiItem } from './AdaptiveKpiStrip';
+export { AdaptiveRowActions } from './AdaptiveRowActions';
+export type { AdaptiveRowAction, AdaptiveRowActionTone, AdaptiveRowActionAppearance } from './AdaptiveRowActions';
+export { AdaptiveFacetChips } from './AdaptiveFacetChips';
+export type { AdaptiveFacetChip } from './AdaptiveFacetChips';
+export { AdaptiveMetaGrid, AdaptiveMetaItem } from './AdaptiveMetaGrid';
+export { AdaptiveMoreMenu } from './AdaptiveMoreMenu';
 export { AdaptiveScanner } from './AdaptiveScanner';
 export { AdaptivePrintPreview } from './AdaptivePrintPreview';
 export {

@@ -1,16 +1,17 @@
-import { useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import {
   useAdaptiveLayoutOptional,
   useAdaptiveWorkspaceOptional,
 } from './AdaptiveAppShell';
 import { AdaptiveActionBar } from './AdaptiveActionBar';
+import { AdaptiveMoreMenu } from './AdaptiveMoreMenu';
 import {
   resolveFloorplanFromWorkspace,
   type AdaptivePageDensity,
 } from '../../lib/adaptiveFloorplan';
 
 type AdaptivePageProps = {
-  title: ReactNode;
+  title?: ReactNode;
   /** Short supporting line — hidden when disclosure is essentials unless forceDescription. */
   description?: ReactNode;
   forceDescription?: boolean;
@@ -20,8 +21,14 @@ type AdaptivePageProps = {
   primaryActions?: ReactNode;
   /** Secondary / advanced actions — collapsed behind More on essentials/balanced. */
   secondaryActions?: ReactNode;
-  /** Optional toolbar row under the header (search, filters). */
+  /** Optional toolbar (search, filters). */
   toolbar?: ReactNode;
+  /**
+   * Force toolbar beside the title (same header row from `md` up).
+   * Below md: title stacks above a full-width toolbar (no left dead column).
+   * Default: auto — inline when there is a title and no page-level primary/secondary actions.
+   */
+  toolbarInline?: boolean;
   children: ReactNode;
   /** Sticky/inline footer actions. */
   footer?: ReactNode;
@@ -29,11 +36,19 @@ type AdaptivePageProps = {
   className?: string;
   /** Tests / nested density override. */
   densityOverride?: AdaptivePageDensity;
+  /**
+   * When true, omit the title/description block (embedded workbench tabs already name the surface).
+   * Actions + toolbar still render.
+   */
+  hideTitle?: boolean;
 };
 
 /**
  * ERP page floorplan: title, progressive actions, toolbar slot, body, action bar.
  * Presentation only — commands stay in the parent (same APIs on every device).
+ *
+ * toolbarInline: title beside toolbar from `md` up; below that title stacks ABOVE
+ * a full-width toolbar (no left dead column / cramped right cluster).
  */
 export function AdaptivePage({
   title,
@@ -43,32 +58,44 @@ export function AdaptivePage({
   primaryActions,
   secondaryActions,
   toolbar,
+  toolbarInline,
   children,
   footer,
   footerPrimaryFab,
   className = '',
   densityOverride,
+  hideTitle = false,
 }: AdaptivePageProps) {
   const layout = useAdaptiveLayoutOptional();
   const workspace = useAdaptiveWorkspaceOptional();
   const floorplan = resolveFloorplanFromWorkspace(workspace, layout?.tier ?? 'desktop');
   const density = densityOverride ?? floorplan.pageDensity;
   const disclosure = floorplan.progressiveDisclosure;
-  const [moreOpen, setMoreOpen] = useState(false);
 
   const showDescription =
+    !hideTitle &&
     Boolean(description) &&
-    (forceDescription || disclosure !== 'essentials');
+    (forceDescription || (disclosure !== 'essentials' && density !== 'dense'));
+
+  const showTitleBlock = !hideTitle && Boolean(title || backLink || showDescription);
 
   const collapseSecondary =
     Boolean(secondaryActions) &&
     (disclosure === 'essentials' || disclosure === 'balanced');
 
+  const hasPageActions = Boolean(primaryActions || secondaryActions);
+
+  /** Title | toolbar on one row when no separate page CTAs (Products / catalog pattern). */
+  const inlineToolbar =
+    Boolean(toolbar) &&
+    (toolbarInline === true ||
+      (toolbarInline !== false && showTitleBlock && !hasPageActions));
+
   const pad =
     density === 'dense'
-      ? 'space-y-3'
+      ? 'space-y-2.5'
       : density === 'compact'
-        ? 'space-y-4'
+        ? 'space-y-3'
         : 'space-y-6';
 
   const titleSize =
@@ -78,69 +105,87 @@ export function AdaptivePage({
         ? 'text-xl font-semibold tracking-tight text-stone-900'
         : 'text-2xl font-semibold tracking-tight text-stone-900';
 
+  const showHeader =
+    showTitleBlock || hasPageActions || inlineToolbar;
+
   return (
     <div
       className={`${pad} ${className}`.trim()}
       data-adaptive-page="true"
       data-page-density={density}
       data-page-disclosure={disclosure}
+      data-page-hide-title={hideTitle ? 'true' : undefined}
+      data-page-toolbar-inline={inlineToolbar ? 'true' : undefined}
       data-workspace={workspace?.id}
     >
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          {backLink ? <div data-adaptive-page-back="true">{backLink}</div> : null}
-          <h1 className={titleSize}>{title}</h1>
-          {showDescription ? (
+      {showHeader ? (
+        <header
+          className={
+            inlineToolbar
+              ? 'flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:gap-3'
+              : density !== 'dense'
+                ? 'flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3'
+                : 'flex flex-col gap-2'
+          }
+          data-adaptive-page-header="true"
+        >
+          {showTitleBlock ? (
             <div
               className={
-                density === 'comfortable'
-                  ? 'text-sm text-stone-600'
-                  : 'text-xs text-stone-500'
+                inlineToolbar
+                  ? 'min-w-0 w-full shrink-0 space-y-0.5 md:w-auto'
+                  : 'min-w-0 flex-1 space-y-1'
               }
-              data-adaptive-page-description="true"
             >
-              {description}
+              {backLink ? <div data-adaptive-page-back="true">{backLink}</div> : null}
+              {title != null && title !== false ? <h1 className={titleSize}>{title}</h1> : null}
+              {showDescription ? (
+                <div
+                  className={
+                    density === 'comfortable'
+                      ? 'text-sm text-stone-600'
+                      : 'text-xs text-stone-500 leading-snug max-w-xs'
+                  }
+                  data-adaptive-page-description="true"
+                >
+                  {description}
+                </div>
+              ) : null}
             </div>
           ) : null}
-        </div>
 
-        {(primaryActions || secondaryActions) && (
-          <div
-            className="flex flex-wrap items-center gap-2 shrink-0"
-            data-adaptive-page-actions="true"
-          >
-            {primaryActions}
-            {collapseSecondary ? (
-              <div className="relative">
-                <button
-                  type="button"
-                  className="inline-flex items-center justify-center rounded-md border border-stone-200 bg-white px-3 text-sm font-medium text-stone-700 min-h-[var(--layout-touch-target)] hover:bg-stone-50"
-                  aria-expanded={moreOpen}
-                  aria-controls="adaptive-page-more"
-                  onClick={() => setMoreOpen((o) => !o)}
-                  data-adaptive-page-more-trigger="true"
+          {inlineToolbar ? (
+            <div
+              className="min-w-0 w-full md:flex-1 md:basis-[12rem]"
+              data-adaptive-page-toolbar="true"
+              data-toolbar-inline="true"
+            >
+              {toolbar}
+            </div>
+          ) : null}
+
+          {!inlineToolbar && hasPageActions ? (
+            <div
+              className="flex w-full flex-row flex-wrap items-center gap-2 sm:w-auto sm:justify-end shrink-0"
+              data-adaptive-page-actions="true"
+            >
+              {primaryActions}
+              {collapseSecondary ? (
+                <AdaptiveMoreMenu>{secondaryActions}</AdaptiveMoreMenu>
+              ) : (
+                <div
+                  className="flex flex-row flex-wrap items-center gap-2"
+                  data-adaptive-page-secondary="true"
                 >
-                  More
-                </button>
-                {moreOpen ? (
-                  <div
-                    id="adaptive-page-more"
-                    role="menu"
-                    className="absolute right-0 z-20 mt-1 min-w-[12rem] rounded-md border border-stone-200 bg-white p-2 shadow-sm"
-                    data-adaptive-page-more-panel="true"
-                  >
-                    <div className="flex flex-col gap-2">{secondaryActions}</div>
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              secondaryActions
-            )}
-          </div>
-        )}
-      </header>
+                  {secondaryActions}
+                </div>
+              )}
+            </div>
+          ) : null}
+        </header>
+      ) : null}
 
-      {toolbar ? (
+      {toolbar && !inlineToolbar ? (
         <div data-adaptive-page-toolbar="true">{toolbar}</div>
       ) : null}
 

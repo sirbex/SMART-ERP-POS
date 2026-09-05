@@ -12,9 +12,17 @@ interface MobileSortSelectProps {
   onFieldChange: (field: string) => void;
   onToggleOrder: () => void;
   className?: string;
+  /**
+   * bar — touch select under toolbar (legacy).
+   * menu — menuitems for AdaptiveMoreMenu (phone overflow SSOT; no blank band).
+   */
+  presentation?: 'bar' | 'menu';
 }
 
-/** Touch-friendly sort control for mobile card views (sm:hidden). */
+/**
+ * Mobile list sort — SSOT.
+ * Prefer presentation="menu" inside AdaptiveToolbar `more` (SAP/Square overflow).
+ */
 export function MobileSortSelect({
   sortField,
   sortOrder,
@@ -22,7 +30,36 @@ export function MobileSortSelect({
   onFieldChange,
   onToggleOrder,
   className = '',
+  presentation = 'bar',
 }: MobileSortSelectProps) {
+  if (presentation === 'menu') {
+    return (
+      <div className={`contents sm:hidden ${className}`.trim()} data-mobile-sort-menu="true">
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            role="menuitem"
+            aria-current={sortField === opt.value ? 'true' : undefined}
+            onClick={() => onFieldChange(opt.value)}
+            data-mobile-sort-field={opt.value}
+          >
+            {sortField === opt.value ? '✓ ' : ''}
+            Sort: {opt.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          role="menuitem"
+          onClick={onToggleOrder}
+          data-mobile-sort-order="true"
+        >
+          Order: {sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className={`flex gap-2 sm:hidden ${className}`}>
       <select

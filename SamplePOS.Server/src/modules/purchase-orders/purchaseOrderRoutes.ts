@@ -80,6 +80,7 @@ const ListPOsQuerySchema = z.object({
     .transform((val) => (val ? parseInt(val) : 50)),
   status: z.enum(['DRAFT', 'PENDING', 'COMPLETED', 'CANCELLED']).optional(),
   supplierId: z.string().uuid().optional(),
+  search: z.string().optional(),
   ...EnterpriseListQueryFields,
 });
 
@@ -202,6 +203,7 @@ export const purchaseOrderController = {
     const result = await purchaseOrderService.listPOs(pool, query.page, query.limit, {
       status: query.status,
       supplierId: query.supplierId,
+      search: query.search,
       sortBy: query.sortBy,
       sortOrder: query.sortOrder,
     });

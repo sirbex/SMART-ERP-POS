@@ -89,10 +89,20 @@ import { inventoryKeys } from '../../hooks/useInventory';
 import { DatePicker } from '../../components/ui/date-picker';
 import SlideDrawer from '../../components/ui/SlideDrawer';
 import {
+  AdaptiveFacetChips,
+  AdaptiveMetaGrid,
+  AdaptiveMetaItem,
   AdaptivePage,
+  AdaptiveRowActions,
   AdaptiveSearch,
   AdaptiveToolbar,
 } from '../../components/adaptive';
+import {
+  ADAPTIVE_PAGE_PAD_CLASS,
+  ADAPTIVE_TOOLBAR_CARD_CLASS,
+  ADAPTIVE_WORKLIST_DENSITY,
+  ADAPTIVE_WORKLIST_SEARCH_DEBOUNCE_MS,
+} from '../../lib/adaptiveDashboard';
 
 // Configure Decimal for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -390,9 +400,12 @@ export default function GoodsReceiptsPage() {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
-  // Debounce search (300ms)
+  // Debounce search (worklist SSOT)
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchTerm), 300);
+    const timer = setTimeout(
+      () => setDebouncedSearch(searchTerm.trim()),
+      ADAPTIVE_WORKLIST_SEARCH_DEBOUNCE_MS,
+    );
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
@@ -1362,205 +1375,307 @@ export default function GoodsReceiptsPage() {
     billingFilter && pagination?.total != null ? Number(pagination.total) : null;
 
   const renderGrActions = (gr: GRRow, layout: 'row' | 'stack' = 'row') => {
-    const viewBtn = (
-      <button
-        type="button"
-        onClick={() => handleViewDetails(gr)}
-        className="text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg px-3 transition-colors"
-      >
-        View details
-      </button>
-    );
-    const finalizeBtn = isGrReceivable(gr) && canFinalizeGR ? (
-      <button
-        type="button"
-        onClick={() => handleFinalize(gr.id)}
-        className="text-sm font-medium text-green-800 bg-green-50 hover:bg-green-100 rounded-lg px-3 transition-colors"
-      >
-        Finalize
-      </button>
-    ) : null;
+    const canFinalize = isGrReceivable(gr) && canFinalizeGR;
 
     if (layout === 'stack') {
+      // Phone card: tap opens detail — never a boxed View chip.
+      // Only surface Finalize (text link) when the GR is receivable.
+      if (!canFinalize) return null;
       return (
-        <ResponsiveActionBar>
-          {viewBtn}
-          {finalizeBtn}
-        </ResponsiveActionBar>
+        <div data-gr-card-actions="true">
+          <AdaptiveRowActions
+            presentationOverride="inline"
+            actions={[
+              {
+                id: 'finalize',
+                label: 'Finalize',
+                onClick: () => handleFinalize(gr.id),
+                tone: 'warning',
+                appearance: 'link',
+              },
+            ]}
+          />
+        </div>
       );
     }
 
     return (
       <div className="flex flex-row flex-wrap gap-2">
-        {viewBtn}
-        {finalizeBtn}
+        <AdaptiveRowActions
+          presentationOverride="inline"
+          actions={[
+            {
+              id: 'view',
+              label: 'View details',
+              onClick: () => handleViewDetails(gr),
+              tone: 'primary',
+              appearance: 'link',
+            },
+            ...(canFinalize
+              ? [
+                  {
+                    id: 'finalize',
+                    label: 'Finalize',
+                    onClick: () => handleFinalize(gr.id),
+                    tone: 'warning' as const,
+                    appearance: 'link' as const,
+                  },
+                ]
+              : []),
+          ]}
+        />
       </div>
     );
   };
 
   return (
-    <div className="p-4 sm:p-6">
+    <div data-gr-receiving-page="true">
       <AdaptivePage
-        title={embedded ? 'Receipts' : 'Goods Receipts'}
+        className={ADAPTIVE_PAGE_PAD_CLASS}
+        hideTitle={embedded}
+        title={embedded ? undefined : 'Goods Receipts'}
         description={
           embedded
-            ? 'Inward goods: receive stock, finalize, and create supplier bills. Use the Returns tab above for open RGRNs.'
+            ? undefined
             : 'Receiving workflow with batch creation and cost change alerts'
         }
-        primaryActions={
-          <div className="flex flex-col gap-3 w-full sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3">
-            <div className="flex flex-col gap-2 w-full sm:w-auto sm:flex-row sm:items-center">
-              <span className="text-sm text-gray-600 shrink-0">Cost variance baseline:</span>
-              <select
-                aria-label="Cost variance baseline"
-                title="Cost variance baseline"
-                className="w-full sm:w-auto border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[var(--layout-touch-target)]"
-                value={baseline}
-                onChange={(e) => setBaseline(e.target.value as 'PO' | 'PRODUCT')}
-              >
-                <option value="PO">PO Cost</option>
-                <option value="PRODUCT">Product Cost</option>
-              </select>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full sm:flex sm:w-auto sm:gap-2">
-              {canCreateGR && (
-                <div className="w-full sm:w-auto [&>button]:w-full sm:[&>button]:w-auto">
-                  <ManualGRButton />
-                </div>
-              )}
-              {canCreateGR && (
-                <button
-                  type="button"
-                  onClick={openCreateModal}
-                  className={`${mobileActionBtnClass} px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm flex min-h-[var(--layout-touch-target)]`}
-                >
-                  + Create from PO
-                </button>
-              )}
-            </div>
-          </div>
-        }
+        densityOverride={ADAPTIVE_WORKLIST_DENSITY}
+        toolbarInline={!embedded}
         toolbar={
-          <div className="bg-white rounded-lg border border-gray-200 p-4" data-gr-filters="true">
+          <div className={ADAPTIVE_TOOLBAR_CARD_CLASS} data-gr-filters="true">
             <AdaptiveToolbar
+              modeOverride="compact"
+              actionsBeforeLeading
               leading={
                 <AdaptiveSearch
                   value={searchTerm}
                   onChange={setSearchTerm}
                   placeholder="GRN, PO number, supplier..."
                   label="Search goods receipts"
+                  presentationOverride="compact"
+                />
+              }
+              facets={
+                <AdaptiveFacetChips
+                  aria-label="Billing status"
+                  items={[
+                    {
+                      id: 'all',
+                      label: 'All billing',
+                      tone: 'neutral',
+                      active: billingFilter === '',
+                      onSelect: () => {
+                        setBillingFilter('');
+                        setPage(1);
+                      },
+                    },
+                    {
+                      id: 'to-invoice',
+                      label:
+                        billingFilter === 'TO_INVOICE' && activeBillingTotal != null
+                          ? `To invoice (${activeBillingTotal})`
+                          : 'To invoice',
+                      tone: 'amber',
+                      active: billingFilter === 'TO_INVOICE',
+                      onSelect: () => {
+                        setBillingFilter('TO_INVOICE');
+                        setPage(1);
+                      },
+                    },
+                    {
+                      id: 'invoiced',
+                      label:
+                        billingFilter === 'INVOICED' && activeBillingTotal != null
+                          ? `Invoiced (${activeBillingTotal})`
+                          : 'Invoiced',
+                      tone: 'emerald',
+                      active: billingFilter === 'INVOICED',
+                      onSelect: () => {
+                        setBillingFilter('INVOICED');
+                        setPage(1);
+                      },
+                    },
+                    {
+                      id: 'reversed',
+                      label:
+                        billingFilter === 'REVERSED' && activeBillingTotal != null
+                          ? `Reversed (${activeBillingTotal})`
+                          : 'Reversed',
+                      tone: 'slate',
+                      active: billingFilter === 'REVERSED',
+                      onSelect: () => {
+                        setBillingFilter('REVERSED');
+                        setPage(1);
+                      },
+                    },
+                  ]}
                 />
               }
               secondaryLabel="Filters"
-              secondary={
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-[14rem]">
-                  <div>
-                    <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-2">
-                      Status
-                    </label>
-                    <select
-                      id="status-filter"
-                      value={statusFilter}
-                      onChange={(e) => {
-                        setStatusFilter(e.target.value);
-                        setPage(1);
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
-                    >
-                      <option value="">All Statuses</option>
-                      <option value="DRAFT">Draft</option>
-                      <option value="COMPLETED">Completed</option>
-                      <option value="CANCELLED">Cancelled</option>
-                    </select>
+              secondary={({ close }) => (
+                <div className="space-y-3 w-full" data-gr-filter-panel="true">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label htmlFor="grn-date-preset" className="block text-sm font-medium text-gray-700 mb-1">
+                        Date Range
+                      </label>
+                      <select
+                        id="grn-date-preset"
+                        value={dateRangePreset}
+                        onChange={(e) => {
+                          const preset = e.target.value as DateRangePreset;
+                          setDateRangePreset(preset);
+                          const range = getDateRange(preset);
+                          setStartDate(range.start);
+                          setEndDate(range.end);
+                          setPage(1);
+                          if (preset !== 'custom') close();
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                      >
+                        <option value="custom">All Dates</option>
+                        <option value="today">Today</option>
+                        <option value="yesterday">Yesterday</option>
+                        <option value="this_week">This Week</option>
+                        <option value="last_week">Last Week</option>
+                        <option value="this_month">This Month</option>
+                        <option value="last_month">Last Month</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-1">
+                        Status
+                      </label>
+                      <select
+                        id="status-filter"
+                        value={statusFilter}
+                        onChange={(e) => {
+                          setStatusFilter(e.target.value);
+                          setPage(1);
+                          close();
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                      >
+                        <option value="">All Statuses</option>
+                        <option value="DRAFT">Draft</option>
+                        <option value="COMPLETED">Completed</option>
+                        <option value="CANCELLED">Cancelled</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Start Date
+                      </label>
+                      <DatePicker
+                        value={startDate}
+                        onChange={(date) => {
+                          setStartDate(date);
+                          setDateRangePreset('custom');
+                          setPage(1);
+                        }}
+                        placeholder="Select start date"
+                        maxDate={endDate ? new Date(endDate) : undefined}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        End Date
+                      </label>
+                      <DatePicker
+                        value={endDate}
+                        onChange={(date) => {
+                          setEndDate(date);
+                          setDateRangePreset('custom');
+                          setPage(1);
+                        }}
+                        placeholder="Select end date"
+                        minDate={startDate ? new Date(startDate) : undefined}
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label htmlFor="billing-filter" className="block text-sm font-medium text-gray-700 mb-1">
+                        Supplier invoice
+                      </label>
+                      <select
+                        id="billing-filter"
+                        value={billingFilter}
+                        onChange={(e) => {
+                          setBillingFilter(e.target.value as '' | 'TO_INVOICE' | 'INVOICED' | 'REVERSED');
+                          setPage(1);
+                          close();
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                      >
+                        <option value="">All</option>
+                        <option value="TO_INVOICE">To invoice (not billed)</option>
+                        <option value="INVOICED">Invoiced (bill posted)</option>
+                        <option value="REVERSED">Reversed (uninvoiced undo)</option>
+                      </select>
+                    </div>
                   </div>
-                  <div>
-                    <label htmlFor="billing-filter" className="block text-sm font-medium text-gray-700 mb-2">
-                      Supplier invoice
-                    </label>
-                    <select
-                      id="billing-filter"
-                      value={billingFilter}
-                      onChange={(e) => {
-                        setBillingFilter(e.target.value as '' | 'TO_INVOICE' | 'INVOICED' | 'REVERSED');
-                        setPage(1);
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                  {dateRangePreset === 'custom' ? (
+                    <button
+                      type="button"
+                      onClick={() => close()}
+                      className="w-full rounded-md bg-stone-900 px-3 py-2 text-sm font-medium text-white min-h-[var(--layout-touch-target)]"
+                      data-gr-filters-done="true"
                     >
-                      <option value="">All</option>
-                      <option value="TO_INVOICE">To invoice (not billed)</option>
-                      <option value="INVOICED">Invoiced (bill posted)</option>
-                      <option value="REVERSED">Reversed (uninvoiced undo)</option>
-                    </select>
-                  </div>
+                      Done
+                    </button>
+                  ) : null}
                 </div>
+              )}
+              more={
+                <>
+                  <MobileSortSelect
+                    presentation="menu"
+                    sortField={sortField}
+                    sortOrder={sortOrder}
+                    options={mobileSortOptions}
+                    onFieldChange={handleColumnSort}
+                    onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+                  />
+                  <div data-gr-cost-baseline="true" className="px-2.5 py-2 space-y-1.5" onClick={(e) => e.stopPropagation()}>
+                    <label htmlFor="gr-cost-baseline" className="block text-xs font-medium text-stone-600">
+                      Cost variance baseline
+                    </label>
+                    <select
+                      id="gr-cost-baseline"
+                      aria-label="Cost variance baseline"
+                      title="Cost variance baseline"
+                      className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm"
+                      value={baseline}
+                      onChange={(e) => setBaseline(e.target.value as 'PO' | 'PRODUCT')}
+                    >
+                      <option value="PO">PO Cost</option>
+                      <option value="PRODUCT">Product Cost</option>
+                    </select>
+                  </div>
+                </>
               }
-            />
+            >
+              {canCreateGR ? (
+                <>
+                  <div className="shrink-0" data-gr-manual-cta="true">
+                    <ManualGRButton />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openCreateModal}
+                    aria-label="Create goods receipt from purchase order"
+                    className="inline-flex shrink-0 items-center justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 min-h-[var(--layout-touch-target)]"
+                    data-gr-create-from-po="true"
+                  >
+                    <span className="hidden md:inline">+ From PO</span>
+                    <span className="inline md:hidden">+ PO</span>
+                  </button>
+                </>
+              ) : null}
+            </AdaptiveToolbar>
           </div>
         }
       >
-      {/* Date filters remain on-canvas; search/status/billing live in AdaptiveToolbar */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6" data-gr-date-filters="true">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Date Range Preset */}
-          <div>
-            <label htmlFor="grn-date-preset" className="block text-sm font-medium text-gray-700 mb-2">
-              Date Range
-            </label>
-            <select
-              id="grn-date-preset"
-              value={dateRangePreset}
-              onChange={(e) => {
-                const preset = e.target.value as DateRangePreset;
-                setDateRangePreset(preset);
-                const range = getDateRange(preset);
-                setStartDate(range.start);
-                setEndDate(range.end);
-              }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
-            >
-              <option value="custom">All Dates</option>
-              <option value="today">Today</option>
-              <option value="yesterday">Yesterday</option>
-              <option value="this_week">This Week</option>
-              <option value="last_week">Last Week</option>
-              <option value="this_month">This Month</option>
-              <option value="last_month">Last Month</option>
-            </select>
-          </div>
-
-          {/* Start Date */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Start Date
-            </label>
-            <DatePicker
-              value={startDate}
-              onChange={(date) => {
-                setStartDate(date);
-                setDateRangePreset('custom');
-              }}
-              placeholder="Select start date"
-              maxDate={endDate ? new Date(endDate) : undefined}
-            />
-          </div>
-
-          {/* End Date */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              End Date
-            </label>
-            <DatePicker
-              value={endDate}
-              onChange={(date) => {
-                setEndDate(date);
-                setDateRangePreset('custom');
-              }}
-              placeholder="Select end date"
-              minDate={startDate ? new Date(startDate) : undefined}
-            />
-          </div>
-        </div>
-      </div>
+      {/* Filters + billing facets live in AdaptiveToolbar */}
 
       {/* Loading State */}
       {isLoading && (
@@ -1579,94 +1694,65 @@ export default function GoodsReceiptsPage() {
       {/* Goods Receipts Table */}
       {!isLoading && !error && (
         <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-gray-100">
-          {/* Quick billing lane filters (SAP/Odoo) */}
-          <div className="px-4 sm:px-6 py-3 border-b border-gray-100 bg-gray-50/80 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="grid grid-cols-1 min-[400px]:grid-cols-2 sm:grid-cols-4 gap-2 sm:flex sm:flex-wrap">
-              <button
-                type="button"
-                onClick={() => { setBillingFilter(''); setPage(1); }}
-                className={`w-full sm:w-auto px-3 py-2 text-xs font-medium rounded-lg transition-colors ${billingFilter === '' ? 'bg-gray-800 text-white' : 'bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-100'}`}
-              >
-                All billing
-              </button>
-              <button
-                type="button"
-                onClick={() => { setBillingFilter('TO_INVOICE'); setPage(1); }}
-                className={`w-full sm:w-auto px-3 py-2 text-xs font-medium rounded-lg transition-colors ${billingFilter === 'TO_INVOICE' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-900 ring-1 ring-amber-200 hover:bg-amber-100'}`}
-              >
-                To invoice
-                {billingFilter === 'TO_INVOICE' && activeBillingTotal != null
-                  ? ` (${activeBillingTotal})`
-                  : ''}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setBillingFilter('INVOICED'); setPage(1); }}
-                className={`w-full sm:w-auto px-3 py-2 text-xs font-medium rounded-lg transition-colors ${billingFilter === 'INVOICED' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100'}`}
-              >
-                Invoiced
-                {billingFilter === 'INVOICED' && activeBillingTotal != null
-                  ? ` (${activeBillingTotal})`
-                  : ''}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setBillingFilter('REVERSED'); setPage(1); }}
-                className={`w-full sm:w-auto px-3 py-2 text-xs font-medium rounded-lg transition-colors ${billingFilter === 'REVERSED' ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-800 ring-1 ring-slate-200 hover:bg-slate-200'}`}
-              >
-                Reversed
-                {billingFilter === 'REVERSED' && activeBillingTotal != null
-                  ? ` (${activeBillingTotal})`
-                  : ''}
-              </button>
-            </div>
-            <p className="text-xs text-gray-500 leading-relaxed max-w-xl hidden lg:block">
-              <span className="font-medium text-gray-600">Receipt status</span> = physical receipt.
-              {' '}<span className="font-medium text-gray-600">Supplier invoice</span> = billed in AP.
-            </p>
-          </div>
-          <MobileSortSelect
-            sortField={sortField}
-            sortOrder={sortOrder}
-            options={mobileSortOptions}
-            onFieldChange={handleColumnSort}
-            onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
-          />
-
+          <p className="hidden lg:block px-4 lg:px-6 pt-3 text-xs text-gray-500 leading-relaxed">
+            <span className="font-medium text-gray-600">Receipt status</span> = physical receipt.
+            {' '}<span className="font-medium text-gray-600">Supplier invoice</span> = billed in AP.
+          </p>
           {/* Mobile card list */}
           <div className="md:hidden divide-y divide-gray-100">
             {displayGoodsReceipts.length === 0 ? (
               <p className="px-4 py-12 text-center text-gray-500 text-sm">No goods receipts found</p>
             ) : (
-              displayGoodsReceipts.map((gr: GRRow) => (
-                <MobileListCard key={gr.id}>
-                  <div className="flex items-start justify-between gap-3 min-w-0">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-gray-900 truncate">
-                        {gr.grNumber || gr.receiptNumber || gr.receipt_number}
-                      </p>
-                      <p className="text-sm text-gray-600 truncate">{gr.supplierName || gr.supplier_name || '—'}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        PO {gr.poNumber || gr.po_number || '—'} · {formatDisplayDate(gr.receivedDate || gr.received_date)}
-                      </p>
+              displayGoodsReceipts.map((gr: GRRow) => {
+                const cardActions = renderGrActions(gr, 'stack');
+                return (
+                <MobileListCard key={gr.id} className="gap-1.5">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    data-gr-card-open="true"
+                    className="min-w-0 cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                    onClick={() => handleViewDetails(gr)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleViewDetails(gr);
+                      }
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-2 min-w-0">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-gray-900 truncate">
+                          {gr.grNumber || gr.receiptNumber || gr.receipt_number}
+                        </p>
+                        <p className="text-sm text-gray-600 truncate">{gr.supplierName || gr.supplier_name || '—'}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          PO {gr.poNumber || gr.po_number || '—'} · {formatDisplayDate(gr.receivedDate || gr.received_date)}
+                        </p>
+                      </div>
+                      <div className="shrink-0 flex flex-col items-end gap-1">
+                        <GrReceiptStatusBadge
+                          status={gr.status}
+                          isReversed={gr.isReversed ?? gr.is_reversed}
+                        />
+                      </div>
                     </div>
-                    <div className="shrink-0 pt-0.5">
-                      <GrReceiptStatusBadge
-                        status={gr.status}
+                    <div className="mt-1.5 min-w-0">
+                      <GrBillingStatusBadge
+                        variant="card"
+                        receiptStatus={gr.status}
+                        billingStatus={gr.billingStatus || gr.billing_status}
+                        supplierBillNumber={gr.supplierBillNumber || gr.supplier_bill_number}
                         isReversed={gr.isReversed ?? gr.is_reversed}
                       />
                     </div>
                   </div>
-                  <GrBillingStatusBadge
-                    variant="card"
-                    receiptStatus={gr.status}
-                    billingStatus={gr.billingStatus || gr.billing_status}
-                    supplierBillNumber={gr.supplierBillNumber || gr.supplier_bill_number}
-                    isReversed={gr.isReversed ?? gr.is_reversed}
-                  />
-                  {renderGrActions(gr, 'stack')}
+                  {cardActions ? (
+                    <div className="flex justify-end">{cardActions}</div>
+                  ) : null}
                 </MobileListCard>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -1789,31 +1875,21 @@ export default function GoodsReceiptsPage() {
           transactional
           guardLabel="Goods receipt details"
         >
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Received Date</label>
-                  <p className="text-gray-900">
+              <div data-gr-detail-meta="true">
+                <AdaptiveMetaGrid className="mb-4">
+                  <AdaptiveMetaItem label="Received Date">
                     {formatDisplayDate(selectedGR.receivedDate || selectedGR.received_date)}
-                  </p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Status</label>
-                  <div className="mt-1">
+                  </AdaptiveMetaItem>
+                  <AdaptiveMetaItem label="Status">
                     <GrReceiptStatusBadge status={selectedGR.status} isReversed={isGrReversed} />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Received By</label>
-                  <p className="text-gray-900">
+                  </AdaptiveMetaItem>
+                  <AdaptiveMetaItem label="Received By">
                     {selectedGR.receivedByName || selectedGR.received_by_name || '-'}
-                  </p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Delivery Note</label>
-                  <p className="text-gray-900">
+                  </AdaptiveMetaItem>
+                  <AdaptiveMetaItem label="Delivery Note">
                     {selectedGR.supplierDeliveryNote || selectedGR.supplier_delivery_note || '-'}
-                  </p>
-                </div>
+                  </AdaptiveMetaItem>
+                </AdaptiveMetaGrid>
               </div>
 
               {selectedGR.notes && (
@@ -1872,8 +1948,8 @@ export default function GoodsReceiptsPage() {
 
               {/* Items Table */}
               <div className="mb-6">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
+                <div className="flex flex-col gap-2 mb-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
                     <h4 className="text-lg font-semibold text-gray-900">Items</h4>
                     {selectedGR.status === 'DRAFT' && (
                       <p className="text-xs text-gray-500 mt-0.5">
@@ -1882,7 +1958,7 @@ export default function GoodsReceiptsPage() {
                       </p>
                     )}
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col gap-2 w-full sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
                     {selectedGR.status === 'DRAFT' && isFromPO && (
                       <div className="flex items-center gap-2">
                         <button
@@ -2054,20 +2130,27 @@ export default function GoodsReceiptsPage() {
                       {reversedByRgrnNumber ? ` (${reversedByRgrnNumber})` : ''}. Amounts below are historical only.
                     </p>
                   ) : null}
-                  <div className={`grid grid-cols-2 gap-4 ${isGrReversed ? 'opacity-60' : ''}`}>
-                    <div className="flex items-center justify-between bg-white rounded-md px-3 py-2 border">
-                      <div>
-                        <span className="text-xs text-slate-500">DR</span>
-                        <span className="ml-2 text-sm font-medium text-slate-900">Inventory (1300)</span>
+                  <div
+                    className={`grid grid-cols-1 min-[480px]:grid-cols-2 gap-2 ${isGrReversed ? 'opacity-60' : ''}`}
+                    data-gr-gl-preview="true"
+                  >
+                    <div className="flex flex-col gap-1 bg-white rounded-md px-3 py-2.5 border min-w-0">
+                      <div className="text-xs text-slate-500 truncate">
+                        <span className="font-semibold text-slate-600">DR</span>
+                        {' '}Inventory (1300)
                       </div>
-                      <span className="text-sm font-bold text-green-700">{formatCurrency(accountingPreview)}</span>
+                      <span className="text-base sm:text-sm font-bold text-green-700 tabular-nums">
+                        {formatCurrency(accountingPreview)}
+                      </span>
                     </div>
-                    <div className="flex items-center justify-between bg-white rounded-md px-3 py-2 border">
-                      <div>
-                        <span className="text-xs text-slate-500">CR</span>
-                        <span className="ml-2 text-sm font-medium text-slate-900">Goods Received Not Invoiced (2200)</span>
+                    <div className="flex flex-col gap-1 bg-white rounded-md px-3 py-2.5 border min-w-0">
+                      <div className="text-xs text-slate-500 truncate" title="Goods Received Not Invoiced (2200)">
+                        <span className="font-semibold text-slate-600">CR</span>
+                        {' '}GRNI (2200)
                       </div>
-                      <span className="text-sm font-bold text-red-700">{formatCurrency(accountingPreview)}</span>
+                      <span className="text-base sm:text-sm font-bold text-red-700 tabular-nums">
+                        {formatCurrency(accountingPreview)}
+                      </span>
                     </div>
                   </div>
 
@@ -2134,15 +2217,16 @@ export default function GoodsReceiptsPage() {
                 </div>
               )}
 
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-3">
+              <div className="flex flex-col gap-3 w-full" data-gr-detail-chrome="true">
+                <div className="flex flex-col gap-2 w-full min-[400px]:flex-row min-[400px]:flex-wrap min-[400px]:items-center">
                   <button
+                    type="button"
                     onClick={() => handleExportGRPDF(selectedGR, items)}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                    className={`${mobileActionBtnClass} px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex gap-2`}
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
-                      className="h-4 w-4"
+                      className="h-4 w-4 shrink-0"
                       fill="none"
                       viewBox="0 0 24 24"
                       stroke="currentColor"
@@ -2156,15 +2240,17 @@ export default function GoodsReceiptsPage() {
                     </svg>
                     Export PDF
                   </button>
-                  <DocumentFlowButton entityType="GOODS_RECEIPT" entityId={selectedGR.id} size="sm" />
+                  <div className="w-full min-[400px]:w-auto [&>button]:w-full min-[400px]:[&>button]:w-auto">
+                    <DocumentFlowButton entityType="GOODS_RECEIPT" entityId={selectedGR.id} size="sm" />
+                  </div>
                 </div>
                 {selectedGR.status === 'CANCELLED' && (
-                  <p className="text-sm text-gray-600 mb-3">
+                  <p className="text-sm text-gray-600">
                     This goods receipt was cancelled and cannot be posted to inventory.
                   </p>
                 )}
                 {selectedGR.status === 'DRAFT' && linkedPoStatus === 'CANCELLED' && (
-                  <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                  <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                     The linked purchase order is cancelled. Receiving is blocked (open receipt cancelled with the PO).
                   </p>
                 )}
@@ -2172,13 +2258,13 @@ export default function GoodsReceiptsPage() {
                   linkedPoStatus &&
                   linkedPoStatus !== 'CANCELLED' &&
                   !poAllowsGoodsReceiptFinalize(linkedPoStatus) && (
-                  <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                  <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                     Purchase order is <strong>{linkedPoStatus}</strong> — submit and send it to the supplier before receiving.
                     After a full reverse the PO returns to Draft; Finalize stays blocked until that cycle is open again.
                   </p>
                 )}
                 {selectedGR.status === 'DRAFT' && (
-                  <ResponsiveActionBar divider={false} className="sm:flex-row-reverse">
+                  <ResponsiveActionBar divider={false} adaptiveCollapse={false} className="sm:flex-row-reverse">
                     {canFinalizeGR && canReceiveThisGR && (
                       <button
                         onClick={() => handleFinalize(selectedGR.id)}
@@ -2206,9 +2292,9 @@ export default function GoodsReceiptsPage() {
                   </ResponsiveActionBar>
                 )}
                 {isGoodsReceiptPosted(selectedGR.status) && (
-                  <div className="flex flex-col gap-2 w-full">
+                  <div className="flex flex-col gap-2 w-full min-w-0">
                     {isGrReversed && (
-                      <div className="text-sm rounded-lg border border-rose-300 bg-rose-50 text-rose-900 px-3 py-2">
+                      <div className="text-sm rounded-lg border border-rose-300 bg-rose-50 text-rose-900 px-3 py-2 leading-snug">
                         <span className="font-semibold">Reversed (counter-document).</span>
                         {' '}Receipt status stays <strong>Completed</strong> for audit
                         {reversedByRgrnNumber ? (
@@ -2234,7 +2320,7 @@ export default function GoodsReceiptsPage() {
                       });
                       if (isGrReversed && postedReturns.length > 0) {
                         return (
-                          <div className="text-sm rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-900 px-3 py-2">
+                          <div className="text-sm rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-900 px-3 py-2 leading-snug">
                             <span className="font-semibold">Reversal complete — no credit note needed.</span>
                             {' '}
                             Stock and GR/IR were cleared when{' '}
@@ -2245,7 +2331,7 @@ export default function GoodsReceiptsPage() {
                       }
                       if (uninvoicedPosted.length > 0) {
                         return (
-                          <div className="text-sm rounded-lg border border-slate-200 bg-slate-50 text-slate-800 px-3 py-2">
+                          <div className="text-sm rounded-lg border border-slate-200 bg-slate-50 text-slate-800 px-3 py-2 leading-snug">
                             <span className="font-semibold">No credit note needed.</span>
                             {' '}
                             {supplierReturnActionLabel({
@@ -2319,7 +2405,7 @@ export default function GoodsReceiptsPage() {
                         </div>
                       </div>
                     )}
-                    <ResponsiveActionBar divider={false}>
+                    <ResponsiveActionBar divider={false} adaptiveCollapse={false}>
                     {canReverseUninvoiced && !isGrReversed && (
                       <button
                         type="button"
@@ -2516,7 +2602,7 @@ export default function GoodsReceiptsPage() {
           cancellable={!reverseSubmitting}
           guardLabel="Reverse goods receipt"
           footer={
-            <ResponsiveActionBar divider={false} className="sm:flex-row-reverse">
+            <ResponsiveActionBar divider={false} adaptiveCollapse={false} className="sm:flex-row-reverse">
               <button
                 type="button"
                 onClick={handleSubmitReverseUninvoiced}
@@ -2573,7 +2659,7 @@ export default function GoodsReceiptsPage() {
           cancellable={false}
           guardLabel="Return goods to supplier"
           footer={
-            <ResponsiveActionBar divider={false} className="sm:flex-row-reverse">
+            <ResponsiveActionBar divider={false} adaptiveCollapse={false} className="sm:flex-row-reverse">
               <button
                 onClick={handleSubmitReturn}
                 disabled={

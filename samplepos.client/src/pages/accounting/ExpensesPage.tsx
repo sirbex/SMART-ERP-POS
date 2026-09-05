@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
-import { Plus, Download, FileText, Eye, CheckCircle, XCircle, Send, DollarSign, Wallet, Loader2, BarChart3 } from 'lucide-react';
+import { Plus, FileText, Eye, CheckCircle, XCircle, Send, DollarSign, Wallet, Loader2, BarChart3 } from 'lucide-react';
 import { useExpenses, useSubmitExpense, useApproveExpense, useRejectExpense, useMarkAsPaid, useDeleteExpense, usePaymentAccounts, useExpenseCategories, useExpenseStaffOptions } from '../../hooks/useExpenses';
 import { ExpenseFilter, Expense } from '@shared/types/expense';
 import { Button } from '@/components/ui/button';
@@ -88,6 +88,7 @@ const ExpensesPage: React.FC = () => {
   const canCreateExpense = useCanAccess([], ['expenses.create']);
   const canApproveExpense = useCanAccess([], ['expenses.approve']);
   const canDeleteExpense = useCanAccess([], ['expenses.delete']);
+  const canViewExpenseReports = useCanAccess([], ['reports.read', 'reports.financial_view', 'expenses.read']);
 
   // Action mutations
   const submitMutation = useSubmitExpense();
@@ -223,16 +224,14 @@ const ExpensesPage: React.FC = () => {
       description="Create expense vouchers for approval, then mark them paid from bank or cash. Daily staff transport and similar operating payouts go here (e.g. Employee Allowances category) — not HR payroll. Spending from the petty float belongs under Banking → Petty cash."
       primaryActions={
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <Link to="/reports/expenses">
-            <Button variant="outline" className="flex items-center gap-2 min-h-[var(--layout-touch-target)]">
-              <BarChart3 className="h-4 w-4" />
-              View Reports
-            </Button>
-          </Link>
-          <Button variant="outline" className="flex items-center gap-2 min-h-[var(--layout-touch-target)]">
-            <Download className="h-4 w-4" />
-            Export
-          </Button>
+          {canViewExpenseReports ? (
+            <Link to="/reports/expenses">
+              <Button variant="outline" className="flex items-center gap-2 min-h-[var(--layout-touch-target)]">
+                <BarChart3 className="h-4 w-4" />
+                View Reports
+              </Button>
+            </Link>
+          ) : null}
           {canCreateExpense && (
             <Button
               onClick={() => setIsCreateModalOpen(true)}

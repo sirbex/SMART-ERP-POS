@@ -14,6 +14,7 @@ import { useRestaurantModeForRouting } from './hooks/useRestaurantEnabled';
 import { RestaurantModeBoot } from './components/auth/RestaurantModeBoot';
 
 // Layouts stay static (small, shared across routes)
+import Layout from './components/Layout';
 import InventoryLayout from './components/InventoryLayout';
 import { StoreNetworkStoresRedirect } from './components/inventory/StoreNetworkLayout';
 import { StoreNetworkSection } from './components/inventory/StoreNetworkSection';
@@ -796,6 +797,18 @@ function App() {
                   {/* Removed duplicates — redirect to canonical pages */}
                   <Route path="/accounting/customer-financial" element={<Navigate to="/accounting/aged-balances" replace />} />
                   <Route path="/accounting/invoice-integration" element={<Navigate to="/accounting/general-ledger" replace />} />
+                  {/* Ops expenses — no accounting feature lock (cashiers / sales with expenses.*). */}
+                  <Route
+                    path="/expenses"
+                    element={
+                      <ProtectedRoute requiredPermissions={['expenses.read', 'expenses.create']}>
+                        <Layout>
+                          <ExpensesPage />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  {/* Accounting module expenses — full accounting chrome + feature flag. */}
                   <Route
                     path="/accounting/expenses"
                     element={

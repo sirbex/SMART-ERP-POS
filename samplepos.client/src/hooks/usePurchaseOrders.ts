@@ -27,6 +27,7 @@ export function usePurchaseOrders(params?: {
   limit?: number;
   status?: string;
   supplierId?: string;
+  search?: string;
 } & ServerListParams) {
   return useQuery({
     queryKey: purchaseOrderKeys.list((params || {}) as Record<string, unknown>),
@@ -36,6 +37,7 @@ export function usePurchaseOrders(params?: {
         limit: params?.limit,
         status: params?.status,
         supplierId: params?.supplierId,
+        search: params?.search,
         ...toServerListQuery(params ?? {}),
       });
       return response.data;

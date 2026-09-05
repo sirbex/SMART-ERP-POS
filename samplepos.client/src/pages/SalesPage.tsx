@@ -38,7 +38,24 @@ import {
   AdaptiveSearch,
   AdaptiveToolbar,
 } from '../components/adaptive';
+import {
+  ADAPTIVE_PAGE_PAD_CLASS,
+  KPI_ACCENT_GRID_CLASS,
+  KPI_ACCENT_LABEL_CLASS,
+  KPI_ACCENT_SUB_CLASS,
+  KPI_ACCENT_VALUE_CLASS,
+  kpiAccentCardClass,
+} from '../lib/adaptiveDashboard';
 import { useBackendPermission } from '../hooks/useBackendPermission';
+import { useCanAccess } from '../components/auth/ProtectedRoute';
+import { CreateExpenseForm } from '../components/expenses/CreateExpenseForm';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/temp-ui-components';
 import { SortableTableHeader } from '../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../components/ui/MobileSortSelect';
 import { useColumnSort } from '../hooks/useColumnSort';
@@ -406,6 +423,8 @@ export default function SalesPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedSale, setSelectedSale] = useState<SaleRow | null>(null);
+  const [isCreateExpenseOpen, setIsCreateExpenseOpen] = useState(false);
+  const canCreateExpense = useCanAccess([], ['expenses.create']);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
@@ -769,36 +788,42 @@ export default function SalesPage() {
   return (
     <Layout>
       <AdaptivePage
-        className="p-6"
+        className={ADAPTIVE_PAGE_PAD_CLASS}
         title={isScopedSalesUser ? 'My Sales' : 'Sales Analytics'}
         description={
           isScopedSalesUser
             ? 'View your sales transactions'
-            : 'Comprehensive sales reporting and insights'
+            : 'Sales reporting and insights'
         }
         primaryActions={
-          <button
-            type="button"
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 min-h-[var(--layout-touch-target)]"
-          >
-            <span>📥</span>
-            Export Report
-          </button>
+          canCreateExpense ? (
+            <button
+              type="button"
+              onClick={() => setIsCreateExpenseOpen(true)}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 min-h-[var(--layout-touch-target)] w-full sm:w-auto"
+              data-sales-expense-cta="true"
+              aria-label="Create expense"
+            >
+              New Expense
+            </button>
+          ) : undefined
         }
         toolbar={
-          <div className="bg-white rounded-lg shadow p-4 space-y-4" data-sales-filters="true">
+          <div className="bg-white rounded-lg shadow p-2.5 sm:p-4" data-sales-filters="true">
             <AdaptiveToolbar
+              modeOverride="compact"
               leading={
                 <AdaptiveSearch
                   value={searchQuery}
                   onChange={setSearchQuery}
                   placeholder="Sale # or Customer..."
                   label="Search sales"
+                  presentationOverride="compact"
                 />
               }
-              secondaryLabel="Filters"
-              secondary={
-                <div className="space-y-3 w-full min-w-[16rem]">
+              secondaryLabel="Period"
+              secondary={({ close }) => (
+                <div className="space-y-3 w-full" data-sales-period-panel="true">
                   <div className="flex flex-wrap gap-2">
                     {(
                       [
@@ -816,7 +841,10 @@ export default function SalesPage() {
                       <button
                         key={key}
                         type="button"
-                        onClick={() => handleDateFilterChange(key)}
+                        onClick={() => {
+                          handleDateFilterChange(key);
+                          if (key !== 'custom') close();
+                        }}
                         disabled={lockSalesToBusinessDay && key !== 'today'}
                         className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors min-h-[var(--layout-touch-target)] ${
                           dateFilter === key
@@ -876,7 +904,10 @@ export default function SalesPage() {
                       <select
                         id="paymentMethod"
                         value={paymentMethodFilter}
-                        onChange={(e) => setPaymentMethodFilter(e.target.value)}
+                        onChange={(e) => {
+                          setPaymentMethodFilter(e.target.value);
+                          close();
+                        }}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
                       >
                         <option value="ALL">All Methods</option>
@@ -897,7 +928,10 @@ export default function SalesPage() {
                       <select
                         id="statusFilter"
                         value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value)}
+                        onChange={(e) => {
+                          setStatusFilter(e.target.value);
+                          close();
+                        }}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
                       >
                         <option value="ALL">All Status</option>
@@ -909,41 +943,51 @@ export default function SalesPage() {
                       </select>
                     </div>
                   </div>
+                  {dateFilter === 'custom' ? (
+                    <button
+                      type="button"
+                      onClick={() => close()}
+                      className="w-full rounded-md bg-stone-900 px-3 py-2 text-sm font-medium text-white min-h-[var(--layout-touch-target)]"
+                      data-sales-period-done="true"
+                    >
+                      Done
+                    </button>
+                  ) : null}
                 </div>
-              }
+              )}
             />
           </div>
         }
       >
         {/* Filters moved into AdaptiveToolbar — body starts with tabs / KPIs */}
 
-        {/* KPI Cards - Overview Tab */}
+        {/* KPI Cards - Overview Tab — 2-up compact on phone (SSOT) */}
         {activeTab === 'overview' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow p-6 text-white">
-              <div className="text-sm font-medium opacity-90">Total Sales</div>
-              <div className="text-3xl font-bold mt-2">{formatCurrency(kpis.totalSales)}</div>
-              <div className="text-sm mt-2 opacity-75">{kpis.salesCount} transactions</div>
+          <div className={KPI_ACCENT_GRID_CLASS} data-sales-kpis="true">
+            <div className={kpiAccentCardClass('blue')}>
+              <div className={KPI_ACCENT_LABEL_CLASS}>Total Sales</div>
+              <div className={KPI_ACCENT_VALUE_CLASS}>{formatCurrency(kpis.totalSales)}</div>
+              <div className={KPI_ACCENT_SUB_CLASS}>{kpis.salesCount} transactions</div>
             </div>
-            <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-lg shadow p-6 text-white">
-              <div className="text-sm font-medium opacity-90">Total Profit</div>
-              <div className="text-3xl font-bold mt-2">{formatCurrency(kpis.totalProfit)}</div>
-              <div className="text-sm mt-2 opacity-75">{kpis.profitMargin.toFixed(2)}% margin</div>
+            <div className={kpiAccentCardClass('green')}>
+              <div className={KPI_ACCENT_LABEL_CLASS}>Total Profit</div>
+              <div className={KPI_ACCENT_VALUE_CLASS}>{formatCurrency(kpis.totalProfit)}</div>
+              <div className={KPI_ACCENT_SUB_CLASS}>{kpis.profitMargin.toFixed(2)}% margin</div>
             </div>
-            <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg shadow p-6 text-white">
-              <div className="text-sm font-medium opacity-90">Average Sale</div>
-              <div className="text-3xl font-bold mt-2">{formatCurrency(kpis.avgSale)}</div>
-              <div className="text-sm mt-2 opacity-75">Per transaction</div>
+            <div className={kpiAccentCardClass('purple')}>
+              <div className={KPI_ACCENT_LABEL_CLASS}>Average Sale</div>
+              <div className={KPI_ACCENT_VALUE_CLASS}>{formatCurrency(kpis.avgSale)}</div>
+              <div className={KPI_ACCENT_SUB_CLASS}>Per transaction</div>
             </div>
-            <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg shadow p-6 text-white">
-              <div className="text-sm font-medium opacity-90">Credit Sales</div>
-              <div className="text-3xl font-bold mt-2">{kpis.creditSalesCount}</div>
-              <div className="text-sm mt-2 opacity-75">{kpis.partialPaymentCount} partial</div>
+            <div className={kpiAccentCardClass('orange')}>
+              <div className={KPI_ACCENT_LABEL_CLASS}>Credit Sales</div>
+              <div className={KPI_ACCENT_VALUE_CLASS}>{kpis.creditSalesCount}</div>
+              <div className={KPI_ACCENT_SUB_CLASS}>{kpis.partialPaymentCount} partial</div>
             </div>
-            <div className="bg-gradient-to-br from-pink-500 to-pink-600 rounded-lg shadow p-6 text-white">
-              <div className="text-sm font-medium opacity-90">Total Discounts</div>
-              <div className="text-3xl font-bold mt-2">{formatCurrency(kpis.totalDiscounts)}</div>
-              <div className="text-sm mt-2 opacity-75">
+            <div className={kpiAccentCardClass('pink')}>
+              <div className={KPI_ACCENT_LABEL_CLASS}>Total Discounts</div>
+              <div className={KPI_ACCENT_VALUE_CLASS}>{formatCurrency(kpis.totalDiscounts)}</div>
+              <div className={KPI_ACCENT_SUB_CLASS}>
                 {kpis.totalSales > 0
                   ? `${new Decimal(kpis.totalDiscounts).dividedBy(new Decimal(kpis.totalSales).plus(kpis.totalDiscounts)).times(100).toDecimalPlaces(1).toNumber()}% of gross`
                   : 'No sales'}
@@ -1186,6 +1230,26 @@ export default function SalesPage() {
             onSaleUpdated={() => { refetchSales(); }}
           />
         )}
+
+        {/* Expense create — ops path: expenses.create only (no Accounting feature) */}
+        <Dialog open={isCreateExpenseOpen} onOpenChange={setIsCreateExpenseOpen}>
+          <DialogContent className="max-w-5xl max-h-[95vh] overflow-hidden flex flex-col">
+            <div data-sales-expense-dialog="true" className="contents">
+            <DialogHeader className="flex-shrink-0">
+              <DialogTitle className="text-xl sm:text-2xl">Create New Expense</DialogTitle>
+              <DialogDescription>
+                Record an operating expense (transport, supplies, allowances). Accounting menu access is not required.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="overflow-y-auto flex-1 -mx-6 px-6" data-sales-expense-form="true">
+              <CreateExpenseForm
+                onSuccess={() => setIsCreateExpenseOpen(false)}
+                onCancel={() => setIsCreateExpenseOpen(false)}
+              />
+            </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </AdaptivePage>
     </Layout>
   );
@@ -1900,17 +1964,17 @@ function CreditSalesView({ onSelectSale, startDate, endDate }: CreditSalesViewPr
 
   return (
     <div className="space-y-4">
-      <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-        <div className="flex justify-between items-center">
-          <div>
-            <div className="text-sm text-orange-800 font-medium">Total Outstanding</div>
-            <div className="text-3xl font-bold text-orange-900 mt-1">
+      <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 sm:p-4">
+        <div className="flex justify-between items-center gap-3">
+          <div className="min-w-0">
+            <div className="text-xs sm:text-sm text-orange-800 font-medium">Total Outstanding</div>
+            <div className="text-lg sm:text-3xl font-bold text-orange-900 mt-0.5 sm:mt-1 tabular-nums break-words">
               {formatCurrency(totalOutstanding.toNumber())}
             </div>
           </div>
-          <div className="text-right">
-            <div className="text-sm text-orange-800">Credit Sales</div>
-            <div className="text-2xl font-bold text-orange-900">{sales.length}</div>
+          <div className="text-right shrink-0">
+            <div className="text-xs sm:text-sm text-orange-800">Credit Sales</div>
+            <div className="text-lg sm:text-2xl font-bold text-orange-900">{sales.length}</div>
           </div>
         </div>
       </div>

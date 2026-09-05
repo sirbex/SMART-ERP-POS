@@ -65,13 +65,15 @@ function renderNavTabButton(
       onClick={measureOnly ? undefined : () => onNavigate(tab.path)}
       tabIndex={measureOnly ? -1 : 0}
       aria-hidden={measureOnly || undefined}
-      className={`px-4 py-2 rounded-lg font-medium whitespace-nowrap transition-colors flex items-center gap-2 ${
+      className={`px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-lg text-sm sm:text-base font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 sm:gap-2 min-h-[var(--layout-touch-target)] ${
         isActive
           ? 'bg-blue-600 text-white'
           : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
       }`}
     >
-      <span>{tab.icon}</span>
+      <span className="text-base sm:text-lg leading-none" aria-hidden>
+        {tab.icon}
+      </span>
       <span>{tab.label}</span>
     </button>
   );
@@ -206,27 +208,36 @@ export default function InventoryLayout({ children }: InventoryLayoutProps) {
 
       <div className="h-full flex flex-col">
 
-        <div className="bg-white border-b border-gray-200 px-6 py-4">
+        <div
+          className="bg-white border-b border-gray-200 px-3 py-2.5 sm:px-6 sm:py-4"
+          data-inventory-hub-chrome="true"
+        >
 
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-4">
 
-            <div className="text-3xl">📦</div>
+            <div className="text-xl sm:text-3xl leading-none" aria-hidden>
+              📦
+            </div>
 
-            <div>
+            <div className="min-w-0">
 
-              <h1 className="text-2xl font-bold text-gray-900">Inventory</h1>
+              <h1 className="text-lg sm:text-2xl font-bold text-gray-900 tracking-tight">
+                Inventory
+              </h1>
 
-              <p className="text-sm text-gray-600">Products, stock, receipts, and warehouse network</p>
+              <p className="hidden sm:block text-sm text-gray-600">
+                Products, stock, receipts, and warehouse network
+              </p>
 
             </div>
 
             {!isOnline && (
 
-              <span className="ml-auto inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">
+              <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800 shrink-0">
 
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
 
-                Offline Mode
+                Offline
 
               </span>
 
@@ -236,7 +247,7 @@ export default function InventoryLayout({ children }: InventoryLayoutProps) {
 
 
 
-          <div ref={containerRef} className="relative flex gap-2 items-center pb-0.5">
+          <div ref={containerRef} className="relative flex gap-1.5 sm:gap-2 items-center pb-0.5 overflow-x-auto">
 
             {visiblePrimaryTabs.map((tab) =>
               renderNavTabButton(
@@ -264,7 +275,7 @@ export default function InventoryLayout({ children }: InventoryLayoutProps) {
 
                     aria-haspopup="menu"
 
-                    className={`shrink-0 px-4 py-2 rounded-lg font-medium whitespace-nowrap transition-colors flex items-center gap-2 max-w-[220px] ${
+                    className={`shrink-0 px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-lg text-sm sm:text-base font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 sm:gap-2 max-w-[200px] sm:max-w-[220px] min-h-[var(--layout-touch-target)] ${
 
                       moreActive || moreOpen
 

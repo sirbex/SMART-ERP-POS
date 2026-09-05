@@ -89,7 +89,7 @@ export function AdaptiveSearch({
     .join(' ');
 
   const field = (
-    <div className={`flex items-center gap-2 ${className}`.trim()}>
+    <div className={`flex w-full min-w-0 items-center gap-2 ${className}`.trim()}>
       {leading}
       <label htmlFor={inputId} className="sr-only">
         {label}
@@ -103,7 +103,7 @@ export function AdaptiveSearch({
         disabled={disabled}
         placeholder={placeholder}
         aria-label={label}
-        wrapClassName="min-w-0 flex-1"
+        wrapClassName="min-w-0 flex-1 w-full"
         className={inputClass}
         onKeyDown={onKeyDown}
         data-adaptive-search-input="true"
@@ -168,6 +168,7 @@ export function AdaptiveSearch({
 
   return (
     <div
+      className="w-full min-w-0"
       data-adaptive-search="true"
       data-search-presentation={presentation}
     >

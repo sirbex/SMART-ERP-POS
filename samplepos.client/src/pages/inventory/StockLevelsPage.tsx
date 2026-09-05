@@ -26,7 +26,13 @@ import {
   AdaptivePage,
   AdaptiveSearch,
   AdaptiveToolbar,
+  AdaptiveKpiStrip,
 } from '../../components/adaptive';
+import {
+  ADAPTIVE_PAGE_PAD_CLASS,
+  ADAPTIVE_TOOLBAR_CARD_CLASS,
+  ADAPTIVE_WORKLIST_DENSITY,
+} from '../../lib/adaptiveDashboard';
 
 function unwrapStockListPayload(payload: unknown): unknown[] {
   if (!payload) return [];
@@ -364,20 +370,13 @@ export default function StockLevelsPage() {
 
   return (
     <AdaptivePage
-      className="p-6"
+      className={ADAPTIVE_PAGE_PAD_CLASS}
       title="Stock Levels"
       description={isOnline ? 'Real-time inventory from database' : 'Cached inventory data (offline)'}
-      primaryActions={
-        <button
-          type="button"
-          onClick={() => refetch()}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 min-h-[var(--layout-touch-target)]"
-        >
-          🔄 Refresh
-        </button>
-      }
+      densityOverride={ADAPTIVE_WORKLIST_DENSITY}
+      toolbarInline
       toolbar={
-        <div className="space-y-3" data-stock-filters="true">
+        <div className="space-y-2" data-stock-filters="true">
           {!isOnline && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2 text-amber-800 text-sm">
               <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
@@ -387,36 +386,47 @@ export default function StockLevelsPage() {
           {canUseStoreFilter && (
             <StockViewModeToggle mode={stockViewMode} onChange={handleStockViewModeChange} />
           )}
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className={ADAPTIVE_TOOLBAR_CARD_CLASS}>
             <AdaptiveToolbar
+              modeOverride="compact"
               leading={
                 <AdaptiveSearch
                   value={searchTerm}
                   onChange={setSearchTerm}
                   placeholder="Search by name or category..."
                   label="Search products"
+                  presentationOverride="compact"
                 />
               }
               secondaryLabel="Filters"
-              secondary={
-                <div className={`grid grid-cols-1 gap-3 min-w-[14rem] ${byStoreView ? 'sm:grid-cols-2' : ''}`}>
+              secondary={({ close }) => (
+                <div
+                  className={`grid grid-cols-1 gap-3 w-full min-w-[14rem] ${byStoreView ? 'sm:grid-cols-2' : ''}`}
+                  data-stock-filter-panel="true"
+                >
                   {byStoreView && (
                     <StoreLocationSelect
                       id="filter-store-location"
                       label="Location"
                       stores={storeLocations}
                       value={storeFilterId}
-                      onChange={setStoreFilterId}
+                      onChange={(id) => {
+                        setStoreFilterId(id);
+                        close();
+                      }}
                     />
                   )}
                   <div>
-                    <label htmlFor="filter-category" className="block text-sm font-medium text-gray-700 mb-2">
+                    <label htmlFor="filter-category" className="block text-sm font-medium text-gray-700 mb-1">
                       Category
                     </label>
                     <select
                       id="filter-category"
                       value={filterCategory}
-                      onChange={(e) => setFilterCategory(e.target.value)}
+                      onChange={(e) => {
+                        setFilterCategory(e.target.value);
+                        close();
+                      }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 min-h-[var(--layout-touch-target)]"
                     >
                       <option value="all">All Categories</option>
@@ -426,13 +436,16 @@ export default function StockLevelsPage() {
                     </select>
                   </div>
                   <div>
-                    <label htmlFor="filter-status" className="block text-sm font-medium text-gray-700 mb-2">
+                    <label htmlFor="filter-status" className="block text-sm font-medium text-gray-700 mb-1">
                       Status
                     </label>
                     <select
                       id="filter-status"
                       value={filterStatus}
-                      onChange={(e) => setFilterStatus(e.target.value as 'all' | 'low' | 'expiring')}
+                      onChange={(e) => {
+                        setFilterStatus(e.target.value as 'all' | 'low' | 'expiring');
+                        close();
+                      }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 min-h-[var(--layout-touch-target)]"
                     >
                       <option value="all">All Products</option>
@@ -441,15 +454,22 @@ export default function StockLevelsPage() {
                     </select>
                   </div>
                 </div>
+              )}
+              more={
+                <>
+                  <MobileSortSelect
+                    presentation="menu"
+                    sortField={sortField}
+                    sortOrder={sortOrder}
+                    options={mobileSortOptions}
+                    onFieldChange={handleColumnSort}
+                    onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+                  />
+                  <button type="button" role="menuitem" onClick={() => refetch()} data-stock-refresh="true">
+                    Refresh
+                  </button>
+                </>
               }
-            />
-            <MobileSortSelect
-              className="mt-4"
-              sortField={sortField}
-              sortOrder={sortOrder}
-              options={mobileSortOptions}
-              onFieldChange={handleColumnSort}
-              onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
             />
           </div>
         </div>
@@ -663,34 +683,33 @@ export default function StockLevelsPage() {
         </div>
       )}
 
-      {/* Stats */}
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Total Products</div>
-          <div className="text-2xl font-bold text-gray-900 mt-1">{stockLevels.length}</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Low Stock Items</div>
-          <div className="text-2xl font-bold text-yellow-600 mt-1">
-            {stockLevels.filter((item: StockLevelItem) => item.needs_reorder).length}
-          </div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Expiring Soon (≤ 30d)</div>
-          <div className="text-2xl font-bold text-red-600 mt-1">
-            {
-              stockLevels.filter((item: StockLevelItem) => {
-                const days = getDaysUntilExpiry(item.nearest_expiry);
-                return days !== null && days <= 30;
-              }).length
-            }
-          </div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Filtered Results</div>
-          <div className="text-2xl font-bold text-blue-600 mt-1">{filteredStockLevels.length}</div>
-        </div>
-      </div>
+      {/* Stats — global AdaptiveKpiStrip (2-up phone) */}
+      <AdaptiveKpiStrip
+        items={[
+          { id: 'products', label: 'Total Products', value: stockLevels.length },
+          {
+            id: 'low',
+            label: 'Low Stock Items',
+            value: stockLevels.filter((item: StockLevelItem) => item.needs_reorder).length,
+            valueClassName: 'text-yellow-600',
+          },
+          {
+            id: 'expiring',
+            label: 'Expiring Soon (≤ 30d)',
+            value: stockLevels.filter((item: StockLevelItem) => {
+              const days = getDaysUntilExpiry(item.nearest_expiry);
+              return days !== null && days <= 30;
+            }).length,
+            valueClassName: 'text-red-600',
+          },
+          {
+            id: 'filtered',
+            label: 'Filtered Results',
+            value: filteredStockLevels.length,
+            valueClassName: 'text-blue-600',
+          },
+        ]}
+      />
     </AdaptivePage>
   );
 }

@@ -1,0 +1,65 @@
+{
+  "proof": "ADAPTIVE_ROW_ACTIONS",
+  "verdict": "PASS",
+  "generatedAt": "2026-09-05T11:49:51.816Z",
+  "passed": 11,
+  "total": 11,
+  "gates": [
+    {
+      "id": "MOBILE_SHEET",
+      "ok": true,
+      "detail": "mobile chrome uses sheet secondary actions"
+    },
+    {
+      "id": "MOBILE_MENU",
+      "ok": true,
+      "detail": "3 card actions collapse to Actions menu on phone"
+    },
+    {
+      "id": "SINGLE_INLINE",
+      "ok": true,
+      "detail": "single action stays inline"
+    },
+    {
+      "id": "DESKTOP_INLINE",
+      "ok": true,
+      "detail": "roomy desktop keeps inline when chrome allows"
+    },
+    {
+      "id": "NARROW_PANE_MENU",
+      "ok": true,
+      "detail": "narrow content pane forces menu even if shell is desktop"
+    },
+    {
+      "id": "ROW_ACTIONS_COMPONENT",
+      "ok": true,
+      "detail": "AdaptiveRowActions menu trigger exported"
+    },
+    {
+      "id": "MENU_LABEL_DENSITY",
+      "ok": true,
+      "detail": "row actions menu label is verbose Actions vs short More"
+    },
+    {
+      "id": "LINK_APPEARANCE",
+      "ok": true,
+      "detail": "AdaptiveRowActions supports link (no-box) appearance for detail nav"
+    },
+    {
+      "id": "BAR_DELEGATES",
+      "ok": true,
+      "detail": "ResponsiveActionBar no longer stacks full-width towers"
+    },
+    {
+      "id": "ADJ_USES_ROW_ACTIONS",
+      "ok": true,
+      "detail": "Adjustments wires structured AdaptiveRowActions"
+    },
+    {
+      "id": "FOOTER_NO_COLLAPSE",
+      "ok": true,
+      "detail": "page sticky AdaptiveActionBar keeps CTAs visible"
+    }
+  ],
+  "integrity": "List/card row actions: sheet/dense chrome → Actions menu; ResponsiveActionBar delegates to AdaptiveRowActions; no full-width stacked CTA towers on phone cards."
+}

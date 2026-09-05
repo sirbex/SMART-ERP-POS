@@ -9,6 +9,18 @@ import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
 import { useServerTableSort } from '../../hooks/useServerTableSort';
 import { WorkflowHelpTrigger } from '../../components/inventory/shared';
+import {
+  AdaptivePage,
+  AdaptiveToolbar,
+  AdaptiveSearch,
+  AdaptiveKpiStrip,
+} from '../../components/adaptive';
+import {
+  ADAPTIVE_PAGE_PAD_CLASS,
+  ADAPTIVE_TOOLBAR_CARD_CLASS,
+  ADAPTIVE_WORKLIST_DENSITY,
+  ADAPTIVE_WORKLIST_SEARCH_DEBOUNCE_MS,
+} from '../../lib/adaptiveDashboard';
 
 type MovementSortField =
   | 'dateTime'
@@ -183,9 +195,12 @@ export default function StockMovementsPage() {
     onQueryChange: () => setPage(1),
   });
 
-  // Debounce search term (300ms) so we don't fire a request on every keystroke
+  // Debounce search (worklist SSOT) so we don't fire a request on every keystroke
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchTerm), 300);
+    const timer = setTimeout(
+      () => setDebouncedSearch(searchTerm.trim()),
+      ADAPTIVE_WORKLIST_SEARCH_DEBOUNCE_MS,
+    );
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
@@ -415,16 +430,15 @@ export default function StockMovementsPage() {
   }
 
   return (
-    <div className="p-6">
-      {/* Subtle fetching indicator — does NOT unmount or disrupt focus */}
+    <div data-stock-movements-page="true">
       {isFetching && (
         <div className="fixed top-0 left-0 right-0 h-1 bg-blue-500 animate-pulse z-50" />
       )}
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-2xl font-bold text-gray-900">Movement History</h2>
+      <AdaptivePage
+        className={ADAPTIVE_PAGE_PAD_CLASS}
+        title={
+          <span className="inline-flex items-center gap-2">
+            Movement History
             <WorkflowHelpTrigger title="About Movement History">
               <ul className="space-y-1">
                 <li>• <strong>Audit Trail:</strong> Read-only view of ALL inventory movements (immutable records)</li>
@@ -436,184 +450,199 @@ export default function StockMovementsPage() {
                 <li>• To create adjustments, record damages, or run a physical count, go to <strong>Adjustments &amp; Stock Count</strong></li>
               </ul>
             </WorkflowHelpTrigger>
-          </div>
-          <p className="text-gray-600 mt-1">Complete audit trail of all inventory movements</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => navigate('/inventory/adjustments')}
-            className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors flex items-center gap-2"
-          >
-            ⚖️ Adjustments & Stock Count
-          </button>
-          <button
-            onClick={handleExportCSV}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
-          >
-            📥 Export CSV
-          </button>
-          <button
-            onClick={() => refetch()}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            🔄 Refresh
-          </button>
-        </div>
-      </div>
-
-      {/* Summary Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Total Movements</div>
-          <div className="text-2xl font-bold text-gray-900 mt-1">{stats.total}</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Quantity In</div>
-          <div className="text-2xl font-bold text-green-600 mt-1">
-            +{stats.totalQuantityIn.toFixed(2)}
-          </div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Quantity Out</div>
-          <div className="text-2xl font-bold text-red-600 mt-1">
-            -{stats.totalQuantityOut.toFixed(2)}
-          </div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Net Change</div>
-          <div className={`text-2xl font-bold mt-1 ${stats.netQuantity >= 0 ? 'text-green-600' : 'text-red-600'
-            }`}>
-            {stats.netQuantity >= 0 ? '+' : ''}{stats.netQuantity.toFixed(2)}
-          </div>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-          {/* Search */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Search
-            </label>
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Product, batch, reference..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-
-          {/* Movement Type */}
-          <div>
-            <label htmlFor="movement-type" className="block text-sm font-medium text-gray-700 mb-2">
-              Movement Type
-            </label>
-            <select
-              id="movement-type"
-              value={selectedType}
-              onChange={(e) => setSelectedType(e.target.value as MovementType | 'ALL')}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          </span>
+        }
+        description="Complete audit trail of all inventory movements"
+        densityOverride={ADAPTIVE_WORKLIST_DENSITY}
+        toolbarInline
+        toolbar={
+          <div className={ADAPTIVE_TOOLBAR_CARD_CLASS} data-movements-filters="true">
+            <AdaptiveToolbar
+              modeOverride="compact"
+              actionsBeforeLeading
+              leading={
+                <AdaptiveSearch
+                  value={searchTerm}
+                  onChange={(v) => {
+                    setSearchTerm(v);
+                    setPage(1);
+                  }}
+                  placeholder="Product, batch, reference…"
+                  label="Search stock movements"
+                  presentationOverride="compact"
+                />
+              }
+              secondaryLabel="Filters"
+              secondary={({ close }) => (
+                <div className="space-y-3 w-full" data-movements-filter-panel="true">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label htmlFor="movement-type" className="block text-sm font-medium text-gray-700 mb-1">
+                        Movement Type
+                      </label>
+                      <select
+                        id="movement-type"
+                        value={selectedType}
+                        onChange={(e) => {
+                          setSelectedType(e.target.value as MovementType | 'ALL');
+                          setPage(1);
+                          close();
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                      >
+                        <option value="ALL">All Types</option>
+                        {Object.entries(MOVEMENT_TYPES).map(([key, { label, icon }]) => (
+                          <option key={key} value={key}>
+                            {icon} {label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="date-preset" className="block text-sm font-medium text-gray-700 mb-1">
+                        Date Range
+                      </label>
+                      <select
+                        id="date-preset"
+                        value={dateRangePreset}
+                        onChange={(e) => {
+                          const preset = e.target.value as DateRangePreset;
+                          handleDateRangePresetChange(preset);
+                          if (preset !== 'custom') close();
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                      >
+                        <option value="today">Today</option>
+                        <option value="yesterday">Yesterday</option>
+                        <option value="this_week">This Week</option>
+                        <option value="last_week">Last Week</option>
+                        <option value="this_month">This Month</option>
+                        <option value="last_month">Last Month</option>
+                        <option value="custom">Custom Range</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="start-date" className="block text-sm font-medium text-gray-700 mb-1">
+                        Start Date
+                      </label>
+                      <DatePicker
+                        value={startDate}
+                        onChange={(date) => handleCustomDateChange(date, endDate)}
+                        placeholder="Select start date"
+                        maxDate={endDate ? new Date(endDate) : undefined}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="end-date" className="block text-sm font-medium text-gray-700 mb-1">
+                        End Date
+                      </label>
+                      <DatePicker
+                        value={endDate}
+                        onChange={(date) => handleCustomDateChange(startDate, date)}
+                        placeholder="Select end date"
+                        minDate={startDate ? new Date(startDate) : undefined}
+                      />
+                    </div>
+                  </div>
+                  {startDate && endDate ? (
+                    <p className="text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                      Showing {formatDisplayDate(startDate)} → {formatDisplayDate(endDate)}
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleResetFilters();
+                        close();
+                      }}
+                      className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 min-h-[var(--layout-touch-target)]"
+                    >
+                      Reset Filters
+                    </button>
+                    {dateRangePreset === 'custom' ? (
+                      <button
+                        type="button"
+                        onClick={() => close()}
+                        className="px-4 py-2 text-sm font-medium text-white bg-stone-900 rounded-lg min-h-[var(--layout-touch-target)]"
+                      >
+                        Done
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+              more={
+                <>
+                  <MobileSortSelect
+                    presentation="menu"
+                    sortField={sortField}
+                    sortOrder={sortOrder}
+                    options={mobileSortOptions}
+                    onFieldChange={handleColumnSort}
+                    onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+                  />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={handleExportCSV}
+                    data-movements-export="true"
+                  >
+                    Export CSV
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => refetch()}
+                    data-movements-refresh="true"
+                  >
+                    Refresh
+                  </button>
+                </>
+              }
             >
-              <option value="ALL">All Types</option>
-              {Object.entries(MOVEMENT_TYPES).map(([key, { label, icon }]) => (
-                <option key={key} value={key}>
-                  {icon} {label}
-                </option>
-              ))}
-            </select>
+              <button
+                type="button"
+                onClick={() => navigate('/inventory/adjustments')}
+                className="inline-flex items-center justify-center rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 min-h-[var(--layout-touch-target)]"
+                data-movements-primary-cta="true"
+              >
+                Adjustments
+              </button>
+              <span
+                className="text-[11px] sm:text-xs text-stone-500 tabular-nums whitespace-nowrap"
+                data-movements-result-count="true"
+              >
+                {displayMovements.length}/{totalCount}
+              </span>
+            </AdaptiveToolbar>
           </div>
+        }
+      >
 
-          {/* Date Range Preset */}
-          <div>
-            <label htmlFor="date-preset" className="block text-sm font-medium text-gray-700 mb-2">
-              Date Range
-            </label>
-            <select
-              id="date-preset"
-              value={dateRangePreset}
-              onChange={(e) => handleDateRangePresetChange(e.target.value as DateRangePreset)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="today">📅 Today</option>
-              <option value="yesterday">📅 Yesterday</option>
-              <option value="this_week">📅 This Week</option>
-              <option value="last_week">📅 Last Week</option>
-              <option value="this_month">📅 This Month</option>
-              <option value="last_month">📅 Last Month</option>
-              <option value="custom">🗓️ Custom Range</option>
-            </select>
-          </div>
-
-          {/* Start Date - Always visible for custom adjustments */}
-          <div>
-            <label htmlFor="start-date" className="block text-sm font-medium text-gray-700 mb-2">
-              Start Date
-            </label>
-            <DatePicker
-              value={startDate}
-              onChange={(date) => handleCustomDateChange(date, endDate)}
-              placeholder="Select start date"
-              maxDate={endDate ? new Date(endDate) : undefined}
-            />
-          </div>
-
-          {/* End Date - Always visible for custom adjustments */}
-          <div>
-            <label htmlFor="end-date" className="block text-sm font-medium text-gray-700 mb-2">
-              End Date
-            </label>
-            <DatePicker
-              value={endDate}
-              onChange={(date) => handleCustomDateChange(startDate, date)}
-              placeholder="Select end date"
-              minDate={startDate ? new Date(startDate) : undefined}
-            />
-          </div>
-        </div>
-
-        {/* Active Date Range Info */}
-        {startDate && endDate && (
-          <div className="mt-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
-            <div className="flex items-center justify-between">
-              <div className="text-sm text-blue-800">
-                <span className="font-medium">Showing movements from:</span>{' '}
-                <span className="font-semibold">{formatDisplayDate(startDate)}</span>
-                {' '}<span className="text-blue-600">to</span>{' '}
-                <span className="font-semibold">{formatDisplayDate(endDate)}</span>
-                {dateRangePreset !== 'custom' && (
-                  <span className="ml-2 text-xs bg-blue-200 px-2 py-0.5 rounded-full">
-                    {dateRangePreset.replace('_', ' ').toUpperCase()}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Filter Actions */}
-        <div className="flex flex-col gap-3 mt-4 pt-4 border-t">
-          <MobileSortSelect
-            sortField={sortField}
-            sortOrder={sortOrder}
-            options={mobileSortOptions}
-            onFieldChange={handleColumnSort}
-            onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
-          />
-          <div className="flex justify-between items-center">
-          <div className="text-sm text-gray-600">
-            Showing {displayMovements.length} of {totalCount} movements
-          </div>
-          <button
-            onClick={handleResetFilters}
-            className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-          >
-            Reset Filters
-          </button>
-          </div>
-        </div>
-      </div>
+      <AdaptiveKpiStrip
+        items={[
+          { id: 'total', label: 'Total Movements', value: stats.total },
+          {
+            id: 'qty-in',
+            label: 'Quantity In',
+            value: `+${stats.totalQuantityIn.toFixed(2)}`,
+            valueClassName: 'text-green-600',
+          },
+          {
+            id: 'qty-out',
+            label: 'Quantity Out',
+            value: `-${stats.totalQuantityOut.toFixed(2)}`,
+            valueClassName: 'text-red-600',
+          },
+          {
+            id: 'net',
+            label: 'Net Change',
+            value: `${stats.netQuantity >= 0 ? '+' : ''}${stats.netQuantity.toFixed(2)}`,
+            valueClassName: stats.netQuantity >= 0 ? 'text-green-600' : 'text-red-600',
+          },
+        ]}
+      />
 
       {/* Movement Type Summary - Shows ALL types from date-filtered data */}
       {movements.length > 0 && (
@@ -877,6 +906,7 @@ export default function StockMovementsPage() {
         </div>
       )}
 
+      </AdaptivePage>
     </div>
   );
 }

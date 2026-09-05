@@ -14,6 +14,20 @@ import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import { ResponsiveGrid } from '../../components/ui/ResponsiveGrid';
+import {
+  AdaptivePage,
+  AdaptiveToolbar,
+  AdaptiveSearch,
+  AdaptiveDataGrid,
+  AdaptiveKpiStrip,
+  type AdaptiveDataColumn,
+} from '../../components/adaptive';
+import {
+  ADAPTIVE_PAGE_PAD_CLASS,
+  ADAPTIVE_TOOLBAR_CARD_CLASS,
+  ADAPTIVE_WORKLIST_DENSITY,
+} from '../../lib/adaptiveDashboard';
+import { AdaptiveRowActions } from '../../components/adaptive';
 import { useStockLevels, useAdjustInventory, useAdjustBatch } from '../../hooks/useInventory';
 import { useMultistoreEnabled } from '../../hooks/useMultistore';
 import { useStoreLocations, useStockLevelsByStore, useStoreLotsAtStore } from '../../hooks/useWarehouse';
@@ -845,18 +859,89 @@ export default function InventoryAdjustmentsPage() {
     );
   }
 
+  const adjustmentBatchColumns: AdaptiveDataColumn<Batch>[] = [
+    {
+      id: 'product',
+      header: 'Product',
+      priority: 'primary',
+      cardRole: 'title',
+      cell: (batch) => (
+        <span className="text-sm font-medium text-gray-900">{batch.product_name}</span>
+      ),
+    },
+    {
+      id: 'category',
+      header: 'Category',
+      priority: 'secondary',
+      cardRole: 'subtitle',
+      cell: (batch) => {
+        const cat = productCategoryMap.get(batch.product_id);
+        return cat ? (
+          <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-blue-50 text-blue-700">
+            {cat}
+          </span>
+        ) : (
+          <span className="text-gray-400">—</span>
+        );
+      },
+    },
+    {
+      id: 'batchNumber',
+      header: 'Batch Number',
+      priority: 'secondary',
+      cardRole: 'meta',
+      cell: (batch) => <span className="text-sm text-gray-900">{batch.batch_number}</span>,
+    },
+    {
+      id: 'quantity',
+      header: 'Quantity',
+      priority: 'primary',
+      cardRole: 'amount',
+      align: 'right',
+      cell: (batch) => (
+        <span className="font-semibold tabular-nums">{batch.remaining_quantity.toFixed(2)}</span>
+      ),
+    },
+    {
+      id: 'expiryDate',
+      header: 'Expiry Date',
+      priority: 'secondary',
+      cardRole: 'meta',
+      cell: (batch) => (
+        <span className="text-sm text-gray-600">
+          {batch.expiry_date ? formatDisplayDate(batch.expiry_date) : 'N/A'}
+        </span>
+      ),
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      priority: 'secondary',
+      cardRole: 'status',
+      cell: (batch) => (
+        <span
+          className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${
+            batch.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+          }`}
+        >
+          {batch.status}
+        </span>
+      ),
+    },
+  ];
+
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-2xl font-bold text-gray-900">Adjustments & Stock Count</h2>
+    <div data-inventory-adjustments-page="true">
+      <AdaptivePage
+        className={ADAPTIVE_PAGE_PAD_CLASS}
+        title={
+          <span className="inline-flex items-center gap-2">
+            Adjustments & Stock Count
             <WorkflowHelpTrigger title="About Adjustments & Stock Count">
               <ul className="space-y-1">
                 <li>• <strong>Adjustment:</strong> Increase or decrease stock for corrections</li>
                 <li>• <strong>Damage:</strong> Record stock lost due to physical damage</li>
-                <li>• <strong>Damage / Expiry:</strong> Quarantine first (no P&L) — dispose from Quarantine workqueue</li>
+                <li>• <strong>Damage / Expiry:</strong> Quarantine first (no P&amp;L) — dispose from Quarantine workqueue</li>
                 <li>• <strong>Physical Count:</strong> Compare physical stock vs system, auto-create adjustments for discrepancies</li>
                 <li>• All records create immutable stock movement entries for full audit trail</li>
                 <li>• View <strong>Movement History</strong> for the complete audit trail</li>
@@ -865,52 +950,109 @@ export default function InventoryAdjustmentsPage() {
                 </li>
               </ul>
             </WorkflowHelpTrigger>
-          </div>
-          <p className="text-gray-600 mt-1">
-            Record stock adjustments, damages, expiry quarantine, and physical counts
-          </p>
-          {isMultistoreEnabled && adjustmentStores.length > 0 && (
-            <div className="mt-4 max-w-sm">
-              <StoreLocationSelect
-                id="adjustment-store"
-                label="Adjust at store"
-                stores={adjustmentStores}
-                value={adjustmentStoreId}
-                onChange={setAdjustmentStoreId}
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Stock changes apply to the selected location&apos;s lot balances.
-              </p>
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowPhysicalCountModal(true)}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
-          >
-            🔍 Physical Count
-          </button>
-          <button
-            onClick={handleViewAllMovements}
-            className="px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium transition-colors flex items-center gap-2"
-          >
-            📊 Movement History
-          </button>
-          <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full font-medium text-sm">
-            {currentUser?.role}
           </span>
-        </div>
-      </div>
+        }
+        description="Record stock adjustments, damages, expiry quarantine, and physical counts"
+        densityOverride={ADAPTIVE_WORKLIST_DENSITY}
+        toolbarInline
+        toolbar={
+          <div className={`${ADAPTIVE_TOOLBAR_CARD_CLASS} space-y-3`} data-adj-filters="true">
+            {isMultistoreEnabled && adjustmentStores.length > 0 ? (
+              <div className="max-w-sm">
+                <StoreLocationSelect
+                  id="adjustment-store"
+                  label="Adjust at store"
+                  stores={adjustmentStores}
+                  value={adjustmentStoreId}
+                  onChange={setAdjustmentStoreId}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Stock changes apply to the selected location&apos;s lot balances.
+                </p>
+              </div>
+            ) : null}
+            <AdaptiveToolbar
+              modeOverride="compact"
+              actionsBeforeLeading
+              leading={
+                <AdaptiveSearch
+                  value={searchTerm}
+                  onChange={(v) => {
+                    setSearchTerm(v);
+                    setCurrentPage(1);
+                  }}
+                  placeholder="Product name or batch number…"
+                  label="Search batches"
+                  presentationOverride="compact"
+                />
+              }
+              secondaryLabel="Options"
+              secondary={({ close }) => (
+                <div className="space-y-3 w-full" data-adj-options-panel="true">
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={filterQtyOnly}
+                      onChange={(e) => {
+                        setFilterQtyOnly(e.target.checked);
+                        setCurrentPage(1);
+                        close();
+                      }}
+                    />
+                    Batches with quantity only
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => close()}
+                    className="w-full rounded-md bg-stone-900 px-3 py-2 text-sm font-medium text-white min-h-[var(--layout-touch-target)]"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+              more={
+                <>
+                  <MobileSortSelect
+                    presentation="menu"
+                    sortField={sortField}
+                    sortOrder={sortOrder}
+                    options={mobileSortOptions}
+                    onFieldChange={handleColumnSort}
+                    onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+                  />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={handleViewAllMovements}
+                    data-adj-movements-link="true"
+                  >
+                    Movement History
+                  </button>
+                </>
+              }
+            >
+              <button
+                type="button"
+                onClick={() => setShowPhysicalCountModal(true)}
+                className="inline-flex items-center justify-center rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-700 min-h-[var(--layout-touch-target)]"
+                data-adj-primary-cta="true"
+              >
+                Physical Count
+              </button>
+            </AdaptiveToolbar>
+          </div>
+        }
+      >
 
       {/* Recent Adjustments Summary */}
       {recentAdjustments.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4">
           <div className="flex justify-between items-center mb-3">
             <h3 className="text-sm font-semibold text-blue-900">
-              📝 Today&apos;s Adjustments ({recentAdjustments.length})
+              Today&apos;s Adjustments ({recentAdjustments.length})
             </h3>
             <button
+              type="button"
               onClick={handleViewAllMovements}
               className="text-sm text-blue-700 hover:text-blue-900 font-medium"
             >
@@ -937,27 +1079,27 @@ export default function InventoryAdjustmentsPage() {
                   return (
                     <div
                       key={adj.id}
-                      className="flex items-center justify-between text-sm bg-white rounded px-3 py-2"
+                      className="flex items-center justify-between text-sm bg-white rounded px-3 py-2 gap-2"
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
                         <span
                           className={
                             movementType === 'ADJUSTMENT_IN'
-                              ? 'text-green-600 font-bold'
-                              : 'text-red-600 font-bold'
+                              ? 'text-green-600 font-bold shrink-0'
+                              : 'text-red-600 font-bold shrink-0'
                           }
                         >
-                          {movementType === 'ADJUSTMENT_IN' ? '➕' : '➖'}
+                          {movementType === 'ADJUSTMENT_IN' ? '+' : '−'}
                         </span>
-                        <span className="font-medium text-gray-900">
+                        <span className="font-medium text-gray-900 truncate">
                           {productName}
                         </span>
-                        <span className="text-gray-600">
+                        <span className="text-gray-600 shrink-0 tabular-nums">
                           {movementType === 'ADJUSTMENT_IN' ? '+' : '-'}
                           {Math.abs(adj.quantity || 0).toFixed(2)}
                         </span>
                       </div>
-                      <div className="text-xs text-gray-500">
+                      <div className="text-xs text-gray-500 shrink-0">
                         {createdAt?.includes('T')
                           ? `${formatDisplayDate(createdAt)} ${createdAt.split('T')[1].substring(0, 8)}`
                           : formatDisplayDate(createdAt)}
@@ -970,135 +1112,61 @@ export default function InventoryAdjustmentsPage() {
         </div>
       )}
 
-      {/* Search Bar */}
-      <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <label htmlFor="search" className="block text-sm font-medium text-gray-700 mb-2">
-          Search Batches
-        </label>
-        <input
-          id="search"
-          type="text"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="Search by product name or batch number..."
-          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-        />
-        <MobileSortSelect
-          className="mt-4"
-          sortField={sortField}
-          sortOrder={sortOrder}
-          options={mobileSortOptions}
-          onFieldChange={handleColumnSort}
-          onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
-        />
-      </div>
+      {filterQtyOnly && (
+        <div className="px-3 py-2 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-900 flex items-center justify-between gap-2">
+          <span>Showing batches with remaining quantity only ({sortedBatches.length})</span>
+          <button
+            type="button"
+            className="text-amber-800 underline shrink-0"
+            onClick={() => {
+              setFilterQtyOnly(false);
+              handleSort('product', { defaultOrder: 'asc' });
+            }}
+          >
+            Clear filter
+          </button>
+        </div>
+      )}
 
-      {/* Batches Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <ResponsiveTableWrapper>
-          {filterQtyOnly && (
-            <div className="px-6 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-900 flex items-center justify-between">
-              <span>Showing batches with remaining quantity only ({sortedBatches.length})</span>
-              <button
-                type="button"
-                className="text-amber-800 underline"
-                onClick={() => {
-                  setFilterQtyOnly(false);
-                  handleSort('product', { defaultOrder: 'asc' });
-                }}
-              >
-                Clear filter
-              </button>
-            </div>
+      {/* Batches — AdaptiveDataGrid cards on phone / table on desktop */}
+      <div className="bg-white rounded-lg shadow overflow-hidden border border-gray-100">
+        <AdaptiveDataGrid
+          rows={paginatedBatches}
+          getRowId={(batch) => batch.id}
+          emptyMessage={searchTerm ? 'No batches match your search' : 'No inventory batches found'}
+          columns={adjustmentBatchColumns}
+          renderRowActions={(batch) => (
+            <AdaptiveRowActions
+              actions={[
+                {
+                  id: 'adjust',
+                  label: 'Adjust',
+                  tone: 'primary',
+                  onClick: () => handleOpenAdjustModal(batch),
+                },
+                {
+                  id: 'damage',
+                  label: 'Damage',
+                  tone: 'warning',
+                  onClick: () => {
+                    handleOpenAdjustModal(batch);
+                    setTimeout(() => {
+                      setMovementCategory('DAMAGE');
+                      setAdjustmentType('decrease');
+                    }, 0);
+                  },
+                },
+                {
+                  id: 'history',
+                  label: 'History',
+                  tone: 'muted',
+                  onClick: () =>
+                    navigate(`/inventory/stock-movements?product=${batch.product_id}`),
+                },
+              ]}
+            />
           )}
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <SortableTableHeader label="Product" field="product" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
-                <SortableTableHeader label="Category" field="category" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
-                <SortableTableHeader label="Batch Number" field="batchNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
-                <SortableTableHeader label="Quantity" field="quantity" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" filtered={filterQtyOnly} />
-                <SortableTableHeader label="Expiry Date" field="expiryDate" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
-                <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {sortedBatches.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
-                    {searchTerm ? 'No batches match your search' : 'No inventory batches found'}
-                  </td>
-                </tr>
-              ) : (
-                paginatedBatches.map((batch: Batch) => (
-                  <tr key={batch.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-gray-900">{batch.product_name}</div>
-                    </td>
-                    <td className="px-6 py-4 text-sm">
-                      {productCategoryMap.get(batch.product_id) ? (
-                        <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-blue-50 text-blue-700">
-                          {productCategoryMap.get(batch.product_id)}
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">—</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">{batch.batch_number}</td>
-                    <td className="px-6 py-4 text-sm text-gray-900">
-                      <span className="font-semibold">{batch.remaining_quantity.toFixed(2)}</span>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {batch.expiry_date ? formatDisplayDate(batch.expiry_date) : 'N/A'}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span
-                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${batch.status === 'ACTIVE'
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-gray-100 text-gray-800'
-                          }`}
-                      >
-                        {batch.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm space-x-2">
-                      <button
-                        onClick={() => handleOpenAdjustModal(batch)}
-                        className="text-blue-600 hover:text-blue-900 font-medium"
-                      >
-                        Adjust
-                      </button>
-                      <button
-                        onClick={() => {
-                          handleOpenAdjustModal(batch);
-                          // Set category after modal opens
-                          setTimeout(() => {
-                            setMovementCategory('DAMAGE');
-                            setAdjustmentType('decrease');
-                          }, 0);
-                        }}
-                        className="text-orange-600 hover:text-orange-900 font-medium"
-                      >
-                        Damage
-                      </button>
-                      <button
-                        onClick={() =>
-                          navigate(`/inventory/stock-movements?product=${batch.product_id}`)
-                        }
-                        className="text-gray-600 hover:text-gray-900 font-medium"
-                      >
-                        History
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </ResponsiveTableWrapper>
+        />
       </div>
 
       {/* Batch Table Pagination */}
@@ -1128,6 +1196,8 @@ export default function InventoryAdjustmentsPage() {
           </div>
         </div>
       )}
+
+      </AdaptivePage>
 
       {/* Adjustment workspace */}
       {showAdjustModal && selectedBatch && (
@@ -1429,26 +1499,31 @@ export default function InventoryAdjustmentsPage() {
           </div>
         }
       >
-            {/* Statistics Bar */}
-            <div className="px-6 py-3 bg-gray-50 border-b border-gray-200">
-              <ResponsiveGrid cols={4} className="gap-4 text-center">
-                <div>
-                  <div className="text-sm text-gray-600">Total Items</div>
-                  <div className="text-xl font-bold text-gray-900">{physicalCountStats.total}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-600">Counted</div>
-                  <div className="text-xl font-bold text-blue-600">{physicalCountStats.counted}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-600">Remaining</div>
-                  <div className="text-xl font-bold text-yellow-600">{physicalCountStats.remaining}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-600">Discrepancies</div>
-                  <div className="text-xl font-bold text-red-600">{physicalCountStats.discrepancies}</div>
-                </div>
-              </ResponsiveGrid>
+            {/* Statistics Bar — global AdaptiveKpiStrip (2-up phone) */}
+            <div className="px-4 sm:px-6 py-3 bg-gray-50 border-b border-gray-200">
+              <AdaptiveKpiStrip
+                items={[
+                  { id: 'pc-total', label: 'Total Items', value: physicalCountStats.total },
+                  {
+                    id: 'pc-counted',
+                    label: 'Counted',
+                    value: physicalCountStats.counted,
+                    valueClassName: 'text-blue-600',
+                  },
+                  {
+                    id: 'pc-remaining',
+                    label: 'Remaining',
+                    value: physicalCountStats.remaining,
+                    valueClassName: 'text-yellow-600',
+                  },
+                  {
+                    id: 'pc-disc',
+                    label: 'Discrepancies',
+                    value: physicalCountStats.discrepancies,
+                    valueClassName: 'text-red-600',
+                  },
+                ]}
+              />
             </div>
 
             {/* Count Reason */}

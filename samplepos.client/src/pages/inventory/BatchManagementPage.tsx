@@ -19,6 +19,17 @@ import { applyTableSort } from '../../lib/tableSortUtils';
 import SlideDrawer from '../../components/ui/SlideDrawer';
 import { DatePicker } from '../../components/ui/date-picker';
 import { WorkflowHelpTrigger } from '../../components/inventory/shared';
+import {
+  AdaptivePage,
+  AdaptiveToolbar,
+  AdaptiveSearch,
+  AdaptiveKpiStrip,
+} from '../../components/adaptive';
+import {
+  ADAPTIVE_PAGE_PAD_CLASS,
+  ADAPTIVE_TOOLBAR_CARD_CLASS,
+  ADAPTIVE_WORKLIST_DENSITY,
+} from '../../lib/adaptiveDashboard';
 
 type BatchSortField =
   | 'product'
@@ -289,12 +300,12 @@ export default function BatchManagementPage() {
   }
 
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-2xl font-bold text-gray-900">Batch Management</h2>
+    <div data-batch-management-page="true">
+      <AdaptivePage
+        className={ADAPTIVE_PAGE_PAD_CLASS}
+        title={
+          <span className="inline-flex items-center gap-2">
+            Batch Management
             <WorkflowHelpTrigger title="FEFO (First Expiry First Out)">
               <ul className="space-y-1">
                 <li>• Batches are sorted by expiry date (earliest first) to ensure proper stock rotation</li>
@@ -305,126 +316,135 @@ export default function BatchManagementPage() {
                 <li>• Batches without expiry dates appear last in the queue</li>
               </ul>
             </WorkflowHelpTrigger>
-          </div>
-          <p className="text-gray-600 mt-1">FEFO inventory tracking with expiry monitoring</p>
-        </div>
-        <button
-          onClick={() => refetch()}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          🔄 Refresh
-        </button>
-      </div>
-
-      {/* Summary Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Total Batches</div>
-          <div className="text-2xl font-bold text-gray-900 mt-1">{stats.total}</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Active</div>
-          <div className="text-2xl font-bold text-green-600 mt-1">{stats.active}</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Critical (≤7 days)</div>
-          <div className="text-2xl font-bold text-red-600 mt-1">{stats.critical}</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Warning (≤30 days)</div>
-          <div className="text-2xl font-bold text-yellow-600 mt-1">{stats.warning}</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Total Value</div>
-          <div className="text-xl font-bold text-gray-900 mt-1">
-            UGX {stats.totalValue.toLocaleString()}
-          </div>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Search */}
-          <div>
-            <label htmlFor="search" className="block text-sm font-medium text-gray-700 mb-2">
-              Search Batches
-            </label>
-            <input
-              id="search"
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Product name or batch number..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-
-          {/* Status Filter */}
-          <div>
-            <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-2">
-              Status
-            </label>
-            <select
-              id="status-filter"
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as typeof filterStatus)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          </span>
+        }
+        description="FEFO inventory tracking with expiry monitoring"
+        densityOverride={ADAPTIVE_WORKLIST_DENSITY}
+        toolbarInline
+        toolbar={
+          <div className={`${ADAPTIVE_TOOLBAR_CARD_CLASS} space-y-2`} data-batch-filters="true">
+            <AdaptiveToolbar
+              modeOverride="compact"
+              leading={
+                <AdaptiveSearch
+                  value={searchTerm}
+                  onChange={setSearchTerm}
+                  placeholder="Product name or batch number…"
+                  label="Search batches"
+                  presentationOverride="compact"
+                />
+              }
+              secondaryLabel="Filters"
+              secondary={({ close }) => (
+                <div className="space-y-3 w-full" data-batch-filter-panel="true">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-1">
+                        Status
+                      </label>
+                      <select
+                        id="status-filter"
+                        value={filterStatus}
+                        onChange={(e) => {
+                          setFilterStatus(e.target.value as typeof filterStatus);
+                          close();
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                      >
+                        <option value="ALL">All Status</option>
+                        <option value="ACTIVE">Active</option>
+                        <option value="DEPLETED">Depleted</option>
+                        <option value="EXPIRED">Expired</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="urgency-filter"
+                        className="block text-sm font-medium text-gray-700 mb-1"
+                      >
+                        Expiry Urgency
+                      </label>
+                      <select
+                        id="urgency-filter"
+                        value={filterUrgency}
+                        onChange={(e) => {
+                          setFilterUrgency(e.target.value as typeof filterUrgency);
+                          close();
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                      >
+                        <option value="ALL">All Urgency Levels</option>
+                        <option value="CRITICAL">Critical (≤7 days)</option>
+                        <option value="WARNING">Warning (≤30 days)</option>
+                        <option value="NORMAL">Normal (&gt;30 days)</option>
+                        <option value="NONE">No Expiry Date</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setFilterStatus('ALL');
+                      setFilterUrgency('ALL');
+                      close();
+                    }}
+                    className="w-full px-3 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 min-h-[var(--layout-touch-target)]"
+                  >
+                    Reset Filters
+                  </button>
+                </div>
+              )}
+              more={
+                <>
+                  <MobileSortSelect
+                    presentation="menu"
+                    sortField={sortField}
+                    sortOrder={sortOrder}
+                    options={mobileSortOptions}
+                    onFieldChange={handleColumnSort}
+                    onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+                  />
+                  <button type="button" role="menuitem" onClick={() => refetch()} data-batch-refresh="true">
+                    Refresh
+                  </button>
+                </>
+              }
             >
-              <option value="ALL">All Status</option>
-              <option value="ACTIVE">Active</option>
-              <option value="DEPLETED">Depleted</option>
-              <option value="EXPIRED">Expired</option>
-            </select>
+              <span
+                className="text-[11px] sm:text-xs text-stone-500 tabular-nums whitespace-nowrap"
+                data-batch-result-count="true"
+              >
+                {sortedBatches.length}/{batches.length}
+              </span>
+            </AdaptiveToolbar>
           </div>
+        }
+      >
 
-          {/* Urgency Filter */}
-          <div>
-            <label
-              htmlFor="urgency-filter"
-              className="block text-sm font-medium text-gray-700 mb-2"
-            >
-              Expiry Urgency
-            </label>
-            <select
-              id="urgency-filter"
-              value={filterUrgency}
-              onChange={(e) => setFilterUrgency(e.target.value as typeof filterUrgency)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="ALL">All Urgency Levels</option>
-              <option value="CRITICAL">🔴 Critical (≤7 days)</option>
-              <option value="WARNING">🟡 Warning (≤30 days)</option>
-              <option value="NORMAL">🟢 Normal (&gt;30 days)</option>
-              <option value="NONE">No Expiry Date</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Filter Summary */}
-        <div className="flex justify-between items-center mt-4 pt-4 border-t">
-          <div className="text-sm text-gray-600">
-            Showing {sortedBatches.length} of {batches.length} batches
-          </div>
-          <MobileSortSelect
-            sortField={sortField}
-            sortOrder={sortOrder}
-            options={mobileSortOptions}
-            onFieldChange={handleColumnSort}
-            onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
-          />
-          <button
-            onClick={() => {
-              setSearchTerm('');
-              setFilterStatus('ALL');
-              setFilterUrgency('ALL');
-            }}
-            className="text-sm text-gray-700 bg-gray-100 px-3 py-1 rounded hover:bg-gray-200"
-          >
-            Reset Filters
-          </button>
-        </div>
-      </div>
+      <AdaptiveKpiStrip
+        items={[
+          { id: 'total', label: 'Total Batches', value: stats.total },
+          { id: 'active', label: 'Active', value: stats.active, valueClassName: 'text-green-600' },
+          {
+            id: 'critical',
+            label: 'Critical (≤7 days)',
+            value: stats.critical,
+            valueClassName: 'text-red-600',
+          },
+          {
+            id: 'warning',
+            label: 'Warning (≤30 days)',
+            value: stats.warning,
+            valueClassName: 'text-yellow-600',
+          },
+          {
+            id: 'value',
+            label: 'Total Value',
+            value: `UGX ${stats.totalValue.toLocaleString()}`,
+          },
+        ]}
+      />
 
       {/* Batches Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -647,6 +667,8 @@ export default function BatchManagementPage() {
           </table>
         </div>
       </div>
+
+      </AdaptivePage>
 
       {/* Batch Details Modal */}
       {showDetailsModal && selectedBatch && (

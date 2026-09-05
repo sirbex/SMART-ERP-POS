@@ -17,12 +17,22 @@ import { api } from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
+import { mobileActionBtnClass } from '../../components/ui/ResponsiveActionBar';
 import Decimal from 'decimal.js';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
 import SlideDrawer from '../../components/ui/SlideDrawer';
 import {
   AdaptivePage,
+  AdaptiveToolbar,
+  AdaptiveSearch,
+  AdaptiveKpiStrip,
 } from '../../components/adaptive';
+import {
+  ADAPTIVE_PAGE_PAD_CLASS,
+  ADAPTIVE_TOOLBAR_CARD_CLASS,
+  ADAPTIVE_WORKLIST_DENSITY,
+  ADAPTIVE_WORKLIST_SEARCH_DEBOUNCE_MS,
+} from '../../lib/adaptiveDashboard';
 
 import { DatePicker } from '../../components/ui/date-picker';
 import { derivePOReceiptStatusBadge } from '../../../../shared/utils/purchaseOrderReceiptDisplay';
@@ -1292,6 +1302,8 @@ export default function PurchaseOrdersPage() {
 
   const [selectedStatus, setSelectedStatus] = useState<POStatus | 'ALL'>('ALL');
   const [selectedSupplier, setSelectedSupplier] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const limit = 20;
   const {
@@ -1306,6 +1318,18 @@ export default function PurchaseOrdersPage() {
     onQueryChange: () => setPage(1),
   });
 
+  useEffect(() => {
+    const timer = setTimeout(
+      () => setDebouncedSearch(searchTerm.trim()),
+      ADAPTIVE_WORKLIST_SEARCH_DEBOUNCE_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch]);
+
   // API queries
   const {
     data: posData,
@@ -1317,6 +1341,7 @@ export default function PurchaseOrdersPage() {
     limit,
     status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
     supplierId: selectedSupplier || undefined,
+    search: debouncedSearch || undefined,
     ...serverListParams,
   });
 
@@ -1628,8 +1653,9 @@ export default function PurchaseOrdersPage() {
   const hasDeliveryDates = purchaseOrders.some((po: PORow) => po.expectedDelivery);
 
   return (
-    <div className="p-6">
+    <div data-po-page="true">
       <AdaptivePage
+        className={ADAPTIVE_PAGE_PAD_CLASS}
         title={
           <span className="inline-flex items-center gap-2">
             Purchase Orders
@@ -1642,129 +1668,145 @@ export default function PurchaseOrdersPage() {
           </span>
         }
         description="Manage supplier orders with full workflow tracking"
-        primaryActions={
-          canCreatePO ? (
-            <button
-              type="button"
-              onClick={() => setShowCreateModal(true)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 min-h-[var(--layout-touch-target)]"
+        densityOverride={ADAPTIVE_WORKLIST_DENSITY}
+        toolbarInline
+        toolbar={
+          <div className={ADAPTIVE_TOOLBAR_CARD_CLASS} data-po-filters="true">
+            <AdaptiveToolbar
+              modeOverride="compact"
+              actionsBeforeLeading
+              leading={
+                <AdaptiveSearch
+                  value={searchTerm}
+                  onChange={setSearchTerm}
+                  placeholder="PO number, supplier…"
+                  label="Search purchase orders"
+                  presentationOverride="compact"
+                />
+              }
+              secondaryLabel="Filters"
+              secondary={({ close }) => (
+                <div className="space-y-3 w-full" data-po-filter-panel="true">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-1">
+                        Status
+                      </label>
+                      <select
+                        id="status-filter"
+                        value={selectedStatus}
+                        onChange={(e) => {
+                          setSelectedStatus(e.target.value as POStatus | 'ALL');
+                          setPage(1);
+                          close();
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                      >
+                        <option value="ALL">All Statuses</option>
+                        {Object.entries(PO_STATUSES).map(([key, { label, icon }]) => (
+                          <option key={key} value={key}>
+                            {icon} {label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="supplier-filter"
+                        className="block text-sm font-medium text-gray-700 mb-1"
+                      >
+                        Supplier
+                      </label>
+                      <select
+                        id="supplier-filter"
+                        value={selectedSupplier}
+                        onChange={(e) => {
+                          setSelectedSupplier(e.target.value);
+                          setPage(1);
+                          close();
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                      >
+                        <option value="">All Suppliers</option>
+                        {suppliers.map((supplier: Supplier) => (
+                          <option key={supplier.id} value={supplier.id}>
+                            {supplier.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedStatus('ALL');
+                        setSelectedSupplier('');
+                        setSearchTerm('');
+                        setPage(1);
+                        close();
+                      }}
+                      className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors min-h-[var(--layout-touch-target)]"
+                    >
+                      Clear Filters
+                    </button>
+                  </div>
+                </div>
+              )}
+              more={
+                <>
+                  <MobileSortSelect
+                    presentation="menu"
+                    sortField={sortField}
+                    sortOrder={sortOrder}
+                    options={mobileSortOptions}
+                    onFieldChange={handleColumnSort}
+                    onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+                  />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => refetch()}
+                    data-po-refresh="true"
+                  >
+                    Refresh
+                  </button>
+                </>
+              }
             >
-              Create PO
-            </button>
-          ) : null
+              {canCreatePO ? (
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(true)}
+                  className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 min-h-[var(--layout-touch-target)]"
+                  data-po-primary-cta="true"
+                >
+                  Create PO
+                </button>
+              ) : null}
+            </AdaptiveToolbar>
+          </div>
         }
       >
 
-      {/* Summary Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-6">
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Total POs</div>
-          <div className="text-2xl font-bold text-gray-900 mt-1">{stats.total}</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Draft</div>
-          <div className="text-2xl font-bold text-gray-600 mt-1">{stats.draft}</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Pending</div>
-          <div className="text-2xl font-bold text-yellow-600 mt-1">{stats.pending}</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Completed</div>
-          <div className="text-2xl font-bold text-green-600 mt-1">{stats.completed}</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Cancelled</div>
-          <div className="text-2xl font-bold text-red-600 mt-1">{stats.cancelled}</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Total Value</div>
-          <div className="text-xs text-gray-500 mb-1">(excl. cancelled)</div>
-          <div className="text-2xl font-bold text-blue-600">{formatCurrency(stats.totalValue)}</div>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Status Filter */}
-          <div>
-            <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-2">
-              Status
-            </label>
-            <select
-              id="status-filter"
-              value={selectedStatus}
-              onChange={(e) => {
-                setSelectedStatus(e.target.value as POStatus | 'ALL');
-                setPage(1);
-              }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="ALL">All Statuses</option>
-              {Object.entries(PO_STATUSES).map(([key, { label, icon }]) => (
-                <option key={key} value={key}>
-                  {icon} {label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Supplier Filter */}
-          <div>
-            <label
-              htmlFor="supplier-filter"
-              className="block text-sm font-medium text-gray-700 mb-2"
-            >
-              Supplier
-            </label>
-            <select
-              id="supplier-filter"
-              value={selectedSupplier}
-              onChange={(e) => {
-                setSelectedSupplier(e.target.value);
-                setPage(1);
-              }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="">All Suppliers</option>
-              {suppliers.map((supplier: Supplier) => (
-                <option key={supplier.id} value={supplier.id}>
-                  {supplier.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-end gap-2">
-            <button
-              onClick={() => {
-                setSelectedStatus('ALL');
-                setSelectedSupplier('');
-                setPage(1);
-              }}
-              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              Clear Filters
-            </button>
-            <button
-              onClick={() => refetch()}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              🔄 Refresh
-            </button>
-          </div>
-        </div>
-        <MobileSortSelect
-          className="mt-4"
-          sortField={sortField}
-          sortOrder={sortOrder}
-          options={mobileSortOptions}
-          onFieldChange={handleColumnSort}
-          onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
-        />
-      </div>
+      {/* Summary — global AdaptiveKpiStrip (2-up phone, never cols-1 towers) */}
+      <AdaptiveKpiStrip
+        className="mb-1"
+        items={[
+          { id: 'total', label: 'Total POs', value: stats.total },
+          { id: 'draft', label: 'Draft', value: stats.draft, valueClassName: 'text-gray-600' },
+          { id: 'pending', label: 'Pending', value: stats.pending, valueClassName: 'text-yellow-600' },
+          { id: 'completed', label: 'Completed', value: stats.completed, valueClassName: 'text-green-600' },
+          { id: 'cancelled', label: 'Cancelled', value: stats.cancelled, valueClassName: 'text-red-600' },
+          {
+            id: 'value',
+            label: 'Total Value',
+            sub: '(excl. cancelled)',
+            value: formatCurrency(stats.totalValue),
+            valueClassName: 'text-blue-600',
+          },
+        ]}
+      />
 
       {/* Purchase Orders Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -1772,7 +1814,7 @@ export default function PurchaseOrdersPage() {
         <div className="block sm:hidden space-y-3 p-3">
           {purchaseOrders.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
-              {selectedStatus !== 'ALL' || selectedSupplier
+              {selectedStatus !== 'ALL' || selectedSupplier || searchTerm
                 ? 'No purchase orders match your filters'
                 : 'No purchase orders yet. Create your first PO to get started!'}
             </div>
@@ -1846,7 +1888,7 @@ export default function PurchaseOrdersPage() {
                 {purchaseOrders.length === 0 ? (
                   <tr>
                     <td colSpan={hasDeliveryDates ? 7 : 6} className="px-6 py-8 text-center text-gray-500">
-                      {selectedStatus !== 'ALL' || selectedSupplier
+                      {selectedStatus !== 'ALL' || selectedSupplier || searchTerm
                         ? 'No purchase orders match your filters'
                         : 'No purchase orders yet. Create your first PO to get started!'}
                     </td>
@@ -2038,15 +2080,16 @@ export default function PurchaseOrdersPage() {
           subtitle={selectedPO.poNumber}
           width="full"
           footer={
-            <div className="flex justify-between gap-3 flex-wrap">
-              <div className="flex items-center gap-3">
+            <div className="flex flex-col gap-2 w-full sm:flex-row sm:flex-wrap sm:justify-between sm:items-center" data-po-detail-chrome="true">
+              <div className="flex flex-col gap-2 w-full min-[400px]:flex-row min-[400px]:flex-wrap">
                 <button
+                  type="button"
                   onClick={() => handleExportPDF(selectedPO)}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
+                  className={`${mobileActionBtnClass} px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex gap-2`}
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
-                    className="h-4 w-4"
+                    className="h-4 w-4 shrink-0"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -2060,11 +2103,14 @@ export default function PurchaseOrdersPage() {
                   </svg>
                   Export PDF
                 </button>
-                <DocumentFlowButton entityType="PURCHASE_ORDER" entityId={selectedPO.id} size="sm" />
+                <div className="w-full min-[400px]:w-auto [&>button]:w-full min-[400px]:[&>button]:w-auto">
+                  <DocumentFlowButton entityType="PURCHASE_ORDER" entityId={selectedPO.id} size="sm" />
+                </div>
               </div>
               <button
+                type="button"
                 onClick={() => setShowDetailsModal(false)}
-                className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                className={`${mobileActionBtnClass} px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 flex`}
               >
                 Close
               </button>

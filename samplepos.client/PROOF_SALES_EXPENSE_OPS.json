@@ -1,0 +1,65 @@
+{
+  "proof": "SALES_EXPENSE_OPS",
+  "verdict": "PASS",
+  "generatedAt": "2026-09-05T11:49:52.013Z",
+  "passed": 11,
+  "total": 11,
+  "gates": [
+    {
+      "id": "NO_EXPORT_REPORT",
+      "ok": true,
+      "detail": "Sales Analytics no longer shows Export Report"
+    },
+    {
+      "id": "EXPENSE_CTA_GATE",
+      "ok": true,
+      "detail": "New Expense CTA is primaryActions + expenses.create only"
+    },
+    {
+      "id": "EXPENSE_FORM_SSOT",
+      "ok": true,
+      "detail": "Sales opens shared CreateExpenseForm (same SSOT as ExpensesPage)"
+    },
+    {
+      "id": "EXPENSE_LABEL_PARITY",
+      "ok": true,
+      "detail": "Sales modal title matches ExpensesPage create dialog"
+    },
+    {
+      "id": "OPS_EXPENSES_ROUTE",
+      "ok": true,
+      "detail": "/expenses: expenses.read|create, Layout, NO accounting feature"
+    },
+    {
+      "id": "ACCT_EXPENSES_ROUTE",
+      "ok": true,
+      "detail": "/accounting/expenses keeps accounting feature + AccountingLayout"
+    },
+    {
+      "id": "CASHIER_GRANTS_EXPENSE",
+      "ok": true,
+      "detail": "Default cashier grant set includes expenses.create + expenses.read"
+    },
+    {
+      "id": "CASHIER_PATH_EXPENSES",
+      "ok": true,
+      "detail": "Cashier lockdown allows /expenses when expense keys granted"
+    },
+    {
+      "id": "CASHIER_NAV_EXPENSES",
+      "ok": true,
+      "detail": "Cashier nav surfaces Expenses → /expenses"
+    },
+    {
+      "id": "API_CREATE_PERM",
+      "ok": true,
+      "detail": "POST /expenses requires expenses.create"
+    },
+    {
+      "id": "API_NO_ACCT_FEATURE_ON_CREATE",
+      "ok": true,
+      "detail": "Expense routes are not feature-flagged to accounting module"
+    }
+  ],
+  "integrity": "Sales Analytics New Expense (expenses.create) opens CreateExpenseForm without Accounting feature; /expenses ops route + cashier lockdown SSOT; /accounting/expenses remains accounting-locked."
+}

@@ -1,0 +1,119 @@
+{
+  "feature": "ADAPTIVE_DASHBOARD_KPI_DENSITY",
+  "verdict": "PASS",
+  "passed": 19,
+  "total": 19,
+  "integrity": {
+    "ssot": "samplepos.client/src/lib/adaptiveDashboard.ts",
+    "consumers": [
+      "pages/Dashboard.tsx",
+      "pages/SalesPage.tsx",
+      "components/adaptive/AdaptiveReportSummary.tsx"
+    ],
+    "invariants": [
+      "Phone KPI strips are 2-up (never grid-cols-1 towers)",
+      "Neutral and accent tiles share compact padding + value scale",
+      "Sales Analytics and Dashboard both import adaptiveDashboard SSOT",
+      "AdaptiveReportSummary chrome = adaptiveDashboard (global reports)",
+      "Toolbar stacks search full-width; Period label never ···"
+    ]
+  },
+  "gates": [
+    {
+      "id": "NEUTRAL_GRID_2UP",
+      "ok": true,
+      "detail": "grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4"
+    },
+    {
+      "id": "ACCENT_GRID_2UP",
+      "ok": true,
+      "detail": "grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2.5 sm:gap-4"
+    },
+    {
+      "id": "NEUTRAL_COMPACT_PAD",
+      "ok": true,
+      "detail": "bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-5 hover:shadow-md transition-shadow min-w-0"
+    },
+    {
+      "id": "ACCENT_COMPACT_PAD",
+      "ok": true,
+      "detail": "rounded-lg shadow p-3 sm:p-5 text-white min-w-0 bg-gradient-to-br"
+    },
+    {
+      "id": "VALUE_SCALE_ALIGNED",
+      "ok": true,
+      "detail": "neutral and accent value scales match"
+    },
+    {
+      "id": "TONE_HELPER",
+      "ok": true,
+      "detail": "kpiAccentCardClass composes base + tone"
+    },
+    {
+      "id": "PAGE_FRAME",
+      "ok": true,
+      "detail": "p-3 sm:p-6 lg:p-8 space-y-4 sm:space-y-6"
+    },
+    {
+      "id": "DASH_USES_SSOT",
+      "ok": true,
+      "detail": "Dashboard wires adaptiveDashboard"
+    },
+    {
+      "id": "DASH_NO_COLS1_KPI",
+      "ok": true,
+      "detail": "Dashboard removed full-bleed KPI towers"
+    },
+    {
+      "id": "SALES_USES_SSOT",
+      "ok": true,
+      "detail": "Sales Analytics wires accent KPI SSOT + AdaptivePage pad (no double space-y)"
+    },
+    {
+      "id": "SALES_PERIOD_CLOSES",
+      "ok": true,
+      "detail": "period closes after select; search+Period labels (no icon-sheet/··· waste)"
+    },
+    {
+      "id": "SALES_NO_COLS1_KPI",
+      "ok": true,
+      "detail": "Sales removed full-width p-6 accent towers"
+    },
+    {
+      "id": "SALES_HAS_FIVE_TONES",
+      "ok": true,
+      "detail": "all five overview metrics use tone helper"
+    },
+    {
+      "id": "NO_BRAND_FORK",
+      "ok": true,
+      "detail": "capability density only"
+    },
+    {
+      "id": "PAD_SPLIT",
+      "ok": true,
+      "detail": "pad-only class prevents double vertical rhythm under AdaptivePage"
+    },
+    {
+      "id": "WORKLIST_KPI_EXPORT",
+      "ok": true,
+      "detail": "worklist KPI grid helper is part of global SSOT"
+    },
+    {
+      "id": "TOOLBAR_CLOSE_API",
+      "ok": true,
+      "detail": "secondary close API + Filters popover; never cryptic ···"
+    },
+    {
+      "id": "TOOLBAR_OUTSIDE_CLOSE",
+      "ok": true,
+      "detail": "Escape + outside click dismiss panel"
+    },
+    {
+      "id": "SUMMARY_KPI_SSOT",
+      "ok": true,
+      "detail": "report KPI chrome re-exports adaptiveDashboard"
+    }
+  ],
+  "generatedAt": "2026-09-05T11:49:51.642Z"
+}

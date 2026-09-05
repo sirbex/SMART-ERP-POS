@@ -1,0 +1,250 @@
+{
+  "proof": "ADAPTIVE_INVENTORY_GLOBAL_SSOT",
+  "verdict": "PASS",
+  "generatedAt": "2026-09-05T11:49:51.662Z",
+  "passed": 48,
+  "total": 48,
+  "gates": [
+    {
+      "id": "WORKLIST_2UP",
+      "ok": true,
+      "detail": "worklist grids are 2-up on phone"
+    },
+    {
+      "id": "WORKLIST_RESOLVER",
+      "ok": true,
+      "detail": "worklistKpiGridClass maps count → grid class"
+    },
+    {
+      "id": "WORKLIST_DENSITY_TOKEN",
+      "ok": true,
+      "detail": "ADAPTIVE_WORKLIST_DENSITY dense + search debounce 300ms"
+    },
+    {
+      "id": "KPI_STRIP_SSOT",
+      "ok": true,
+      "detail": "AdaptiveKpiStrip + barrel export"
+    },
+    {
+      "id": "DENSE_PRODUCTSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/ProductsPage.tsx: ADAPTIVE_WORKLIST_DENSITY + toolbarInline"
+    },
+    {
+      "id": "SEARCH_PRODUCTSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/ProductsPage.tsx: AdaptiveSearch in AdaptiveToolbar leading (no blank toolbar)"
+    },
+    {
+      "id": "CREATE_FIRST_PRODUCTSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/ProductsPage.tsx: create-first CTAs before Search"
+    },
+    {
+      "id": "DENSE_PURCHASEORDERSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/PurchaseOrdersPage.tsx: ADAPTIVE_WORKLIST_DENSITY + toolbarInline"
+    },
+    {
+      "id": "SEARCH_PURCHASEORDERSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/PurchaseOrdersPage.tsx: AdaptiveSearch in AdaptiveToolbar leading (no blank toolbar)"
+    },
+    {
+      "id": "CREATE_FIRST_PURCHASEORDERSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/PurchaseOrdersPage.tsx: create-first CTAs before Search"
+    },
+    {
+      "id": "SERVER_SEARCH_PURCHASEORDERSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/PurchaseOrdersPage.tsx: debounced server search (accurate, not per-keystroke)"
+    },
+    {
+      "id": "DENSE_GOODSRECEIPTSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/GoodsReceiptsPage.tsx: ADAPTIVE_WORKLIST_DENSITY + toolbarInline"
+    },
+    {
+      "id": "SEARCH_GOODSRECEIPTSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/GoodsReceiptsPage.tsx: AdaptiveSearch in AdaptiveToolbar leading (no blank toolbar)"
+    },
+    {
+      "id": "CREATE_FIRST_GOODSRECEIPTSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/GoodsReceiptsPage.tsx: create-first CTAs before Search"
+    },
+    {
+      "id": "SERVER_SEARCH_GOODSRECEIPTSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/GoodsReceiptsPage.tsx: debounced server search (accurate, not per-keystroke)"
+    },
+    {
+      "id": "DENSE_STOCKMOVEMENTSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/StockMovementsPage.tsx: ADAPTIVE_WORKLIST_DENSITY + toolbarInline"
+    },
+    {
+      "id": "SEARCH_STOCKMOVEMENTSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/StockMovementsPage.tsx: AdaptiveSearch in AdaptiveToolbar leading (no blank toolbar)"
+    },
+    {
+      "id": "CREATE_FIRST_STOCKMOVEMENTSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/StockMovementsPage.tsx: create-first CTAs before Search"
+    },
+    {
+      "id": "SERVER_SEARCH_STOCKMOVEMENTSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/StockMovementsPage.tsx: debounced server search (accurate, not per-keystroke)"
+    },
+    {
+      "id": "DENSE_INVENTORYADJUSTMENTSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/InventoryAdjustmentsPage.tsx: ADAPTIVE_WORKLIST_DENSITY + toolbarInline"
+    },
+    {
+      "id": "SEARCH_INVENTORYADJUSTMENTSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/InventoryAdjustmentsPage.tsx: AdaptiveSearch in AdaptiveToolbar leading (no blank toolbar)"
+    },
+    {
+      "id": "CREATE_FIRST_INVENTORYADJUSTMENTSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/InventoryAdjustmentsPage.tsx: create-first CTAs before Search"
+    },
+    {
+      "id": "DENSE_BATCHMANAGEMENTPAGE",
+      "ok": true,
+      "detail": "pages/inventory/BatchManagementPage.tsx: ADAPTIVE_WORKLIST_DENSITY + toolbarInline"
+    },
+    {
+      "id": "SEARCH_BATCHMANAGEMENTPAGE",
+      "ok": true,
+      "detail": "pages/inventory/BatchManagementPage.tsx: AdaptiveSearch in AdaptiveToolbar leading (no blank toolbar)"
+    },
+    {
+      "id": "DENSE_STOCKLEVELSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/StockLevelsPage.tsx: ADAPTIVE_WORKLIST_DENSITY + toolbarInline"
+    },
+    {
+      "id": "SEARCH_STOCKLEVELSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/StockLevelsPage.tsx: AdaptiveSearch in AdaptiveToolbar leading (no blank toolbar)"
+    },
+    {
+      "id": "DENSE_SUPPLIERRETURNSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/SupplierReturnsPage.tsx: ADAPTIVE_WORKLIST_DENSITY + toolbarInline"
+    },
+    {
+      "id": "SEARCH_SUPPLIERRETURNSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/SupplierReturnsPage.tsx: AdaptiveSearch in AdaptiveToolbar leading (no blank toolbar)"
+    },
+    {
+      "id": "SERVER_SEARCH_SUPPLIERRETURNSPAGE",
+      "ok": true,
+      "detail": "pages/inventory/SupplierReturnsPage.tsx: debounced server search (accurate, not per-keystroke)"
+    },
+    {
+      "id": "PO_KPI_STRIP",
+      "ok": true,
+      "detail": "PO uses AdaptiveKpiStrip; no cols-1×6 towers"
+    },
+    {
+      "id": "PO_FILTERS_TOOLBAR",
+      "ok": true,
+      "detail": "PO: Create + Filters + Search on AdaptiveToolbar (search fills dead space)"
+    },
+    {
+      "id": "ADJ_ADAPTIVE_SHELL",
+      "ok": true,
+      "detail": "Adjustments uses AdaptivePage chrome"
+    },
+    {
+      "id": "ADJ_DATA_GRID",
+      "ok": true,
+      "detail": "batch list uses AdaptiveDataGrid (cards on phone)"
+    },
+    {
+      "id": "ADJ_PC_KPI",
+      "ok": true,
+      "detail": "physical count stats use AdaptiveKpiStrip"
+    },
+    {
+      "id": "MOVEMENTS_SSOT",
+      "ok": true,
+      "detail": "Movement History: dense Adjustments+Filters+More — no CTA towers"
+    },
+    {
+      "id": "BATCHES_SSOT",
+      "ok": true,
+      "detail": "Batch Management: dense Refresh in toolbar More — no hero Refresh CTA"
+    },
+    {
+      "id": "STOCK_KPI_SSOT",
+      "ok": true,
+      "detail": "Stock Levels: dense Filters with close() + More Refresh"
+    },
+    {
+      "id": "ADJ_NO_CTA_TOWER",
+      "ok": true,
+      "detail": "Adjustments: Physical Count before Search; Movement History in More"
+    },
+    {
+      "id": "RETURNS_SSOT",
+      "ok": true,
+      "detail": "Supplier Returns inherits AdaptivePage/Toolbar/facets/row-actions SSOT"
+    },
+    {
+      "id": "PRODUCTS_SSOT",
+      "ok": true,
+      "detail": "Products: title + Add/Filters/Search share one header row (no white band)"
+    },
+    {
+      "id": "PRODUCTS_ACTIONS_BEFORE_SEARCH",
+      "ok": true,
+      "detail": "Products: + Add Product and Filters sit before Search on one row"
+    },
+    {
+      "id": "PRODUCTS_MOBILE_CARD_ALIGN",
+      "ok": true,
+      "detail": "Phone product cards: hide Active (default); only Inactive + ··· aligned — no right-column stack"
+    },
+    {
+      "id": "ACTIONS_BEFORE_LEADING_PROP",
+      "ok": true,
+      "detail": "AdaptiveToolbar exposes actionsBeforeLeading for create-first worklists"
+    },
+    {
+      "id": "PAGE_TOOLBAR_INLINE",
+      "ok": true,
+      "detail": "AdaptivePage: title above full-width toolbar until md; then title|toolbar inline"
+    },
+    {
+      "id": "CREATE_FIRST_RESPONSIVE",
+      "ok": true,
+      "detail": "create-first: no phone flex-basis blank band; sm+ Search grows on one row"
+    },
+    {
+      "id": "MORE_OVERFLOW_ELLIPSIS",
+      "ok": true,
+      "detail": "More trigger is ··· on phone (SAP/Square overflow), labeled More on sm+"
+    },
+    {
+      "id": "MOBILE_SORT_IN_MORE",
+      "ok": true,
+      "detail": "Phone sort lives in More overflow — no separate Sort row under Search"
+    },
+    {
+      "id": "FILTERS_POPOVER",
+      "ok": true,
+      "detail": "Filters popover: align start/end + Escape/outside-click close"
+    }
+  ],
+  "integrity": "Global inventory adaptive SSOT: dense + toolbarInline + AdaptiveSearch on every worklist; create-first CTAs; debounced server search for PO/GR/Movements/Returns; Filters popover; AdaptiveKpiStrip — no blank toolbar bands or per-page chrome forks."
+}

@@ -894,7 +894,7 @@ export const api = {
 
   // Purchase Orders
   purchaseOrders: {
-    list: (params?: { page?: number; limit?: number; status?: string; supplierId?: string } & ServerListParams) =>
+    list: (params?: { page?: number; limit?: number; status?: string; supplierId?: string; search?: string } & ServerListParams) =>
       apiClient.get<ApiResponse>('purchase-orders', {
         params: params
           ? {
@@ -902,6 +902,7 @@ export const api = {
               limit: params.limit,
               status: params.status,
               supplierId: params.supplierId,
+              search: params.search,
               ...toServerListQuery(params),
             }
           : undefined,

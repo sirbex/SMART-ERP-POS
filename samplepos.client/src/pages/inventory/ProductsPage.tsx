@@ -48,6 +48,16 @@ import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
 import { useColumnSort } from '../../hooks/useColumnSort';
 import { applyTableSort } from '../../lib/tableSortUtils';
+import {
+  AdaptivePage,
+  AdaptiveToolbar,
+  AdaptiveSearch,
+  AdaptiveRowActions,
+} from '../../components/adaptive';
+import {
+  ADAPTIVE_PAGE_PAD_CLASS,
+  ADAPTIVE_WORKLIST_DENSITY,
+} from '../../lib/adaptiveDashboard';
 
 type ProductSortField =
   | 'product'
@@ -1227,67 +1237,154 @@ export default function ProductsPage() {
   const [openingStockProduct, setOpeningStockProduct] = useState<{ id: string; name: string; sku: string } | null>(null);
 
   return (
-    <div className="p-6">
-      {/* Offline notice */}
+    <div data-products-page="true">
       {!isOnline && (
-        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2 text-amber-800 text-sm">
+        <div className="mx-3 mt-3 sm:mx-6 sm:mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2 text-amber-800 text-sm">
           <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
           Offline — showing cached products (read-only). Create/edit/delete require an internet connection.
         </div>
       )}
 
-      {/* Master Data Guard — Damaged Items Banner */}
-      {isOnline && <DamagedItemsBanner />}
-
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Products Management</h2>
-          <p className="text-gray-600 mt-1">
-            {isOnline ? 'Manage product catalog with bank-grade precision' : 'Viewing cached product catalog (offline)'}
-          </p>
+      {isOnline && (
+        <div className="px-3 pt-3 sm:px-6 sm:pt-4">
+          <DamagedItemsBanner />
         </div>
-        <button
-          onClick={handleCreate}
-          disabled={!isOnline}
-          className={`px-4 py-2 rounded-lg transition-colors ${isOnline
-            ? 'bg-blue-600 text-white hover:bg-blue-700'
-            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-            }`}
-        >
-          ➕ Add Product
-        </button>
-      </div>
-
-      {canUseStoreFilter && (
-        <StockViewModeToggle mode={stockViewMode} onChange={handleStockViewModeChange} />
       )}
 
-      {/* Success/Error Messages */}
+      <AdaptivePage
+        className={ADAPTIVE_PAGE_PAD_CLASS}
+        title="Products"
+        description={
+          isOnline
+            ? 'Manage product catalog with bank-grade precision'
+            : 'Viewing cached product catalog (offline)'
+        }
+        densityOverride={ADAPTIVE_WORKLIST_DENSITY}
+        toolbarInline
+        toolbar={
+          <div className="space-y-2" data-products-filters="true">
+            {canUseStoreFilter ? (
+              <StockViewModeToggle mode={stockViewMode} onChange={handleStockViewModeChange} />
+            ) : null}
+            <AdaptiveToolbar
+              modeOverride="compact"
+              actionsBeforeLeading
+              leading={
+                <AdaptiveSearch
+                  value={searchTerm}
+                  onChange={setSearchTerm}
+                  placeholder="Search by name, SKU, barcode, or category..."
+                  label="Search products"
+                  presentationOverride="compact"
+                />
+              }
+              secondaryLabel="Filters"
+              secondary={({ close }) => (
+                <div className="space-y-3 w-full" data-products-filter-panel="true">
+                  <div className={`grid grid-cols-1 gap-3 ${byStoreView ? 'sm:grid-cols-2' : ''}`}>
+                    {byStoreView ? (
+                      <StoreLocationSelect
+                        id="filter-store-location-products"
+                        label="Location"
+                        stores={storeLocations}
+                        value={storeFilterId}
+                        onChange={(id) => {
+                          setStoreFilterId(id);
+                          close();
+                        }}
+                      />
+                    ) : null}
+                    <div>
+                      <label htmlFor="filter-category" className="block text-sm font-medium text-gray-700 mb-1">
+                        Category
+                      </label>
+                      <select
+                        id="filter-category"
+                        value={filterCategory}
+                        onChange={(e) => {
+                          setFilterCategory(e.target.value);
+                          close();
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                      >
+                        <option value="all">All Categories</option>
+                        {uniqueCategories.map((cat) => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="filter-status" className="block text-sm font-medium text-gray-700 mb-1">
+                        Status
+                      </label>
+                      <select
+                        id="filter-status"
+                        value={filterStatus}
+                        onChange={(e) => {
+                          setFilterStatus(e.target.value as 'all' | 'active' | 'inactive');
+                          close();
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                      >
+                        <option value="all">All Products</option>
+                        <option value="active">Active Only</option>
+                        <option value="inactive">Inactive Only</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+              more={
+                <MobileSortSelect
+                  presentation="menu"
+                  sortField={sortField}
+                  sortOrder={sortOrder}
+                  options={mobileSortOptions}
+                  onFieldChange={handleColumnSort}
+                  onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+                />
+              }
+            >
+              <button
+                type="button"
+                onClick={handleCreate}
+                disabled={!isOnline}
+                className={`inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium min-h-[var(--layout-touch-target)] ${
+                  isOnline
+                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
+                data-products-primary-cta="true"
+              >
+                + Add Product
+              </button>
+            </AdaptiveToolbar>
+          </div>
+        }
+      >
       {successMessage && (
-        <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+        <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
           <p className="text-sm text-green-800">✓ {successMessage}</p>
         </div>
       )}
 
       {apiError && (
-        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
           <p className="text-sm text-red-800">❌ {apiError}</p>
         </div>
       )}
 
-      {/* Loading State */}
       {isLoading && (
-        <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
           <p className="text-sm text-blue-800">Loading products...</p>
         </div>
       )}
 
-      {/* Error State */}
       {error && (
-        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
           <p className="text-sm text-red-800">Failed to load products: {getErrorMessage(error)}</p>
           <button
+            type="button"
             onClick={() => refetch()}
             className="mt-2 text-sm text-red-600 hover:text-red-800 font-medium"
           >
@@ -1296,77 +1393,8 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {/* Filters */}
-      <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <div
-          className={`grid grid-cols-1 gap-4 ${byStoreView ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}
-        >
-          <div>
-            <label htmlFor="search-products" className="block text-sm font-medium text-gray-700 mb-2">
-              Search Products
-            </label>
-            <input
-              id="search-products"
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by name, SKU, barcode, or category..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-          {byStoreView && (
-            <StoreLocationSelect
-              id="filter-store-location-products"
-              label="Location"
-              stores={storeLocations}
-              value={storeFilterId}
-              onChange={setStoreFilterId}
-            />
-          )}
-          <div>
-            <label htmlFor="filter-category" className="block text-sm font-medium text-gray-700 mb-2">
-              Category
-            </label>
-            <select
-              id="filter-category"
-              value={filterCategory}
-              onChange={(e) => setFilterCategory(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="all">All Categories</option>
-              {uniqueCategories.map((cat) => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="filter-status" className="block text-sm font-medium text-gray-700 mb-2">
-              Status
-            </label>
-            <select
-              id="filter-status"
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as 'all' | 'active' | 'inactive')}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="all">All Products</option>
-              <option value="active">Active Only</option>
-              <option value="inactive">Inactive Only</option>
-            </select>
-          </div>
-        </div>
-        <MobileSortSelect
-          className="mt-4"
-          sortField={sortField}
-          sortOrder={sortOrder}
-          options={mobileSortOptions}
-          onFieldChange={handleColumnSort}
-          onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
-        />
-      </div>
-
       {/* Products Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div className="bg-white rounded-lg border border-gray-100 shadow-sm overflow-hidden">
         {filterStockOnly && (
           <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-900 flex items-center justify-between">
             <span>Showing products with stock on hand only ({sortedProducts.length})</span>
@@ -1383,59 +1411,94 @@ export default function ProductsPage() {
           </div>
         )}
         {/* Mobile Card View */}
-        <div className="block sm:hidden space-y-3 p-3">
+        <div className="block sm:hidden divide-y divide-gray-100">
           {paginatedProducts.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
+            <div className="text-center py-8 text-gray-500 text-sm px-3">
               {searchTerm || filterStatus !== 'all' || filterCategory !== 'all'
                 ? 'No products match your filters'
-                : 'No products yet. Click "Add Product" to create your first product.'}
+                : 'No products yet. Tap + Add Product to create your first product.'}
             </div>
           ) : (
             paginatedProducts.map((product: ProductListItem) => {
               const margin = calculateMargin(product.costPrice, product.sellingPrice);
               return (
-                <div key={product.id} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium text-gray-900 text-sm">{product.name}</span>
-                        {product.trackExpiry && (
-                          <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-full bg-purple-100 text-purple-800">Perishable</span>
-                        )}
+                <div
+                  key={product.id}
+                  className="p-3 min-w-0"
+                  data-products-mobile-card="true"
+                >
+                  {/* Phone SSOT: one right control (⋯). Hide Active (default); only Inactive shows. */}
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <p className="font-semibold text-gray-900 text-sm truncate">
+                          {product.name}
+                        </p>
+                        {!product.isActive ? (
+                          <span
+                            className="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-gray-100 text-gray-700"
+                            data-product-status="inactive"
+                          >
+                            Inactive
+                          </span>
+                        ) : null}
                       </div>
-                      {product.category && (
-                        <span className="inline-flex px-2 py-0.5 mt-1 text-xs font-medium rounded-full bg-blue-50 text-blue-700">{product.category}</span>
-                      )}
+                      {product.category ? (
+                        <p className="text-xs text-gray-500 truncate">{product.category}</p>
+                      ) : null}
+                      <p className="text-xs text-gray-600 leading-snug">
+                        <span>
+                          Sell {formatCurrency(parseCurrency(product.sellingPrice))}
+                          <span className="text-gray-400"> · </span>
+                          {margin}% margin
+                        </span>
+                        <span className="text-gray-300"> · </span>
+                        <span className="tabular-nums text-gray-700" data-product-stock="true">
+                          Stock {formatMultiUomQuantity(product)}
+                        </span>
+                      </p>
+                      {byStoreView && selectedStoreLabel ? (
+                        <p className="text-[11px] text-gray-500">Store: {selectedStoreLabel}</p>
+                      ) : null}
                     </div>
-                    <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${product.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
-                      {product.isActive ? 'Active' : 'Inactive'}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-center mb-3">
-                    <div>
-                      <div className="text-xs text-gray-500">Cost</div>
-                      <div className="text-sm text-gray-900">{formatCurrency(parseCurrency(product.costPrice))}</div>
+                    <div className="shrink-0 self-start" data-products-card-actions="true">
+                      <AdaptiveRowActions
+                        menuLabel="More"
+                        actions={[
+                          {
+                            id: 'history',
+                            label: 'History',
+                            onClick: () => handleViewHistory(product.id!),
+                            appearance: 'link',
+                          },
+                          {
+                            id: 'edit',
+                            label: 'Edit',
+                            onClick: () => handleEdit(productById.get(product.id!) ?? product),
+                            tone: 'primary',
+                            appearance: 'link',
+                          },
+                          {
+                            id: 'opening',
+                            label: 'Opening Stock',
+                            onClick: () =>
+                              setOpeningStockProduct({
+                                id: product.id!,
+                                name: product.name,
+                                sku: product.sku,
+                              }),
+                            appearance: 'link',
+                          },
+                          {
+                            id: 'delete',
+                            label: 'Delete',
+                            onClick: () => handleDeleteClick(product.id!),
+                            tone: 'danger',
+                            appearance: 'link',
+                          },
+                        ]}
+                      />
                     </div>
-                    <div>
-                      <div className="text-xs text-gray-500">Sell</div>
-                      <div className="text-sm font-medium text-gray-900">{formatCurrency(parseCurrency(product.sellingPrice))}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500">Margin</div>
-                      <div className={`text-sm font-medium ${parseFloat(margin) >= 30 ? 'text-green-600' : parseFloat(margin) >= 15 ? 'text-yellow-600' : 'text-red-600'}`}>{margin}%</div>
-                    </div>
-                  </div>
-                  <div className="text-xs text-gray-600 mb-2">
-                    {byStoreView && selectedStoreLabel && (
-                      <span className="block text-gray-500 mb-0.5">Store: {selectedStoreLabel}</span>
-                    )}
-                    Stock: {formatMultiUomQuantity(product)} | Reorder: {product.reorderLevel}
-                  </div>
-                  <div className="flex gap-3 border-t border-gray-100 pt-2">
-                    <button onClick={() => handleViewHistory(product.id!)} className="text-xs text-purple-600 hover:text-purple-800 font-medium">History</button>
-                    <button onClick={() => handleEdit(productById.get(product.id!) ?? product)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
-                    <button onClick={() => setOpeningStockProduct({ id: product.id!, name: product.name, sku: product.sku })} className="text-xs text-green-600 hover:text-green-800 font-medium">Opening Stock</button>
-                    <button onClick={() => handleDeleteClick(product.id!)} className="text-xs text-red-600 hover:text-red-800 font-medium">Delete</button>
                   </div>
                 </div>
               );
@@ -1448,19 +1511,19 @@ export default function ProductsPage() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <SortableTableHeader label="Product" field="product" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
-                <SortableTableHeader label="Category" field="category" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
-                <SortableTableHeader label="SKU/Barcode" field="sku" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
-                <SortableTableHeader label="Pricing" field="pricing" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
-                <SortableTableHeader label="Margin" field="margin" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
+                <SortableTableHeader label="Product" field="product" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-3" />
+                <SortableTableHeader label="Category" field="category" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-3" />
+                <SortableTableHeader label="SKU" field="sku" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-3 hidden lg:table-cell" />
+                <SortableTableHeader label="Pricing" field="pricing" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-3" />
+                <SortableTableHeader label="Margin" field="margin" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-3 hidden xl:table-cell" />
                 {byStoreView && (
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Store
                   </th>
                 )}
-                <SortableTableHeader label="Stock Levels" field="stock" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" filtered={filterStockOnly} />
-                <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                <SortableTableHeader label="Stock" field="stock" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-3" filtered={filterStockOnly} />
+                <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-3 w-[1%] whitespace-nowrap" />
+                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-[1%] whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -1476,91 +1539,92 @@ export default function ProductsPage() {
                 paginatedProducts.map((product: ProductListItem) => {
                   const margin = calculateMargin(product.costPrice, product.sellingPrice);
                   return (
-                    <tr key={product.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <div className="text-sm font-medium text-gray-900">{product.name}</div>
-                          {product.trackExpiry && (
+                    <tr key={product.id} className="hover:bg-gray-50/80">
+                      <td className="px-3 py-2 align-middle">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-sm font-medium text-gray-900 truncate">{product.name}</span>
+                          {product.trackExpiry ? (
                             <span
-                              aria-label="Perishable product - expiry tracked"
-                              className="inline-flex px-2 py-0.5 text-[10px] font-semibold rounded-full bg-purple-100 text-purple-800"
+                              aria-label="Perishable"
+                              className="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-purple-100 text-purple-800"
                             >
-                              Perishable
+                              Exp
                             </span>
-                          )}
+                          ) : null}
                         </div>
-                        <div className="text-sm text-gray-500">{product.description || 'No description'}</div>
+                        {product.description ? (
+                          <div className="text-xs text-gray-500 truncate max-w-[14rem]">{product.description}</div>
+                        ) : null}
                       </td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${product.category
-                          ? 'bg-blue-50 text-blue-700'
-                          : 'text-gray-400'
-                          }`}>
+                      <td className="px-3 py-2 align-middle">
+                        <span className={`text-xs font-medium ${product.category ? 'text-blue-700' : 'text-gray-400'}`}>
                           {product.category || '—'}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900">SKU: {product.sku}</div>
-                        {product.barcode && (
-                          <div className="text-sm text-gray-500">Barcode: {product.barcode}</div>
-                        )}
+                      <td className="px-3 py-2 align-middle hidden lg:table-cell">
+                        <div className="text-xs text-gray-900 tabular-nums">{product.sku}</div>
+                        {product.barcode ? (
+                          <div className="text-[11px] text-gray-500 tabular-nums">{product.barcode}</div>
+                        ) : null}
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900">
-                          Cost: {formatCurrency(parseCurrency(product.costPrice))}
+                      <td className="px-3 py-2 align-middle">
+                        <div className="text-xs text-gray-600 tabular-nums">
+                          {formatCurrency(parseCurrency(product.costPrice))}
                         </div>
-                        <div className="text-sm font-medium text-gray-900">
-                          Sell: {formatCurrency(parseCurrency(product.sellingPrice))}
+                        <div className="text-sm font-medium text-gray-900 tabular-nums">
+                          {formatCurrency(parseCurrency(product.sellingPrice))}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className={`text-sm font-medium ${parseFloat(margin) >= 30 ? 'text-green-600' :
-                          parseFloat(margin) >= 15 ? 'text-yellow-600' : 'text-red-600'
+                      <td className="px-3 py-2 align-middle hidden xl:table-cell">
+                        <span className={`text-sm font-medium tabular-nums ${parseFloat(margin) >= 30 ? 'text-green-600' :
+                          parseFloat(margin) >= 15 ? 'text-amber-600' : 'text-red-600'
                           }`}>
                           {margin}%
-                        </div>
+                        </span>
                       </td>
                       {byStoreView && (
-                        <td className="px-6 py-4 text-sm text-gray-700">
+                        <td className="px-3 py-2 align-middle text-xs text-gray-700">
                           {selectedStoreLabel || '—'}
                         </td>
                       )}
-                      <td className="px-6 py-4">
-                        <div className="text-xs text-gray-600">
-                          <div>On Hand: {formatMultiUomQuantity(product)}</div>
-                          <div>Reorder: {product.reorderLevel}</div>
-                        </div>
+                      <td className="px-3 py-2 align-middle">
+                        <div className="text-xs text-gray-700 tabular-nums">{formatMultiUomQuantity(product)}</div>
+                        <div className="text-[11px] text-gray-500">RO {product.reorderLevel}</div>
                       </td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${product.isActive
+                      <td className="px-3 py-2 align-middle whitespace-nowrap">
+                        <span className={`inline-flex px-1.5 py-0.5 text-[11px] font-semibold rounded ${product.isActive
                           ? 'bg-green-100 text-green-800'
-                          : 'bg-gray-100 text-gray-800'
+                          : 'bg-gray-100 text-gray-700'
                           }`}>
-                          {product.isActive ? 'Active' : 'Inactive'}
+                          {product.isActive ? 'Active' : 'Off'}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => handleViewHistory(product.id!)}
-                            className="text-purple-600 hover:text-purple-800 text-sm font-medium"
-                            title="View product history"
-                          >
-                            📊 History
-                          </button>
-                          <button
-                            onClick={() => handleEdit(productById.get(product.id!) ?? product)}
-                            className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleDeleteClick(product.id!)}
-                            className="text-red-600 hover:text-red-800 text-sm font-medium"
-                          >
-                            Delete
-                          </button>
-                        </div>
+                      <td className="px-3 py-2 align-middle text-right">
+                        <AdaptiveRowActions
+                          presentationOverride="inline"
+                          actions={[
+                            {
+                              id: 'history',
+                              label: 'History',
+                              onClick: () => handleViewHistory(product.id!),
+                              appearance: 'link',
+                            },
+                            {
+                              id: 'edit',
+                              label: 'Edit',
+                              onClick: () => handleEdit(productById.get(product.id!) ?? product),
+                              tone: 'primary',
+                              appearance: 'link',
+                            },
+                            {
+                              id: 'delete',
+                              label: 'Delete',
+                              onClick: () => handleDeleteClick(product.id!),
+                              tone: 'danger',
+                              appearance: 'link',
+                            },
+                          ]}
+                        />
                       </td>
                     </tr>
                   );
@@ -1598,6 +1662,7 @@ export default function ProductsPage() {
           </div>
         )}
       </div>
+      </AdaptivePage>
 
       {/* Create/Edit Modal */}
       {showModal && (
