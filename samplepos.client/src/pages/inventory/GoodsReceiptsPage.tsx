@@ -71,6 +71,8 @@ import { useServerTableSort } from '../../hooks/useServerTableSort';
 import { ListSkeleton } from '../../components/ui/ListSkeleton';
 import { MobileListCard, ResponsiveActionBar, mobileActionBtnClass } from '../../components/ui/ResponsiveActionBar';
 import ManualGRButton from '../../components/inventory/ManualGRButton';
+import { InventoryColumnPicker } from '../../components/inventory/InventoryColumnPicker';
+import { useInventoryColumnPrefs } from '../../hooks/useInventoryColumnPrefs';
 import { getCachedMultistoreEnabled, useMultistoreEnabled } from '../../hooks/useMultistore';
 import { useStoreLocations } from '../../hooks/useWarehouse';
 import { buildStoreLabelMap, resolveStoreLabel } from '../../components/inventory/storeLocationUtils';
@@ -106,6 +108,9 @@ import {
   ADAPTIVE_TOOLBAR_CARD_CLASS,
   ADAPTIVE_WORKLIST_DENSITY,
   ADAPTIVE_WORKLIST_SEARCH_DEBOUNCE_MS,
+  INVENTORY_WORKLIST_TABLE_CLASS,
+  INVENTORY_COL_FILL_CLASS,
+  INVENTORY_COL_FIT_CLASS,
 } from '../../lib/adaptiveDashboard';
 
 // Configure Decimal for financial calculations
@@ -166,6 +171,9 @@ interface GRRow {
   po_number?: string;
   poStatus?: string;
   po_status?: string;
+  /** Linked PO was auto-created by Manual GR (COMPLETED shell until GR posts). */
+  poManualReceipt?: boolean;
+  po_manual_receipt?: boolean;
   supplierName?: string;
   supplier_name?: string;
   supplierId?: string;
@@ -391,6 +399,8 @@ const getDateRange = (preset: DateRangePreset): { start: string; end: string } =
 export default function GoodsReceiptsPage() {
   const workbench = useOutletContext<{ embedded?: boolean } | null>();
   const embedded = Boolean(workbench?.embedded);
+  const columnPrefs = useInventoryColumnPrefs('goods-receipts');
+  const { show: showCol } = columnPrefs;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [billingFilter, setBillingFilter] = useState<'' | 'TO_INVOICE' | 'INVOICED' | 'REVERSED'>('');
@@ -716,12 +726,24 @@ export default function GoodsReceiptsPage() {
     selectedGR?.poStatus ??
     selectedGR?.po_status;
 
+  const linkedPoManualReceipt = Boolean(
+    grDetail?.gr?.poManualReceipt
+      ?? grDetail?.gr?.po_manual_receipt
+      ?? selectedGR?.poManualReceipt
+      ?? selectedGR?.po_manual_receipt,
+  );
+
+  const finalizePoCtx = { manualReceipt: linkedPoManualReceipt };
+
   const canReceiveThisGR =
     selectedGR?.status === 'DRAFT' &&
-    poAllowsGoodsReceiptFinalize(linkedPoStatus);
+    poAllowsGoodsReceiptFinalize(linkedPoStatus, finalizePoCtx);
 
   const isGrReceivable = (gr: GRRow) =>
-    gr.status === 'DRAFT' && poAllowsGoodsReceiptFinalize(gr.poStatus ?? gr.po_status);
+    gr.status === 'DRAFT' &&
+    poAllowsGoodsReceiptFinalize(gr.poStatus ?? gr.po_status, {
+      manualReceipt: Boolean(gr.poManualReceipt ?? gr.po_manual_receipt),
+    });
 
   // DRAFT GR from PO with no lines — sync from PO (fixes GRs created before PO lines existed)
   useEffect(() => {
@@ -1627,14 +1649,25 @@ export default function GoodsReceiptsPage() {
                 </AdaptiveFilterPanel>
               )}
               more={
-                <MobileSortSelect
-                  presentation="menu"
-                  sortField={sortField}
-                  sortOrder={sortOrder}
-                  options={mobileSortOptions}
-                  onFieldChange={handleColumnSort}
-                  onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
-                />
+                <>
+                  <MobileSortSelect
+                    presentation="menu"
+                    sortField={sortField}
+                    sortOrder={sortOrder}
+                    options={mobileSortOptions}
+                    onFieldChange={handleColumnSort}
+                    onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+                  />
+                  <InventoryColumnPicker
+                    presentation="menu"
+                    catalog={columnPrefs.catalog}
+                    visibleIds={columnPrefs.visibleIds}
+                    visibleCount={columnPrefs.visibleCount}
+                    totalCount={columnPrefs.totalCount}
+                    onToggle={columnPrefs.toggle}
+                    onResetDefaults={columnPrefs.resetDefaults}
+                  />
+                </>
               }
             >
               {canCreateGR ? (
@@ -1758,59 +1791,89 @@ export default function GoodsReceiptsPage() {
             </div>
           )}
           <ResponsiveTableWrapper>
-            <table className="min-w-full divide-y divide-gray-200">
+            <table className={INVENTORY_WORKLIST_TABLE_CLASS} data-inventory-worklist-table="true">
               <thead className="bg-gray-50">
                 <tr>
-                  <SortableTableHeader label="GR Number" field="grNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-4 lg:px-6" />
-                  <SortableTableHeader label="PO Number" field="poNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-4 lg:px-6 hidden lg:table-cell" />
-                  <SortableTableHeader label="Supplier" field="supplier" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-4 lg:px-6" />
-                  <SortableTableHeader label="Received Date" field="receivedDate" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-4 lg:px-6 hidden xl:table-cell" />
-                  <SortableTableHeader label="Receipt" field="receiptStatus" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-4 lg:px-6" />
-                  <SortableTableHeader label="Invoice" field="invoiceStatus" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-4 lg:px-6" filtered={billingFilter === 'TO_INVOICE' && sortField === 'invoiceStatus'} />
-                  <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
+                  {showCol('grNumber') ? (
+                    <SortableTableHeader label="GR Number" field="grNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={`px-4 lg:px-6 ${INVENTORY_COL_FILL_CLASS}`} />
+                  ) : null}
+                  {showCol('poNumber') ? (
+                    <SortableTableHeader label="PO Number" field="poNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={`px-4 lg:px-6 ${INVENTORY_COL_FIT_CLASS}`} />
+                  ) : null}
+                  {showCol('supplier') ? (
+                    <SortableTableHeader label="Supplier" field="supplier" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={`px-4 lg:px-6 ${INVENTORY_COL_FIT_CLASS}`} />
+                  ) : null}
+                  {showCol('receivedDate') ? (
+                    <SortableTableHeader label="Received Date" field="receivedDate" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={`px-4 lg:px-6 ${INVENTORY_COL_FIT_CLASS}`} />
+                  ) : null}
+                  {showCol('receiptStatus') ? (
+                    <SortableTableHeader label="Receipt" field="receiptStatus" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={`px-4 lg:px-6 ${INVENTORY_COL_FIT_CLASS}`} />
+                  ) : null}
+                  {showCol('invoiceStatus') ? (
+                    <SortableTableHeader label="Invoice" field="invoiceStatus" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={`px-4 lg:px-6 ${INVENTORY_COL_FIT_CLASS}`} filtered={billingFilter === 'TO_INVOICE' && sortField === 'invoiceStatus'} />
+                  ) : null}
+                  {showCol('actions') ? (
+                    <th className={`px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${INVENTORY_COL_FIT_CLASS}`}>
+                      Actions
+                    </th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {displayGoodsReceipts.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={columnPrefs.visibleCount} className="px-6 py-12 text-center text-gray-500">
                       No goods receipts found
                     </td>
                   </tr>
                 ) : (
                   displayGoodsReceipts.map((gr: GRRow) => (
                     <tr key={gr.id} className="hover:bg-gray-50/80 transition-colors">
-                      <td className="px-4 lg:px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {gr.grNumber || gr.receiptNumber || gr.receipt_number}
-                      </td>
-                      <td className="px-4 lg:px-6 py-3 whitespace-nowrap text-sm text-gray-900 hidden lg:table-cell">
-                        {gr.poNumber || gr.po_number || '-'}
-                      </td>
-                      <td className="px-4 lg:px-6 py-3 text-sm text-gray-900 max-w-[180px] truncate">
-                        {gr.supplierName || gr.supplier_name || '-'}
-                      </td>
-                      <td className="px-4 lg:px-6 py-3 whitespace-nowrap text-sm text-gray-500 hidden xl:table-cell">
-                        {formatDisplayDate(gr.receivedDate || gr.received_date)}
-                      </td>
-                      <td className="px-4 lg:px-6 py-3 whitespace-nowrap">
-                        <GrReceiptStatusBadge
-                          status={gr.status}
-                          isReversed={gr.isReversed ?? gr.is_reversed}
-                        />
-                      </td>
-                      <td className="px-4 lg:px-6 py-3 whitespace-nowrap">
-                        <GrBillingStatusBadge
-                          receiptStatus={gr.status}
-                          billingStatus={gr.billingStatus || gr.billing_status}
-                          supplierBillNumber={gr.supplierBillNumber || gr.supplier_bill_number}
-                          isReversed={gr.isReversed ?? gr.is_reversed}
-                        />
-                      </td>
-                      <td className="px-4 lg:px-6 py-3 whitespace-nowrap text-sm">
-                        {renderGrActions(gr)}
-                      </td>
+                      {showCol('grNumber') ? (
+                        <td className={`px-4 lg:px-6 py-3 text-sm font-medium text-gray-900 ${INVENTORY_COL_FILL_CLASS}`}>
+                          <div className="truncate min-w-0">
+                            {gr.grNumber || gr.receiptNumber || gr.receipt_number}
+                          </div>
+                        </td>
+                      ) : null}
+                      {showCol('poNumber') ? (
+                        <td className={`px-4 lg:px-6 py-3 text-sm text-gray-900 ${INVENTORY_COL_FIT_CLASS}`}>
+                          {gr.poNumber || gr.po_number || '-'}
+                        </td>
+                      ) : null}
+                      {showCol('supplier') ? (
+                        <td className={`px-4 lg:px-6 py-3 text-sm text-gray-900 ${INVENTORY_COL_FIT_CLASS}`}>
+                          {gr.supplierName || gr.supplier_name || '-'}
+                        </td>
+                      ) : null}
+                      {showCol('receivedDate') ? (
+                        <td className={`px-4 lg:px-6 py-3 text-sm text-gray-500 ${INVENTORY_COL_FIT_CLASS}`}>
+                          {formatDisplayDate(gr.receivedDate || gr.received_date)}
+                        </td>
+                      ) : null}
+                      {showCol('receiptStatus') ? (
+                        <td className={`px-4 lg:px-6 py-3 ${INVENTORY_COL_FIT_CLASS}`}>
+                          <GrReceiptStatusBadge
+                            status={gr.status}
+                            isReversed={gr.isReversed ?? gr.is_reversed}
+                          />
+                        </td>
+                      ) : null}
+                      {showCol('invoiceStatus') ? (
+                        <td className={`px-4 lg:px-6 py-3 ${INVENTORY_COL_FIT_CLASS}`}>
+                          <GrBillingStatusBadge
+                            receiptStatus={gr.status}
+                            billingStatus={gr.billingStatus || gr.billing_status}
+                            supplierBillNumber={gr.supplierBillNumber || gr.supplier_bill_number}
+                            isReversed={gr.isReversed ?? gr.is_reversed}
+                          />
+                        </td>
+                      ) : null}
+                      {showCol('actions') ? (
+                        <td className={`px-4 lg:px-6 py-3 text-sm ${INVENTORY_COL_FIT_CLASS}`}>
+                          {renderGrActions(gr)}
+                        </td>
+                      ) : null}
                     </tr>
                   ))
                 )}
@@ -2240,10 +2303,17 @@ export default function GoodsReceiptsPage() {
                 {selectedGR.status === 'DRAFT' &&
                   linkedPoStatus &&
                   linkedPoStatus !== 'CANCELLED' &&
-                  !poAllowsGoodsReceiptFinalize(linkedPoStatus) && (
+                  !poAllowsGoodsReceiptFinalize(linkedPoStatus, finalizePoCtx) && (
                   <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                     Purchase order is <strong>{linkedPoStatus}</strong> — submit and send it to the supplier before receiving.
                     After a full reverse the PO returns to Draft; Finalize stays blocked until that cycle is open again.
+                  </p>
+                )}
+                {selectedGR.status === 'DRAFT' &&
+                  linkedPoManualReceipt &&
+                  canReceiveThisGR && (
+                  <p className="text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                    Manual receipt — the linked PO is a tracking document (shown as Completed). Finalize this draft to post stock.
                   </p>
                 )}
                 {selectedGR.status === 'DRAFT' && (

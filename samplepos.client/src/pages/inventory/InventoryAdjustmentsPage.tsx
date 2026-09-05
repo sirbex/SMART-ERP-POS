@@ -28,6 +28,8 @@ import {
   ADAPTIVE_WORKLIST_DENSITY,
 } from '../../lib/adaptiveDashboard';
 import { AdaptiveRowActions } from '../../components/adaptive';
+import { InventoryColumnPicker } from '../../components/inventory/InventoryColumnPicker';
+import { useInventoryColumnPrefs } from '../../hooks/useInventoryColumnPrefs';
 import { useStockLevels, useAdjustInventory, useAdjustBatch } from '../../hooks/useInventory';
 import { useMultistoreEnabled } from '../../hooks/useMultistore';
 import { useStoreLocations, useStockLevelsByStore, useStoreLotsAtStore } from '../../hooks/useWarehouse';
@@ -162,6 +164,8 @@ export default function InventoryAdjustmentsPage() {
 
   const ITEMS_PER_PAGE = 50;
   const [searchTerm, setSearchTerm] = useState('');
+  const columnPrefs = useInventoryColumnPrefs('adjustments');
+  const { show: showCol } = columnPrefs;
   const [currentPage, setCurrentPage] = useState(1);
   const [filterQtyOnly, setFilterQtyOnly] = useState(false);
   const { sortField, sortOrder, handleSort, setSortOrder } =
@@ -859,7 +863,8 @@ export default function InventoryAdjustmentsPage() {
     );
   }
 
-  const adjustmentBatchColumns: AdaptiveDataColumn<Batch>[] = [
+  const adjustmentBatchColumns: AdaptiveDataColumn<Batch>[] = useMemo(() => {
+    const all: AdaptiveDataColumn<Batch>[] = [
     {
       id: 'product',
       header: 'Product',
@@ -929,6 +934,8 @@ export default function InventoryAdjustmentsPage() {
       ),
     },
   ];
+    return all.filter((c) => showCol(c.id));
+  }, [productCategoryMap, showCol]);
 
   return (
     <div data-inventory-adjustments-page="true">
@@ -1028,6 +1035,15 @@ export default function InventoryAdjustmentsPage() {
                   >
                     Movement History
                   </button>
+                  <InventoryColumnPicker
+                    presentation="menu"
+                    catalog={columnPrefs.catalog}
+                    visibleIds={columnPrefs.visibleIds}
+                    visibleCount={columnPrefs.visibleCount}
+                    totalCount={columnPrefs.totalCount}
+                    onToggle={columnPrefs.toggle}
+                    onResetDefaults={columnPrefs.resetDefaults}
+                  />
                 </>
               }
             >

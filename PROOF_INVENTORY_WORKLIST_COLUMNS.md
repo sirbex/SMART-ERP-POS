@@ -1,0 +1,81 @@
+# PROOF_INVENTORY_WORKLIST_COLUMNS
+
+Verdict: **PASS** (73/73)
+
+Columns control is ONLY inside AdaptiveToolbar more={...} with presentation="menu" on all 8 inventory worklists; prefs SSOT heals empty/required; no table-fixed collapse.
+
+Users choose which inventory table columns to show (SKU, Status, Expiry, …). Prefs persist per worklist. Columns lives under **More**, never as a standalone toolbar button.
+
+- PASS `CATALOG_products`: products has column catalog
+- PASS `DEFAULTS_products`: products defaults non-empty
+- PASS `EMPTY_HEAL_products`: products empty → defaults
+- PASS `REQUIRED_products`: products required columns cannot be removed
+- PASS `STORAGE_KEY_products`: products stable v2 storage key
+- PASS `CATALOG_adjustments`: adjustments has column catalog
+- PASS `DEFAULTS_adjustments`: adjustments defaults non-empty
+- PASS `EMPTY_HEAL_adjustments`: adjustments empty → defaults
+- PASS `REQUIRED_adjustments`: adjustments required columns cannot be removed
+- PASS `STORAGE_KEY_adjustments`: adjustments stable v2 storage key
+- PASS `CATALOG_stock-levels`: stock-levels has column catalog
+- PASS `DEFAULTS_stock-levels`: stock-levels defaults non-empty
+- PASS `EMPTY_HEAL_stock-levels`: stock-levels empty → defaults
+- PASS `REQUIRED_stock-levels`: stock-levels required columns cannot be removed
+- PASS `STORAGE_KEY_stock-levels`: stock-levels stable v2 storage key
+- PASS `CATALOG_stock-movements`: stock-movements has column catalog
+- PASS `DEFAULTS_stock-movements`: stock-movements defaults non-empty
+- PASS `EMPTY_HEAL_stock-movements`: stock-movements empty → defaults
+- PASS `REQUIRED_stock-movements`: stock-movements required columns cannot be removed
+- PASS `STORAGE_KEY_stock-movements`: stock-movements stable v2 storage key
+- PASS `CATALOG_goods-receipts`: goods-receipts has column catalog
+- PASS `DEFAULTS_goods-receipts`: goods-receipts defaults non-empty
+- PASS `EMPTY_HEAL_goods-receipts`: goods-receipts empty → defaults
+- PASS `REQUIRED_goods-receipts`: goods-receipts required columns cannot be removed
+- PASS `STORAGE_KEY_goods-receipts`: goods-receipts stable v2 storage key
+- PASS `CATALOG_purchase-orders`: purchase-orders has column catalog
+- PASS `DEFAULTS_purchase-orders`: purchase-orders defaults non-empty
+- PASS `EMPTY_HEAL_purchase-orders`: purchase-orders empty → defaults
+- PASS `REQUIRED_purchase-orders`: purchase-orders required columns cannot be removed
+- PASS `STORAGE_KEY_purchase-orders`: purchase-orders stable v2 storage key
+- PASS `CATALOG_supplier-returns`: supplier-returns has column catalog
+- PASS `DEFAULTS_supplier-returns`: supplier-returns defaults non-empty
+- PASS `EMPTY_HEAL_supplier-returns`: supplier-returns empty → defaults
+- PASS `REQUIRED_supplier-returns`: supplier-returns required columns cannot be removed
+- PASS `STORAGE_KEY_supplier-returns`: supplier-returns stable v2 storage key
+- PASS `CATALOG_batch-management`: batch-management has column catalog
+- PASS `DEFAULTS_batch-management`: batch-management defaults non-empty
+- PASS `EMPTY_HEAL_batch-management`: batch-management empty → defaults
+- PASS `REQUIRED_batch-management`: batch-management required columns cannot be removed
+- PASS `STORAGE_KEY_batch-management`: batch-management stable v2 storage key
+- PASS `SSOT_KEYS`: all worklist ids registered
+- PASS `RESOLVE_DROP_UNKNOWN`: unknown column ids dropped
+- PASS `RESOLVE_DEDUP`: duplicate selected ids collapsed
+- PASS `RESOLVE_CATALOG_ORDER`: catalog order + required (product/actions) forced in
+- PASS `STORE_FILTER`: includeStore:false omits Store from catalog
+- PASS `IS_VISIBLE_HELPER`: isColumnVisible matches resolved set
+- PASS `PICKER_UI`: InventoryColumnPicker column checklist UI
+- PASS `PICKER_MENU_PRESENTATION`: InventoryColumnPicker supports presentation=menu for AdaptiveToolbar More
+- PASS `PICKER_MENU_STOP_PROPAGATION`: menu Columns ticks do not close More (stopPropagation)
+- PASS `HOOK_PERSIST`: prefs persist per worklist in localStorage
+- PASS `HOOK_REQUIRED_NO_TOGGLE`: hook refuses toggling required columns off
+- PASS `TABLE_FILL_SSOT`: worklist tables use natural auto layout (no table-fixed+1% collapse bug)
+- PASS `GRID_TABLE_FILL`: AdaptiveDataGrid uses natural column sizing (no table-fixed collapse)
+- PASS `PRODUCTS_WIRED`: pages/inventory/ProductsPage.tsx hooks prefs + fill layout for products
+- PASS `PRODUCTS_COLUMNS_IN_MORE`: pages/inventory/ProductsPage.tsx: 1 picker(s) only inside more (menu)
+- PASS `ADJUSTMENTS_WIRED`: pages/inventory/InventoryAdjustmentsPage.tsx hooks prefs + fill layout for adjustments
+- PASS `ADJUSTMENTS_COLUMNS_IN_MORE`: pages/inventory/InventoryAdjustmentsPage.tsx: 1 picker(s) only inside more (menu)
+- PASS `STOCK_LEVELS_WIRED`: pages/inventory/StockLevelsPage.tsx hooks prefs + fill layout for stock-levels
+- PASS `STOCK_LEVELS_COLUMNS_IN_MORE`: pages/inventory/StockLevelsPage.tsx: 1 picker(s) only inside more (menu)
+- PASS `STOCK_MOVEMENTS_WIRED`: pages/inventory/StockMovementsPage.tsx hooks prefs + fill layout for stock-movements
+- PASS `STOCK_MOVEMENTS_COLUMNS_IN_MORE`: pages/inventory/StockMovementsPage.tsx: 1 picker(s) only inside more (menu)
+- PASS `GOODS_RECEIPTS_WIRED`: pages/inventory/GoodsReceiptsPage.tsx hooks prefs + fill layout for goods-receipts
+- PASS `GOODS_RECEIPTS_COLUMNS_IN_MORE`: pages/inventory/GoodsReceiptsPage.tsx: 1 picker(s) only inside more (menu)
+- PASS `PURCHASE_ORDERS_WIRED`: pages/inventory/PurchaseOrdersPage.tsx hooks prefs + fill layout for purchase-orders
+- PASS `PURCHASE_ORDERS_COLUMNS_IN_MORE`: pages/inventory/PurchaseOrdersPage.tsx: 1 picker(s) only inside more (menu)
+- PASS `SUPPLIER_RETURNS_WIRED`: pages/inventory/SupplierReturnsPage.tsx hooks prefs + fill layout for supplier-returns
+- PASS `SUPPLIER_RETURNS_COLUMNS_IN_MORE`: pages/inventory/SupplierReturnsPage.tsx: 1 picker(s) only inside more (menu)
+- PASS `BATCH_MGMT_WIRED`: pages/inventory/BatchManagementPage.tsx hooks prefs + fill layout for batch-management
+- PASS `BATCH_MGMT_COLUMNS_IN_MORE`: pages/inventory/BatchManagementPage.tsx: 1 picker(s) only inside more (menu)
+- PASS `PRODUCTS_EXPIRY`: Products Columns includes Expiry (nearest batch date)
+- PASS `ADJUSTMENTS_FILTER`: Adjustments filters AdaptiveDataGrid columns by prefs
+- PASS `NO_STANDALONE_COLUMNS_BUTTON`: zero inventory worklists use Columns as a primary toolbar button
+- PASS `WORKLIST_PAGE_COUNT`: proof covers every registered worklist page

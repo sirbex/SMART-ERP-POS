@@ -22,6 +22,8 @@ import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
 import { useColumnSort } from '../../hooks/useColumnSort';
 import { applyTableSort } from '../../lib/tableSortUtils';
+import { InventoryColumnPicker } from '../../components/inventory/InventoryColumnPicker';
+import { useInventoryColumnPrefs } from '../../hooks/useInventoryColumnPrefs';
 import {
   AdaptivePage,
   AdaptiveSearch,
@@ -32,6 +34,9 @@ import {
   ADAPTIVE_PAGE_PAD_CLASS,
   ADAPTIVE_TOOLBAR_CARD_CLASS,
   ADAPTIVE_WORKLIST_DENSITY,
+  INVENTORY_WORKLIST_TABLE_CLASS,
+  INVENTORY_COL_FILL_CLASS,
+  INVENTORY_COL_FIT_CLASS,
 } from '../../lib/adaptiveDashboard';
 
 function unwrapStockListPayload(payload: unknown): unknown[] {
@@ -117,6 +122,8 @@ export default function StockLevelsPage() {
   }, [isMultistoreEnabled, permissions]);
   const [stockViewMode, setStockViewMode] = useState<StockViewMode>(() => readStockViewMode());
   const byStoreView = canUseStoreFilter && stockViewMode === 'store';
+  const columnPrefs = useInventoryColumnPrefs('stock-levels', { includeStore: byStoreView });
+  const { show: showCol } = columnPrefs;
   const { data: storeLocations = [] } = useStoreLocations(byStoreView && isOnline);
   const [storeFilterId, setStoreFilterId] = useState('');
 
@@ -327,7 +334,19 @@ export default function StockLevelsPage() {
     setCurrentPage(1);
   }, [searchTerm, filterStatus, filterCategory, filterQtyOnly, sortField, sortOrder, storeFilterId]);
 
-  const tableColSpan = byStoreView ? 8 : 7;
+  const tableColSpan = useMemo(() => {
+    const ids = [
+      'product',
+      'category',
+      ...(byStoreView ? (['store'] as const) : []),
+      'quantity',
+      'price',
+      'reorderLevel',
+      'expiry',
+      'status',
+    ];
+    return ids.filter((id) => showCol(id)).length;
+  }, [byStoreView, showCol]);
 
   // Paginated stock levels
   const totalPages = Math.max(1, Math.ceil(sortedStockLevels.length / ITEMS_PER_PAGE));
@@ -468,6 +487,15 @@ export default function StockLevelsPage() {
                   <button type="button" role="menuitem" onClick={() => refetch()} data-stock-refresh="true">
                     Refresh
                   </button>
+                  <InventoryColumnPicker
+                    presentation="menu"
+                    catalog={columnPrefs.catalog}
+                    visibleIds={columnPrefs.visibleIds}
+                    visibleCount={columnPrefs.visibleCount}
+                    totalCount={columnPrefs.totalCount}
+                    onToggle={columnPrefs.toggle}
+                    onResetDefaults={columnPrefs.resetDefaults}
+                  />
                 </>
               }
             />
@@ -492,68 +520,89 @@ export default function StockLevelsPage() {
             </button>
           </div>
         )}
-        <table className="min-w-full divide-y divide-gray-200">
+        <table className={INVENTORY_WORKLIST_TABLE_CLASS} data-inventory-worklist-table="true">
           <thead className="bg-gray-50">
             <tr>
-              <SortableTableHeader
-                label="Product"
-                field="product"
-                activeField={sortField}
-                direction={sortOrder}
-                onSort={handleColumnSort}
-              />
-              <SortableTableHeader
-                label="Category"
-                field="category"
-                activeField={sortField}
-                direction={sortOrder}
-                onSort={handleColumnSort}
-              />
-              {byStoreView && (
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              {showCol('product') ? (
+                <SortableTableHeader
+                  label="Product"
+                  field="product"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                  className={INVENTORY_COL_FILL_CLASS}
+                />
+              ) : null}
+              {showCol('category') ? (
+                <SortableTableHeader
+                  label="Category"
+                  field="category"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                  className={INVENTORY_COL_FIT_CLASS}
+                />
+              ) : null}
+              {byStoreView && showCol('store') ? (
+                <th className={`px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${INVENTORY_COL_FIT_CLASS}`}>
                   Store
                 </th>
-              )}
-              <SortableTableHeader
-                label="Quantity"
-                field="quantity"
-                activeField={sortField}
-                direction={sortOrder}
-                onSort={handleColumnSort}
-                filtered={filterQtyOnly}
-              />
-              <SortableTableHeader
-                label="Price"
-                field="price"
-                activeField={sortField}
-                direction={sortOrder}
-                onSort={handleColumnSort}
-                align="right"
-              />
-              <SortableTableHeader
-                label="Reorder Level"
-                field="reorderLevel"
-                activeField={sortField}
-                direction={sortOrder}
-                onSort={handleColumnSort}
-                align="center"
-              />
-              <SortableTableHeader
-                label="Expiry"
-                field="expiry"
-                activeField={sortField}
-                direction={sortOrder}
-                onSort={handleColumnSort}
-                align="center"
-              />
-              <SortableTableHeader
-                label="Status"
-                field="status"
-                activeField={sortField}
-                direction={sortOrder}
-                onSort={handleColumnSort}
-                align="center"
-              />
+              ) : null}
+              {showCol('quantity') ? (
+                <SortableTableHeader
+                  label="Quantity"
+                  field="quantity"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                  filtered={filterQtyOnly}
+                  className={INVENTORY_COL_FIT_CLASS}
+                />
+              ) : null}
+              {showCol('price') ? (
+                <SortableTableHeader
+                  label="Price"
+                  field="price"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                  align="right"
+                  className={INVENTORY_COL_FIT_CLASS}
+                />
+              ) : null}
+              {showCol('reorderLevel') ? (
+                <SortableTableHeader
+                  label="Reorder Level"
+                  field="reorderLevel"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                  align="center"
+                  className={INVENTORY_COL_FIT_CLASS}
+                />
+              ) : null}
+              {showCol('expiry') ? (
+                <SortableTableHeader
+                  label="Expiry"
+                  field="expiry"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                  align="center"
+                  className={INVENTORY_COL_FIT_CLASS}
+                />
+              ) : null}
+              {showCol('status') ? (
+                <SortableTableHeader
+                  label="Status"
+                  field="status"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                  align="center"
+                  className={INVENTORY_COL_FIT_CLASS}
+                />
+              ) : null}
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
@@ -580,73 +629,87 @@ export default function StockLevelsPage() {
 
                 return (
                   <tr key={item.product_id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-4 whitespace-nowrap">
-                      <div className="flex flex-col">
-                        <div className="text-sm font-medium text-gray-900">{item.product_name}</div>
-                        {product && (
-                          <div className="text-xs text-gray-500 mt-1">SKU: {product.sku}</div>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${product?.category
-                        ? 'bg-blue-50 text-blue-700'
-                        : 'text-gray-400'
-                        }`}>
-                        {product?.category || '\u2014'}
-                      </span>
-                    </td>
-                    {byStoreView && (
-                      <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-700">
+                    {showCol('product') ? (
+                      <td className={`px-4 py-4 ${INVENTORY_COL_FILL_CLASS}`}>
+                        <div className="flex flex-col min-w-0">
+                          <div className="text-sm font-medium text-gray-900 truncate">{item.product_name}</div>
+                          {product && (
+                            <div className="text-xs text-gray-500 mt-1 truncate">SKU: {product.sku}</div>
+                          )}
+                        </div>
+                      </td>
+                    ) : null}
+                    {showCol('category') ? (
+                      <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
+                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${product?.category
+                          ? 'bg-blue-50 text-blue-700'
+                          : 'text-gray-400'
+                          }`}>
+                          {product?.category || '\u2014'}
+                        </span>
+                      </td>
+                    ) : null}
+                    {byStoreView && showCol('store') ? (
+                      <td className={`px-4 py-4 text-sm text-gray-700 ${INVENTORY_COL_FIT_CLASS}`}>
                         {item.storeDisplayLabel ?? '—'}
                       </td>
-                    )}
-                    <td className="px-4 py-4">
-                      <div className="flex flex-col gap-1">
-                        <div className="text-sm font-bold text-blue-600">
-                          {formatMultiUomQuantity(totalQty, uomProduct)}
-                        </div>
-                        <div className="text-xs text-gray-500">{totalQty.toFixed(2)} base</div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 text-right whitespace-nowrap">
-                      <div className="text-sm font-semibold text-gray-900">
-                        {formatCurrency(sellingPrice)}
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 text-center whitespace-nowrap">
-                      <span className="text-sm text-gray-700 font-medium">
-                        {reorderLevel.toFixed(0)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-center whitespace-nowrap">
-                      {(() => {
-                        const days = getDaysUntilExpiry(item.nearest_expiry);
-                        const badge = getExpiryBadge(days);
-                        return (
-                          <div className="flex flex-col items-center gap-1">
-                            <span
-                              className={`inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full ${badge.className}`}
-                            >
-                              {badge.label}
-                            </span>
-                            {item.nearest_expiry && (
-                              <span className="text-xs text-gray-400">{item.nearest_expiry}</span>
-                            )}
+                    ) : null}
+                    {showCol('quantity') ? (
+                      <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
+                        <div className="flex flex-col gap-1">
+                          <div className="text-sm font-bold text-blue-600">
+                            {formatMultiUomQuantity(totalQty, uomProduct)}
                           </div>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-4 py-4 text-center whitespace-nowrap">
-                      <span
-                        className={`inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full ${needsReorder
-                          ? 'bg-yellow-100 text-yellow-800'
-                          : 'bg-green-100 text-green-800'
-                          }`}
-                      >
-                        {needsReorder ? '⚠️ Low Stock' : '✓ Normal'}
-                      </span>
-                    </td>
+                          <div className="text-xs text-gray-500">{totalQty.toFixed(2)} base</div>
+                        </div>
+                      </td>
+                    ) : null}
+                    {showCol('price') ? (
+                      <td className={`px-4 py-4 text-right ${INVENTORY_COL_FIT_CLASS}`}>
+                        <div className="text-sm font-semibold text-gray-900">
+                          {formatCurrency(sellingPrice)}
+                        </div>
+                      </td>
+                    ) : null}
+                    {showCol('reorderLevel') ? (
+                      <td className={`px-4 py-4 text-center ${INVENTORY_COL_FIT_CLASS}`}>
+                        <span className="text-sm text-gray-700 font-medium">
+                          {reorderLevel.toFixed(0)}
+                        </span>
+                      </td>
+                    ) : null}
+                    {showCol('expiry') ? (
+                      <td className={`px-4 py-4 text-center ${INVENTORY_COL_FIT_CLASS}`}>
+                        {(() => {
+                          const days = getDaysUntilExpiry(item.nearest_expiry);
+                          const badge = getExpiryBadge(days);
+                          return (
+                            <div className="flex flex-col items-center gap-1">
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full ${badge.className}`}
+                              >
+                                {badge.label}
+                              </span>
+                              {item.nearest_expiry && (
+                                <span className="text-xs text-gray-400">{item.nearest_expiry}</span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                    ) : null}
+                    {showCol('status') ? (
+                      <td className={`px-4 py-4 text-center ${INVENTORY_COL_FIT_CLASS}`}>
+                        <span
+                          className={`inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full ${needsReorder
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-green-100 text-green-800'
+                            }`}
+                        >
+                          {needsReorder ? '⚠️ Low Stock' : '✓ Normal'}
+                        </span>
+                      </td>
+                    ) : null}
                   </tr>
                 );
               })

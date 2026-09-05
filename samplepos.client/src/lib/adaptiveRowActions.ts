@@ -29,7 +29,7 @@ export const ROW_ACTIONS_INLINE_MIN_PX = 420;
  * Resolve list-row action chrome from global AdaptiveChrome.
  * - sheet + ≥2 actions → menu ("Actions")
  * - narrow content pane + ≥2 actions → menu
- * - else → compact inline row (never full-width vertical stack)
+ * - else → compact inline row (horizontal nowrap — never a vertical CTA stack in Actions)
  */
 export function resolveRowActionsPresentation(
   chrome: Pick<AdaptiveChrome, 'secondaryActions' | 'listRow'> | null | undefined,

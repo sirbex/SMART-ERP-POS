@@ -1,0 +1,374 @@
+{
+  "proof": "INVENTORY_WORKLIST_COLUMNS",
+  "verdict": "PASS",
+  "passed": 73,
+  "total": 73,
+  "invariant": "Columns control is ONLY inside AdaptiveToolbar more={...} with presentation=\"menu\" on all 8 inventory worklists; prefs SSOT heals empty/required; no table-fixed collapse.",
+  "gates": [
+    {
+      "id": "CATALOG_products",
+      "ok": true,
+      "detail": "products has column catalog"
+    },
+    {
+      "id": "DEFAULTS_products",
+      "ok": true,
+      "detail": "products defaults non-empty"
+    },
+    {
+      "id": "EMPTY_HEAL_products",
+      "ok": true,
+      "detail": "products empty → defaults"
+    },
+    {
+      "id": "REQUIRED_products",
+      "ok": true,
+      "detail": "products required columns cannot be removed"
+    },
+    {
+      "id": "STORAGE_KEY_products",
+      "ok": true,
+      "detail": "products stable v2 storage key"
+    },
+    {
+      "id": "CATALOG_adjustments",
+      "ok": true,
+      "detail": "adjustments has column catalog"
+    },
+    {
+      "id": "DEFAULTS_adjustments",
+      "ok": true,
+      "detail": "adjustments defaults non-empty"
+    },
+    {
+      "id": "EMPTY_HEAL_adjustments",
+      "ok": true,
+      "detail": "adjustments empty → defaults"
+    },
+    {
+      "id": "REQUIRED_adjustments",
+      "ok": true,
+      "detail": "adjustments required columns cannot be removed"
+    },
+    {
+      "id": "STORAGE_KEY_adjustments",
+      "ok": true,
+      "detail": "adjustments stable v2 storage key"
+    },
+    {
+      "id": "CATALOG_stock-levels",
+      "ok": true,
+      "detail": "stock-levels has column catalog"
+    },
+    {
+      "id": "DEFAULTS_stock-levels",
+      "ok": true,
+      "detail": "stock-levels defaults non-empty"
+    },
+    {
+      "id": "EMPTY_HEAL_stock-levels",
+      "ok": true,
+      "detail": "stock-levels empty → defaults"
+    },
+    {
+      "id": "REQUIRED_stock-levels",
+      "ok": true,
+      "detail": "stock-levels required columns cannot be removed"
+    },
+    {
+      "id": "STORAGE_KEY_stock-levels",
+      "ok": true,
+      "detail": "stock-levels stable v2 storage key"
+    },
+    {
+      "id": "CATALOG_stock-movements",
+      "ok": true,
+      "detail": "stock-movements has column catalog"
+    },
+    {
+      "id": "DEFAULTS_stock-movements",
+      "ok": true,
+      "detail": "stock-movements defaults non-empty"
+    },
+    {
+      "id": "EMPTY_HEAL_stock-movements",
+      "ok": true,
+      "detail": "stock-movements empty → defaults"
+    },
+    {
+      "id": "REQUIRED_stock-movements",
+      "ok": true,
+      "detail": "stock-movements required columns cannot be removed"
+    },
+    {
+      "id": "STORAGE_KEY_stock-movements",
+      "ok": true,
+      "detail": "stock-movements stable v2 storage key"
+    },
+    {
+      "id": "CATALOG_goods-receipts",
+      "ok": true,
+      "detail": "goods-receipts has column catalog"
+    },
+    {
+      "id": "DEFAULTS_goods-receipts",
+      "ok": true,
+      "detail": "goods-receipts defaults non-empty"
+    },
+    {
+      "id": "EMPTY_HEAL_goods-receipts",
+      "ok": true,
+      "detail": "goods-receipts empty → defaults"
+    },
+    {
+      "id": "REQUIRED_goods-receipts",
+      "ok": true,
+      "detail": "goods-receipts required columns cannot be removed"
+    },
+    {
+      "id": "STORAGE_KEY_goods-receipts",
+      "ok": true,
+      "detail": "goods-receipts stable v2 storage key"
+    },
+    {
+      "id": "CATALOG_purchase-orders",
+      "ok": true,
+      "detail": "purchase-orders has column catalog"
+    },
+    {
+      "id": "DEFAULTS_purchase-orders",
+      "ok": true,
+      "detail": "purchase-orders defaults non-empty"
+    },
+    {
+      "id": "EMPTY_HEAL_purchase-orders",
+      "ok": true,
+      "detail": "purchase-orders empty → defaults"
+    },
+    {
+      "id": "REQUIRED_purchase-orders",
+      "ok": true,
+      "detail": "purchase-orders required columns cannot be removed"
+    },
+    {
+      "id": "STORAGE_KEY_purchase-orders",
+      "ok": true,
+      "detail": "purchase-orders stable v2 storage key"
+    },
+    {
+      "id": "CATALOG_supplier-returns",
+      "ok": true,
+      "detail": "supplier-returns has column catalog"
+    },
+    {
+      "id": "DEFAULTS_supplier-returns",
+      "ok": true,
+      "detail": "supplier-returns defaults non-empty"
+    },
+    {
+      "id": "EMPTY_HEAL_supplier-returns",
+      "ok": true,
+      "detail": "supplier-returns empty → defaults"
+    },
+    {
+      "id": "REQUIRED_supplier-returns",
+      "ok": true,
+      "detail": "supplier-returns required columns cannot be removed"
+    },
+    {
+      "id": "STORAGE_KEY_supplier-returns",
+      "ok": true,
+      "detail": "supplier-returns stable v2 storage key"
+    },
+    {
+      "id": "CATALOG_batch-management",
+      "ok": true,
+      "detail": "batch-management has column catalog"
+    },
+    {
+      "id": "DEFAULTS_batch-management",
+      "ok": true,
+      "detail": "batch-management defaults non-empty"
+    },
+    {
+      "id": "EMPTY_HEAL_batch-management",
+      "ok": true,
+      "detail": "batch-management empty → defaults"
+    },
+    {
+      "id": "REQUIRED_batch-management",
+      "ok": true,
+      "detail": "batch-management required columns cannot be removed"
+    },
+    {
+      "id": "STORAGE_KEY_batch-management",
+      "ok": true,
+      "detail": "batch-management stable v2 storage key"
+    },
+    {
+      "id": "SSOT_KEYS",
+      "ok": true,
+      "detail": "all worklist ids registered"
+    },
+    {
+      "id": "RESOLVE_DROP_UNKNOWN",
+      "ok": true,
+      "detail": "unknown column ids dropped"
+    },
+    {
+      "id": "RESOLVE_DEDUP",
+      "ok": true,
+      "detail": "duplicate selected ids collapsed"
+    },
+    {
+      "id": "RESOLVE_CATALOG_ORDER",
+      "ok": true,
+      "detail": "catalog order + required (product/actions) forced in"
+    },
+    {
+      "id": "STORE_FILTER",
+      "ok": true,
+      "detail": "includeStore:false omits Store from catalog"
+    },
+    {
+      "id": "IS_VISIBLE_HELPER",
+      "ok": true,
+      "detail": "isColumnVisible matches resolved set"
+    },
+    {
+      "id": "PICKER_UI",
+      "ok": true,
+      "detail": "InventoryColumnPicker column checklist UI"
+    },
+    {
+      "id": "PICKER_MENU_PRESENTATION",
+      "ok": true,
+      "detail": "InventoryColumnPicker supports presentation=menu for AdaptiveToolbar More"
+    },
+    {
+      "id": "PICKER_MENU_STOP_PROPAGATION",
+      "ok": true,
+      "detail": "menu Columns ticks do not close More (stopPropagation)"
+    },
+    {
+      "id": "HOOK_PERSIST",
+      "ok": true,
+      "detail": "prefs persist per worklist in localStorage"
+    },
+    {
+      "id": "HOOK_REQUIRED_NO_TOGGLE",
+      "ok": true,
+      "detail": "hook refuses toggling required columns off"
+    },
+    {
+      "id": "TABLE_FILL_SSOT",
+      "ok": true,
+      "detail": "worklist tables use natural auto layout (no table-fixed+1% collapse bug)"
+    },
+    {
+      "id": "GRID_TABLE_FILL",
+      "ok": true,
+      "detail": "AdaptiveDataGrid uses natural column sizing (no table-fixed collapse)"
+    },
+    {
+      "id": "PRODUCTS_WIRED",
+      "ok": true,
+      "detail": "pages/inventory/ProductsPage.tsx hooks prefs + fill layout for products"
+    },
+    {
+      "id": "PRODUCTS_COLUMNS_IN_MORE",
+      "ok": true,
+      "detail": "pages/inventory/ProductsPage.tsx: 1 picker(s) only inside more (menu)"
+    },
+    {
+      "id": "ADJUSTMENTS_WIRED",
+      "ok": true,
+      "detail": "pages/inventory/InventoryAdjustmentsPage.tsx hooks prefs + fill layout for adjustments"
+    },
+    {
+      "id": "ADJUSTMENTS_COLUMNS_IN_MORE",
+      "ok": true,
+      "detail": "pages/inventory/InventoryAdjustmentsPage.tsx: 1 picker(s) only inside more (menu)"
+    },
+    {
+      "id": "STOCK_LEVELS_WIRED",
+      "ok": true,
+      "detail": "pages/inventory/StockLevelsPage.tsx hooks prefs + fill layout for stock-levels"
+    },
+    {
+      "id": "STOCK_LEVELS_COLUMNS_IN_MORE",
+      "ok": true,
+      "detail": "pages/inventory/StockLevelsPage.tsx: 1 picker(s) only inside more (menu)"
+    },
+    {
+      "id": "STOCK_MOVEMENTS_WIRED",
+      "ok": true,
+      "detail": "pages/inventory/StockMovementsPage.tsx hooks prefs + fill layout for stock-movements"
+    },
+    {
+      "id": "STOCK_MOVEMENTS_COLUMNS_IN_MORE",
+      "ok": true,
+      "detail": "pages/inventory/StockMovementsPage.tsx: 1 picker(s) only inside more (menu)"
+    },
+    {
+      "id": "GOODS_RECEIPTS_WIRED",
+      "ok": true,
+      "detail": "pages/inventory/GoodsReceiptsPage.tsx hooks prefs + fill layout for goods-receipts"
+    },
+    {
+      "id": "GOODS_RECEIPTS_COLUMNS_IN_MORE",
+      "ok": true,
+      "detail": "pages/inventory/GoodsReceiptsPage.tsx: 1 picker(s) only inside more (menu)"
+    },
+    {
+      "id": "PURCHASE_ORDERS_WIRED",
+      "ok": true,
+      "detail": "pages/inventory/PurchaseOrdersPage.tsx hooks prefs + fill layout for purchase-orders"
+    },
+    {
+      "id": "PURCHASE_ORDERS_COLUMNS_IN_MORE",
+      "ok": true,
+      "detail": "pages/inventory/PurchaseOrdersPage.tsx: 1 picker(s) only inside more (menu)"
+    },
+    {
+      "id": "SUPPLIER_RETURNS_WIRED",
+      "ok": true,
+      "detail": "pages/inventory/SupplierReturnsPage.tsx hooks prefs + fill layout for supplier-returns"
+    },
+    {
+      "id": "SUPPLIER_RETURNS_COLUMNS_IN_MORE",
+      "ok": true,
+      "detail": "pages/inventory/SupplierReturnsPage.tsx: 1 picker(s) only inside more (menu)"
+    },
+    {
+      "id": "BATCH_MGMT_WIRED",
+      "ok": true,
+      "detail": "pages/inventory/BatchManagementPage.tsx hooks prefs + fill layout for batch-management"
+    },
+    {
+      "id": "BATCH_MGMT_COLUMNS_IN_MORE",
+      "ok": true,
+      "detail": "pages/inventory/BatchManagementPage.tsx: 1 picker(s) only inside more (menu)"
+    },
+    {
+      "id": "PRODUCTS_EXPIRY",
+      "ok": true,
+      "detail": "Products Columns includes Expiry (nearest batch date)"
+    },
+    {
+      "id": "ADJUSTMENTS_FILTER",
+      "ok": true,
+      "detail": "Adjustments filters AdaptiveDataGrid columns by prefs"
+    },
+    {
+      "id": "NO_STANDALONE_COLUMNS_BUTTON",
+      "ok": true,
+      "detail": "zero inventory worklists use Columns as a primary toolbar button"
+    },
+    {
+      "id": "WORKLIST_PAGE_COUNT",
+      "ok": true,
+      "detail": "proof covers every registered worklist page"
+    }
+  ]
+}

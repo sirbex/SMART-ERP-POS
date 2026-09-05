@@ -1,9 +1,9 @@
 {
   "proof": "ADAPTIVE_ROW_ACTIONS",
   "verdict": "PASS",
-  "generatedAt": "2026-09-05T11:49:51.816Z",
-  "passed": 11,
-  "total": 11,
+  "generatedAt": "2026-09-05T17:07:47.991Z",
+  "passed": 13,
+  "total": 13,
   "gates": [
     {
       "id": "MOBILE_SHEET",
@@ -54,6 +54,16 @@
       "id": "ADJ_USES_ROW_ACTIONS",
       "ok": true,
       "detail": "Adjustments wires structured AdaptiveRowActions"
+    },
+    {
+      "id": "INLINE_NOWRAP_ROW",
+      "ok": true,
+      "detail": "Inline AdaptiveRowActions stay one horizontal row (match Adjustments)"
+    },
+    {
+      "id": "PRODUCTS_BUTTON_ROW_ACTIONS",
+      "ok": true,
+      "detail": "Products table ACTIONS match Adjustments: outlined buttons in one horizontal nowrap row"
     },
     {
       "id": "FOOTER_NO_COLLAPSE",

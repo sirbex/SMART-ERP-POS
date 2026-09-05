@@ -9,6 +9,8 @@ import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
 import { useServerTableSort } from '../../hooks/useServerTableSort';
 import { WorkflowHelpTrigger } from '../../components/inventory/shared';
+import { InventoryColumnPicker } from '../../components/inventory/InventoryColumnPicker';
+import { useInventoryColumnPrefs } from '../../hooks/useInventoryColumnPrefs';
 import {
   AdaptivePage,
   AdaptiveToolbar,
@@ -20,6 +22,9 @@ import {
   ADAPTIVE_TOOLBAR_CARD_CLASS,
   ADAPTIVE_WORKLIST_DENSITY,
   ADAPTIVE_WORKLIST_SEARCH_DEBOUNCE_MS,
+  INVENTORY_WORKLIST_TABLE_CLASS,
+  INVENTORY_COL_FILL_CLASS,
+  INVENTORY_COL_FIT_CLASS,
 } from '../../lib/adaptiveDashboard';
 
 type MovementSortField =
@@ -171,6 +176,8 @@ const getDateRange = (preset: DateRangePreset): { start: string; end: string } =
 
 export default function StockMovementsPage() {
   const navigate = useNavigate();
+  const columnPrefs = useInventoryColumnPrefs('stock-movements');
+  const { show: showCol } = columnPrefs;
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -598,6 +605,15 @@ export default function StockMovementsPage() {
                   >
                     Refresh
                   </button>
+                  <InventoryColumnPicker
+                    presentation="menu"
+                    catalog={columnPrefs.catalog}
+                    visibleIds={columnPrefs.visibleIds}
+                    visibleCount={columnPrefs.visibleCount}
+                    totalCount={columnPrefs.totalCount}
+                    onToggle={columnPrefs.toggle}
+                    onResetDefaults={columnPrefs.resetDefaults}
+                  />
                 </>
               }
             >
@@ -715,25 +731,45 @@ export default function StockMovementsPage() {
               </button>
             </div>
           )}
-          <table className="min-w-full divide-y divide-gray-200">
+          <table className={INVENTORY_WORKLIST_TABLE_CLASS} data-inventory-worklist-table="true">
             <thead className="bg-gray-50">
               <tr>
-                <SortableTableHeader label="Date & Time" field="dateTime" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
-                <SortableTableHeader label="Product" field="product" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
-                <SortableTableHeader label="Category" field="category" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
-                <SortableTableHeader label="Type" field="type" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
-                <SortableTableHeader label="Quantity" field="quantity" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" filtered={filterQtyOnly} />
-                <SortableTableHeader label="Unit Cost" field="unitCost" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
-                <SortableTableHeader label="Total Value" field="totalValue" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
-                <SortableTableHeader label="Balance After" field="balanceAfter" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" filtered={filterBalanceOnly} />
-                <SortableTableHeader label="Reference" field="reference" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
-                <SortableTableHeader label="Notes" field="notes" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+                {showCol('dateTime') ? (
+                  <SortableTableHeader label="Date & Time" field="dateTime" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={INVENTORY_COL_FILL_CLASS} />
+                ) : null}
+                {showCol('product') ? (
+                  <SortableTableHeader label="Product" field="product" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={INVENTORY_COL_FILL_CLASS} />
+                ) : null}
+                {showCol('category') ? (
+                  <SortableTableHeader label="Category" field="category" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={INVENTORY_COL_FIT_CLASS} />
+                ) : null}
+                {showCol('type') ? (
+                  <SortableTableHeader label="Type" field="type" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={INVENTORY_COL_FIT_CLASS} />
+                ) : null}
+                {showCol('quantity') ? (
+                  <SortableTableHeader label="Quantity" field="quantity" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" filtered={filterQtyOnly} className={INVENTORY_COL_FIT_CLASS} />
+                ) : null}
+                {showCol('unitCost') ? (
+                  <SortableTableHeader label="Unit Cost" field="unitCost" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" className={INVENTORY_COL_FIT_CLASS} />
+                ) : null}
+                {showCol('totalValue') ? (
+                  <SortableTableHeader label="Total Value" field="totalValue" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" className={INVENTORY_COL_FIT_CLASS} />
+                ) : null}
+                {showCol('balanceAfter') ? (
+                  <SortableTableHeader label="Balance After" field="balanceAfter" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" filtered={filterBalanceOnly} className={INVENTORY_COL_FIT_CLASS} />
+                ) : null}
+                {showCol('reference') ? (
+                  <SortableTableHeader label="Reference" field="reference" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={INVENTORY_COL_FIT_CLASS} />
+                ) : null}
+                {showCol('notes') ? (
+                  <SortableTableHeader label="Notes" field="notes" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={INVENTORY_COL_FIT_CLASS} />
+                ) : null}
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {displayMovements.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={columnPrefs.visibleCount} className="px-6 py-8 text-center text-gray-500">
                     {searchTerm || selectedType !== 'ALL' || startDate || endDate
                       ? 'No movements match your filters'
                       : 'No stock movements recorded yet'}
@@ -755,35 +791,37 @@ export default function StockMovementsPage() {
 
                   return (
                     <tr key={movement.id} className="hover:bg-gray-50">
-                      {/* Date & Time */}
-                      <td className="px-4 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
+                      {showCol('dateTime') ? (
+                      <td className={`px-4 py-4 ${INVENTORY_COL_FILL_CLASS}`}>
+                        <div className="text-sm text-gray-900 truncate min-w-0">
                           {formatDisplayDate(movement.createdAt)}
                         </div>
-                        <div className="text-xs text-gray-500">
+                        <div className="text-xs text-gray-500 truncate min-w-0">
                           {movement.createdAt?.includes('T') ? movement.createdAt.split('T')[1].substring(0, 8) : 'N/A'}
                         </div>
                       </td>
+                      ) : null}
 
-                      {/* Product */}
-                      <td className="px-4 py-4">
-                        <div className="text-sm font-medium text-gray-900">
+                      {showCol('product') ? (
+                      <td className={`px-4 py-4 ${INVENTORY_COL_FILL_CLASS}`}>
+                        <div className="text-sm font-medium text-gray-900 truncate min-w-0">
                           {movement.productName || product?.name || 'Unknown'}
                         </div>
                         {product && (
-                          <div className="text-xs text-gray-500">
+                          <div className="text-xs text-gray-500 truncate min-w-0">
                             SKU: {product.sku}
                           </div>
                         )}
                         {movement.batchNumber && (
-                          <div className="text-xs text-gray-500">
+                          <div className="text-xs text-gray-500 truncate min-w-0">
                             Batch: {movement.batchNumber}
                           </div>
                         )}
                       </td>
+                      ) : null}
 
-                      {/* Category */}
-                      <td className="px-4 py-4 whitespace-nowrap">
+                      {showCol('category') ? (
+                      <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
                         {(() => {
                           const cat = movement.productCategory || product?.category;
                           return (
@@ -794,16 +832,18 @@ export default function StockMovementsPage() {
                           );
                         })()}
                       </td>
+                      ) : null}
 
-                      {/* Type */}
-                      <td className="px-4 py-4 whitespace-nowrap">
+                      {showCol('type') ? (
+                      <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${movementConfig.color}`}>
                           {movementConfig.icon} {movementConfig.label}
                         </span>
                       </td>
+                      ) : null}
 
-                      {/* Quantity with sign based on movement type */}
-                      <td className="px-4 py-4 whitespace-nowrap text-right">
+                      {showCol('quantity') ? (
+                      <td className={`px-4 py-4 text-right ${INVENTORY_COL_FIT_CLASS}`}>
                         <div className={`text-sm font-medium ${movementConfig.sign === '+' ? 'text-green-600' : 'text-red-600'
                           }`}>
                           {movementConfig.sign}{quantity.abs().toFixed(2)}
@@ -812,19 +852,22 @@ export default function StockMovementsPage() {
                           {movement.productUom || product?.unitOfMeasure || 'PCS'}
                         </div>
                       </td>
+                      ) : null}
 
-                      {/* Unit Cost */}
-                      <td className="px-4 py-4 whitespace-nowrap text-right text-sm text-gray-900">
+                      {showCol('unitCost') ? (
+                      <td className={`px-4 py-4 text-right text-sm text-gray-900 ${INVENTORY_COL_FIT_CLASS}`}>
                         {unitCost.greaterThan(0) ? formatCurrency(unitCost.toNumber()) : '-'}
                       </td>
+                      ) : null}
 
-                      {/* Total Value */}
-                      <td className="px-4 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">
+                      {showCol('totalValue') ? (
+                      <td className={`px-4 py-4 text-right text-sm font-medium text-gray-900 ${INVENTORY_COL_FIT_CLASS}`}>
                         {totalValue.greaterThan(0) ? formatCurrency(totalValue.toNumber()) : '-'}
                       </td>
+                      ) : null}
 
-                      {/* Balance After */}
-                      <td className="px-4 py-4 whitespace-nowrap text-right">
+                      {showCol('balanceAfter') ? (
+                      <td className={`px-4 py-4 text-right ${INVENTORY_COL_FIT_CLASS}`}>
                         {movement.balanceAfter != null ? (
                           <>
                             <div className="text-sm font-medium text-gray-900">
@@ -838,9 +881,10 @@ export default function StockMovementsPage() {
                           <div className="text-sm text-gray-400">—</div>
                         )}
                       </td>
+                      ) : null}
 
-                      {/* Reference */}
-                      <td className="px-4 py-4">
+                      {showCol('reference') ? (
+                      <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
                         {movement.referenceType && movement.referenceId ? (
                           <div className="text-sm text-blue-600">
                             {movement.referenceType === 'SALE' && movement.saleNumber
@@ -865,13 +909,15 @@ export default function StockMovementsPage() {
                           </div>
                         )}
                       </td>
+                      ) : null}
 
-                      {/* Notes */}
-                      <td className="px-4 py-4">
-                        <div className="text-sm text-gray-600 max-w-xs truncate">
+                      {showCol('notes') ? (
+                      <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
+                        <div className="text-sm text-gray-600 truncate">
                           {movement.notes || '-'}
                         </div>
                       </td>
+                      ) : null}
                     </tr>
                   );
                 })

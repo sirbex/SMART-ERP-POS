@@ -19,6 +19,8 @@ import {
 import { formatCurrency } from '../../utils/currency';
 import { handleApiError } from '../../utils/errorHandler';
 import { Button } from '../../components/ui/button';
+import { InventoryColumnPicker } from '../../components/inventory/InventoryColumnPicker';
+import { useInventoryColumnPrefs } from '../../hooks/useInventoryColumnPrefs';
 import {
   AdaptivePage,
   AdaptiveToolbar,
@@ -32,6 +34,9 @@ import {
   ADAPTIVE_TOOLBAR_CARD_CLASS,
   ADAPTIVE_WORKLIST_DENSITY,
   ADAPTIVE_WORKLIST_SEARCH_DEBOUNCE_MS,
+  INVENTORY_WORKLIST_TABLE_CLASS,
+  INVENTORY_COL_FILL_CLASS,
+  INVENTORY_COL_FIT_CLASS,
 } from '../../lib/adaptiveDashboard';
 import {
   canCreateSupplierCreditNoteFromReturn,
@@ -83,6 +88,8 @@ function actionBadge(row: ReturnGrnRecord): { label: string; className: string; 
 export default function SupplierReturnsPage() {
   const workbench = useOutletContext<ReceivingWorkbenchContext | null>();
   const embedded = Boolean(workbench?.embedded);
+  const columnPrefs = useInventoryColumnPrefs('supplier-returns');
+  const { show: showCol } = columnPrefs;
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -219,6 +226,15 @@ export default function SupplierReturnsPage() {
                   <Link to="/accounting/credit-debit-notes" role="menuitem">
                     Credit notes
                   </Link>
+                  <InventoryColumnPicker
+                    presentation="menu"
+                    catalog={columnPrefs.catalog}
+                    visibleIds={columnPrefs.visibleIds}
+                    visibleCount={columnPrefs.visibleCount}
+                    totalCount={columnPrefs.totalCount}
+                    onToggle={columnPrefs.toggle}
+                    onResetDefaults={columnPrefs.resetDefaults}
+                  />
                 </>
               }
             />
@@ -246,30 +262,46 @@ export default function SupplierReturnsPage() {
 
         <div className="bg-white border rounded-xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
+            <table className={`${INVENTORY_WORKLIST_TABLE_CLASS} text-sm`} data-inventory-worklist-table="true">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-3 py-3 font-medium">Return</th>
-                  <th className="px-3 py-3 font-medium">Date</th>
-                  <th className="px-3 py-3 font-medium">Supplier</th>
-                  <th className="px-3 py-3 font-medium">Source GR</th>
-                  <th className="px-3 py-3 font-medium text-right">Amount</th>
-                  <th className="px-3 py-3 font-medium">Next step</th>
-                  <th className="px-3 py-3 font-medium">Bill / SCN</th>
-                  <th className="px-3 py-3 font-medium">Actions</th>
+                  {showCol('return') ? (
+                    <th className={`px-3 py-3 font-medium ${INVENTORY_COL_FILL_CLASS}`}>Return</th>
+                  ) : null}
+                  {showCol('date') ? (
+                    <th className={`px-3 py-3 font-medium ${INVENTORY_COL_FIT_CLASS}`}>Date</th>
+                  ) : null}
+                  {showCol('supplier') ? (
+                    <th className={`px-3 py-3 font-medium ${INVENTORY_COL_FIT_CLASS}`}>Supplier</th>
+                  ) : null}
+                  {showCol('sourceGr') ? (
+                    <th className={`px-3 py-3 font-medium ${INVENTORY_COL_FIT_CLASS}`}>Source GR</th>
+                  ) : null}
+                  {showCol('amount') ? (
+                    <th className={`px-3 py-3 font-medium text-right ${INVENTORY_COL_FIT_CLASS}`}>Amount</th>
+                  ) : null}
+                  {showCol('nextStep') ? (
+                    <th className={`px-3 py-3 font-medium ${INVENTORY_COL_FIT_CLASS}`}>Next step</th>
+                  ) : null}
+                  {showCol('billScn') ? (
+                    <th className={`px-3 py-3 font-medium ${INVENTORY_COL_FIT_CLASS}`}>Bill / SCN</th>
+                  ) : null}
+                  {showCol('actions') ? (
+                    <th className={`px-3 py-3 font-medium ${INVENTORY_COL_FIT_CLASS}`}>Actions</th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {isLoading && (
                   <tr>
-                    <td colSpan={8} className="px-3 py-10 text-center text-gray-500">
+                    <td colSpan={columnPrefs.visibleCount} className="px-3 py-10 text-center text-gray-500">
                       Loading supplier returns…
                     </td>
                   </tr>
                 )}
                 {!isLoading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-3 py-10 text-center text-gray-500">
+                    <td colSpan={columnPrefs.visibleCount} className="px-3 py-10 text-center text-gray-500">
                       {filter === 'attention'
                         ? 'No posted returns waiting for a credit note.'
                         : 'No supplier returns match these filters.'}
@@ -346,46 +378,62 @@ export default function SupplierReturnsPage() {
                       className="hover:bg-slate-50/80"
                       data-testid={`rgrn-row-${row.returnGrnNumber}`}
                     >
-                      <td className="px-3 py-3">
-                        <div className="font-medium text-slate-900">{row.returnGrnNumber}</div>
-                        <div className="text-xs text-slate-500 max-w-[220px] truncate" title={row.reason}>
-                          {row.reason || '—'}
-                        </div>
-                      </td>
-                      <td className="px-3 py-3 whitespace-nowrap">{formatDate(row.returnDate)}</td>
-                      <td className="px-3 py-3">{row.supplierName || '—'}</td>
-                      <td className="px-3 py-3">
-                        <Link
-                          to="/inventory/goods-receipts"
-                          className="text-teal-700 hover:underline font-medium"
-                          title="Open Receipts tab for this GR"
-                        >
-                          {row.grNumber || row.grnNumber || '—'}
-                        </Link>
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums whitespace-nowrap">
-                        {formatCurrency(Number(row.totalAmount) || 0)}
-                      </td>
-                      <td className="px-3 py-3">
-                        <span
-                          className={`inline-flex text-xs font-medium px-2 py-1 rounded-full ${badge.className}`}
-                          title={badge.hint}
-                        >
-                          {badge.label}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-xs text-slate-600">
-                        <div>Bill: {row.supplierBillNumber || (row.hasSupplierBill ? 'yes' : '—')}</div>
-                        <div>
-                          SCN:{' '}
-                          {row.creditNoteNumber
-                            ? `${row.creditNoteNumber}${row.creditNoteStatus ? ` (${row.creditNoteStatus})` : ''}`
-                            : '—'}
-                        </div>
-                      </td>
-                      <td className="px-3 py-3">
-                        <AdaptiveRowActions actions={rowActions} />
-                      </td>
+                      {showCol('return') ? (
+                        <td className={`px-3 py-3 ${INVENTORY_COL_FILL_CLASS}`}>
+                          <div className="font-medium text-slate-900 truncate min-w-0">{row.returnGrnNumber}</div>
+                          <div className="text-xs text-slate-500 truncate min-w-0" title={row.reason}>
+                            {row.reason || '—'}
+                          </div>
+                        </td>
+                      ) : null}
+                      {showCol('date') ? (
+                        <td className={`px-3 py-3 ${INVENTORY_COL_FIT_CLASS}`}>{formatDate(row.returnDate)}</td>
+                      ) : null}
+                      {showCol('supplier') ? (
+                        <td className={`px-3 py-3 ${INVENTORY_COL_FIT_CLASS}`}>{row.supplierName || '—'}</td>
+                      ) : null}
+                      {showCol('sourceGr') ? (
+                        <td className={`px-3 py-3 ${INVENTORY_COL_FIT_CLASS}`}>
+                          <Link
+                            to="/inventory/goods-receipts"
+                            className="text-teal-700 hover:underline font-medium"
+                            title="Open Receipts tab for this GR"
+                          >
+                            {row.grNumber || row.grnNumber || '—'}
+                          </Link>
+                        </td>
+                      ) : null}
+                      {showCol('amount') ? (
+                        <td className={`px-3 py-3 text-right tabular-nums ${INVENTORY_COL_FIT_CLASS}`}>
+                          {formatCurrency(Number(row.totalAmount) || 0)}
+                        </td>
+                      ) : null}
+                      {showCol('nextStep') ? (
+                        <td className={`px-3 py-3 ${INVENTORY_COL_FIT_CLASS}`}>
+                          <span
+                            className={`inline-flex text-xs font-medium px-2 py-1 rounded-full ${badge.className}`}
+                            title={badge.hint}
+                          >
+                            {badge.label}
+                          </span>
+                        </td>
+                      ) : null}
+                      {showCol('billScn') ? (
+                        <td className={`px-3 py-3 text-xs text-slate-600 ${INVENTORY_COL_FIT_CLASS}`}>
+                          <div>Bill: {row.supplierBillNumber || (row.hasSupplierBill ? 'yes' : '—')}</div>
+                          <div>
+                            SCN:{' '}
+                            {row.creditNoteNumber
+                              ? `${row.creditNoteNumber}${row.creditNoteStatus ? ` (${row.creditNoteStatus})` : ''}`
+                              : '—'}
+                          </div>
+                        </td>
+                      ) : null}
+                      {showCol('actions') ? (
+                        <td className={`px-3 py-3 ${INVENTORY_COL_FIT_CLASS}`}>
+                          <AdaptiveRowActions actions={rowActions} />
+                        </td>
+                      ) : null}
                     </tr>
                   );
                 })}

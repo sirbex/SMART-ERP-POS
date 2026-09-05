@@ -11,6 +11,7 @@ import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
 // Zod-based form validation
 import { validateProductValues } from '@/validation/product';
 import { useCreateProduct, useUpdateProduct, useDeleteProduct, productKeys } from '../../hooks/useProducts';
+import { useStockLevels } from '../../hooks/useInventory';
 import { useSuppliers } from '../../hooks/useSuppliers';
 import { useOfflineProducts } from '../../hooks/useOfflineData';
 import { useOfflineContext } from '../../contexts/OfflineContext';
@@ -20,11 +21,13 @@ import { hasWarehouseNetworkAccess } from '../../../../shared/utils/warehouseRba
 import { useStoreLocations, useStockLevelsByStore } from '../../hooks/useWarehouse';
 import { StoreLocationSelect } from '../../components/inventory/StoreLocationSelect';
 import { StockViewModeToggle } from '../../components/inventory/StockViewModeToggle';
+import { InventoryColumnPicker } from '../../components/inventory/InventoryColumnPicker';
 import {
   readStockViewMode,
   writeStockViewMode,
   type StockViewMode,
 } from '../../components/inventory/stockViewPrefs';
+import { useInventoryColumnPrefs } from '../../hooks/useInventoryColumnPrefs';
 import { getErrorMessage, api } from '../../utils/api';
 import Decimal from 'decimal.js';
 import { computeUomPrices } from '@shared/utils/uom-pricing';
@@ -57,6 +60,9 @@ import {
 import {
   ADAPTIVE_PAGE_PAD_CLASS,
   ADAPTIVE_WORKLIST_DENSITY,
+  INVENTORY_WORKLIST_TABLE_CLASS,
+  INVENTORY_COL_FILL_CLASS,
+  INVENTORY_COL_FIT_CLASS,
 } from '../../lib/adaptiveDashboard';
 
 type ProductSortField =
@@ -66,6 +72,7 @@ type ProductSortField =
   | 'pricing'
   | 'margin'
   | 'stock'
+  | 'expiry'
   | 'status';
 
 const PRODUCT_DESC_DEFAULT = new Set<ProductSortField>(['pricing', 'margin', 'stock']);
@@ -203,6 +210,8 @@ export default function ProductsPage() {
   }, [isMultistoreEnabled, permissions]);
   const [stockViewMode, setStockViewMode] = useState<StockViewMode>(() => readStockViewMode());
   const byStoreView = canUseStoreFilter && stockViewMode === 'store';
+  const columnPrefs = useInventoryColumnPrefs('products', { includeStore: byStoreView });
+  const { show: showCol } = columnPrefs;
   const { data: storeLocations = [] } = useStoreLocations(byStoreView && isOnline);
   const [storeFilterId, setStoreFilterId] = useState('');
   const useMultistoreStock = byStoreView && isOnline;
@@ -230,6 +239,25 @@ export default function ProductsPage() {
     error: storeStockError,
     refetch: storeStockRefetch,
   } = useStockLevelsByStore(storeFilterId, useMultistoreStock && !!storeFilterId);
+  const { data: companyStockLevels } = useStockLevels();
+
+  const nearestExpiryByProductId = useMemo(() => {
+    const map = new Map<string, string | null>();
+    const rows = useMultistoreStock && Array.isArray(storeStockData)
+      ? storeStockData
+      : Array.isArray(companyStockLevels)
+        ? companyStockLevels
+        : [];
+    for (const row of rows as Array<{
+      product_id?: string;
+      nearest_expiry?: string | null;
+      nearestExpiry?: string | null;
+    }>) {
+      if (!row.product_id) continue;
+      map.set(row.product_id, row.nearest_expiry ?? row.nearestExpiry ?? null);
+    }
+    return map;
+  }, [useMultistoreStock, storeStockData, companyStockLevels]);
 
   const isLoading = productsLoading || (useMultistoreStock && storeStockLoading);
   const error = productsError ?? (useMultistoreStock ? storeStockError : null);
@@ -614,10 +642,11 @@ export default function ProductsPage() {
       pricing: (p: ProductListItem) => parseFloat(p.sellingPrice) || 0,
       margin: (p: ProductListItem) => parseFloat(calculateMargin(p.costPrice, p.sellingPrice)) || 0,
       stock: (p: ProductListItem) => parseFloat(p.quantityOnHand) || 0,
+      expiry: (p: ProductListItem) => nearestExpiryByProductId.get(p.id!) ?? '',
       status: (p: ProductListItem) => (p.isActive ? 1 : 0),
     }),
     // calculateMargin is stable per render; accessors recreated when products filter changes
-    [products.length, searchTerm, filterStatus, filterCategory],
+    [products.length, searchTerm, filterStatus, filterCategory, nearestExpiryByProductId],
   );
 
   const handleColumnSort = (field: string) => {
@@ -640,6 +669,7 @@ export default function ProductsPage() {
     { value: 'pricing', label: 'Sort by Price' },
     { value: 'margin', label: 'Sort by Margin' },
     { value: 'stock', label: 'Sort by Stock' },
+    { value: 'expiry', label: 'Sort by Expiry' },
     { value: 'status', label: 'Sort by Status' },
   ];
 
@@ -656,7 +686,21 @@ export default function ProductsPage() {
     setCurrentPage(1);
   }, [searchTerm, filterStatus, filterCategory, filterStockOnly, sortField, sortOrder, storeFilterId, stockViewMode]);
 
-  const tableColSpan = byStoreView ? 9 : 8;
+  const tableColSpan = useMemo(() => {
+    const ids = [
+      'product',
+      'category',
+      'sku',
+      'pricing',
+      'margin',
+      ...(byStoreView ? (['store'] as const) : []),
+      'stock',
+      'expiry',
+      'status',
+      'actions',
+    ];
+    return ids.filter((id) => showCol(id)).length;
+  }, [byStoreView, showCol]);
 
   // Paginated products
   const totalPages = Math.max(1, Math.ceil(sortedProducts.length / ITEMS_PER_PAGE));
@@ -1335,14 +1379,25 @@ export default function ProductsPage() {
                 </div>
               )}
               more={
-                <MobileSortSelect
-                  presentation="menu"
-                  sortField={sortField}
-                  sortOrder={sortOrder}
-                  options={mobileSortOptions}
-                  onFieldChange={handleColumnSort}
-                  onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
-                />
+                <>
+                  <MobileSortSelect
+                    presentation="menu"
+                    sortField={sortField}
+                    sortOrder={sortOrder}
+                    options={mobileSortOptions}
+                    onFieldChange={handleColumnSort}
+                    onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+                  />
+                  <InventoryColumnPicker
+                    presentation="menu"
+                    catalog={columnPrefs.catalog}
+                    visibleIds={columnPrefs.visibleIds}
+                    visibleCount={columnPrefs.visibleCount}
+                    totalCount={columnPrefs.totalCount}
+                    onToggle={columnPrefs.toggle}
+                    onResetDefaults={columnPrefs.resetDefaults}
+                  />
+                </>
               }
             >
               <button
@@ -1468,15 +1523,14 @@ export default function ProductsPage() {
                           {
                             id: 'history',
                             label: 'History',
+                            tone: 'muted',
                             onClick: () => handleViewHistory(product.id!),
-                            appearance: 'link',
                           },
                           {
                             id: 'edit',
                             label: 'Edit',
-                            onClick: () => handleEdit(productById.get(product.id!) ?? product),
                             tone: 'primary',
-                            appearance: 'link',
+                            onClick: () => handleEdit(productById.get(product.id!) ?? product),
                           },
                           {
                             id: 'opening',
@@ -1487,14 +1541,12 @@ export default function ProductsPage() {
                                 name: product.name,
                                 sku: product.sku,
                               }),
-                            appearance: 'link',
                           },
                           {
                             id: 'delete',
                             label: 'Delete',
-                            onClick: () => handleDeleteClick(product.id!),
                             tone: 'danger',
-                            appearance: 'link',
+                            onClick: () => handleDeleteClick(product.id!),
                           },
                         ]}
                       />
@@ -1507,23 +1559,42 @@ export default function ProductsPage() {
         </div>
 
         {/* Desktop Table View */}
-        <div className="hidden sm:block overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
+        <div className="hidden sm:block overflow-x-auto w-full">
+          <table className={INVENTORY_WORKLIST_TABLE_CLASS} data-inventory-worklist-table="true">
             <thead className="bg-gray-50">
               <tr>
-                <SortableTableHeader label="Product" field="product" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-3" />
-                <SortableTableHeader label="Category" field="category" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-3" />
-                <SortableTableHeader label="SKU" field="sku" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-3 hidden lg:table-cell" />
-                <SortableTableHeader label="Pricing" field="pricing" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-3" />
-                <SortableTableHeader label="Margin" field="margin" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-3 hidden xl:table-cell" />
-                {byStoreView && (
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                {showCol('product') ? (
+                  <SortableTableHeader label="Product" field="product" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={`px-3 ${INVENTORY_COL_FILL_CLASS}`} />
+                ) : null}
+                {showCol('category') ? (
+                  <SortableTableHeader label="Category" field="category" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={`px-3 ${INVENTORY_COL_FIT_CLASS}`} />
+                ) : null}
+                {showCol('sku') ? (
+                  <SortableTableHeader label="SKU" field="sku" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={`px-3 ${INVENTORY_COL_FIT_CLASS}`} />
+                ) : null}
+                {showCol('pricing') ? (
+                  <SortableTableHeader label="Pricing" field="pricing" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={`px-3 ${INVENTORY_COL_FIT_CLASS}`} />
+                ) : null}
+                {showCol('margin') ? (
+                  <SortableTableHeader label="Margin" field="margin" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={`px-3 ${INVENTORY_COL_FIT_CLASS}`} />
+                ) : null}
+                {byStoreView && showCol('store') ? (
+                  <th className={`px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${INVENTORY_COL_FIT_CLASS}`}>
                     Store
                   </th>
-                )}
-                <SortableTableHeader label="Stock" field="stock" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-3" filtered={filterStockOnly} />
-                <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-3 w-[1%] whitespace-nowrap" />
-                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-[1%] whitespace-nowrap">Actions</th>
+                ) : null}
+                {showCol('stock') ? (
+                  <SortableTableHeader label="Stock" field="stock" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={`px-3 ${INVENTORY_COL_FIT_CLASS}`} filtered={filterStockOnly} />
+                ) : null}
+                {showCol('expiry') ? (
+                  <SortableTableHeader label="Expiry" field="expiry" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={`px-3 ${INVENTORY_COL_FIT_CLASS}`} />
+                ) : null}
+                {showCol('status') ? (
+                  <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={`px-3 ${INVENTORY_COL_FIT_CLASS}`} />
+                ) : null}
+                {showCol('actions') ? (
+                  <th className={`px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider ${INVENTORY_COL_FIT_CLASS}`}>Actions</th>
+                ) : null}
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -1540,7 +1611,8 @@ export default function ProductsPage() {
                   const margin = calculateMargin(product.costPrice, product.sellingPrice);
                   return (
                     <tr key={product.id} className="hover:bg-gray-50/80">
-                      <td className="px-3 py-2 align-middle">
+                      {showCol('product') ? (
+                      <td className={`px-3 py-2 align-middle ${INVENTORY_COL_FILL_CLASS}`}>
                         <div className="flex items-center gap-1.5 min-w-0">
                           <span className="text-sm font-medium text-gray-900 truncate">{product.name}</span>
                           {product.trackExpiry ? (
@@ -1553,21 +1625,27 @@ export default function ProductsPage() {
                           ) : null}
                         </div>
                         {product.description ? (
-                          <div className="text-xs text-gray-500 truncate max-w-[14rem]">{product.description}</div>
+                          <div className="text-xs text-gray-500 truncate">{product.description}</div>
                         ) : null}
                       </td>
-                      <td className="px-3 py-2 align-middle">
+                      ) : null}
+                      {showCol('category') ? (
+                      <td className={`px-3 py-2 align-middle ${INVENTORY_COL_FIT_CLASS}`}>
                         <span className={`text-xs font-medium ${product.category ? 'text-blue-700' : 'text-gray-400'}`}>
                           {product.category || '—'}
                         </span>
                       </td>
-                      <td className="px-3 py-2 align-middle hidden lg:table-cell">
+                      ) : null}
+                      {showCol('sku') ? (
+                      <td className={`px-3 py-2 align-middle ${INVENTORY_COL_FIT_CLASS}`}>
                         <div className="text-xs text-gray-900 tabular-nums">{product.sku}</div>
                         {product.barcode ? (
                           <div className="text-[11px] text-gray-500 tabular-nums">{product.barcode}</div>
                         ) : null}
                       </td>
-                      <td className="px-3 py-2 align-middle">
+                      ) : null}
+                      {showCol('pricing') ? (
+                      <td className={`px-3 py-2 align-middle ${INVENTORY_COL_FIT_CLASS}`}>
                         <div className="text-xs text-gray-600 tabular-nums">
                           {formatCurrency(parseCurrency(product.costPrice))}
                         </div>
@@ -1575,23 +1653,51 @@ export default function ProductsPage() {
                           {formatCurrency(parseCurrency(product.sellingPrice))}
                         </div>
                       </td>
-                      <td className="px-3 py-2 align-middle hidden xl:table-cell">
+                      ) : null}
+                      {showCol('margin') ? (
+                      <td className={`px-3 py-2 align-middle ${INVENTORY_COL_FIT_CLASS}`}>
                         <span className={`text-sm font-medium tabular-nums ${parseFloat(margin) >= 30 ? 'text-green-600' :
                           parseFloat(margin) >= 15 ? 'text-amber-600' : 'text-red-600'
                           }`}>
                           {margin}%
                         </span>
                       </td>
-                      {byStoreView && (
-                        <td className="px-3 py-2 align-middle text-xs text-gray-700">
+                      ) : null}
+                      {byStoreView && showCol('store') ? (
+                        <td className={`px-3 py-2 align-middle text-xs text-gray-700 ${INVENTORY_COL_FIT_CLASS}`}>
                           {selectedStoreLabel || '—'}
                         </td>
-                      )}
-                      <td className="px-3 py-2 align-middle">
+                      ) : null}
+                      {showCol('stock') ? (
+                      <td className={`px-3 py-2 align-middle ${INVENTORY_COL_FIT_CLASS}`}>
                         <div className="text-xs text-gray-700 tabular-nums">{formatMultiUomQuantity(product)}</div>
                         <div className="text-[11px] text-gray-500">RO {product.reorderLevel}</div>
                       </td>
-                      <td className="px-3 py-2 align-middle whitespace-nowrap">
+                      ) : null}
+                      {showCol('expiry') ? (
+                      <td className={`px-3 py-2 align-middle ${INVENTORY_COL_FIT_CLASS}`}>
+                        {(() => {
+                          const exp = nearestExpiryByProductId.get(product.id!) ?? null;
+                          if (!product.trackExpiry) {
+                            return <span className="text-xs text-gray-400">—</span>;
+                          }
+                          if (!exp) {
+                            return <span className="text-xs text-gray-400">No date</span>;
+                          }
+                          return (
+                            <span
+                              className={`text-xs tabular-nums ${
+                                isExpiringSoon(exp) ? 'text-red-700 font-semibold' : 'text-gray-700'
+                              }`}
+                            >
+                              {formatDisplayDate(exp)}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      ) : null}
+                      {showCol('status') ? (
+                      <td className={`px-3 py-2 align-middle ${INVENTORY_COL_FIT_CLASS}`}>
                         <span className={`inline-flex px-1.5 py-0.5 text-[11px] font-semibold rounded ${product.isActive
                           ? 'bg-green-100 text-green-800'
                           : 'bg-gray-100 text-gray-700'
@@ -1599,33 +1705,34 @@ export default function ProductsPage() {
                           {product.isActive ? 'Active' : 'Off'}
                         </span>
                       </td>
-                      <td className="px-3 py-2 align-middle text-right">
+                      ) : null}
+                      {showCol('actions') ? (
+                      <td className={`px-3 py-2 align-middle text-right ${INVENTORY_COL_FIT_CLASS}`}>
                         <AdaptiveRowActions
                           presentationOverride="inline"
                           actions={[
                             {
                               id: 'history',
                               label: 'History',
+                              tone: 'muted',
                               onClick: () => handleViewHistory(product.id!),
-                              appearance: 'link',
                             },
                             {
                               id: 'edit',
                               label: 'Edit',
-                              onClick: () => handleEdit(productById.get(product.id!) ?? product),
                               tone: 'primary',
-                              appearance: 'link',
+                              onClick: () => handleEdit(productById.get(product.id!) ?? product),
                             },
                             {
                               id: 'delete',
                               label: 'Delete',
-                              onClick: () => handleDeleteClick(product.id!),
                               tone: 'danger',
-                              appearance: 'link',
+                              onClick: () => handleDeleteClick(product.id!),
                             },
                           ]}
                         />
                       </td>
+                      ) : null}
                     </tr>
                   );
                 })

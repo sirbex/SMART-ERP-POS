@@ -55,6 +55,21 @@ export const ADAPTIVE_TOOLBAR_CARD_CLASS =
  */
 export const ADAPTIVE_WORKLIST_DENSITY = 'dense' as const;
 
+/**
+ * Inventory worklist tables — full pane width with natural column sizing.
+ * Do NOT use `table-fixed` + `w-[1%]` together: that collapses secondary cols
+ * and dumps leftover width into Product (huge empty gaps).
+ * When Columns prefs hide fields, remaining cols share space under `w-full`.
+ */
+export const INVENTORY_WORKLIST_TABLE_CLASS =
+  'w-full min-w-0 divide-y divide-gray-200';
+
+/** Secondary cols — size to content; do not force a literal 1% width. */
+export const INVENTORY_COL_FIT_CLASS = 'whitespace-nowrap';
+
+/** Primary identity column — allow truncate without locking a huge fixed share. */
+export const INVENTORY_COL_FILL_CLASS = 'min-w-0';
+
 /** Debounce for server-backed worklist search (PO / GR / Movements / Returns). */
 export const ADAPTIVE_WORKLIST_SEARCH_DEBOUNCE_MS = 300;
 

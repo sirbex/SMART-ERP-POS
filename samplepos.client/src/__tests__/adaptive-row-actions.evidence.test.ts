@@ -104,10 +104,40 @@ describe('PROOF: adaptive row actions SSOT', () => {
   it('Adjustments + sticky footer use correct collapse policy', () => {
     const adj = read('pages/inventory/InventoryAdjustmentsPage.tsx');
     const actionBar = read('components/adaptive/AdaptiveActionBar.tsx');
+    const row = read('components/adaptive/AdaptiveRowActions.tsx');
     gate(
       'ADJ_USES_ROW_ACTIONS',
       adj.includes('AdaptiveRowActions') && adj.includes("label: 'Adjust'"),
       'Adjustments wires structured AdaptiveRowActions',
+    );
+    gate(
+      'INLINE_NOWRAP_ROW',
+      (row.match(/flex-nowrap items-center justify-end gap-1\.5/g) ?? []).length >= 2,
+      'Inline AdaptiveRowActions stay one horizontal row (match Adjustments)',
+    );
+    gate(
+      'PRODUCTS_BUTTON_ROW_ACTIONS',
+      (() => {
+        const products = read('pages/inventory/ProductsPage.tsx');
+        const dash = read('lib/adaptiveDashboard.ts');
+        const fitIsNowrap =
+          dash.includes("INVENTORY_COL_FIT_CLASS = 'whitespace-nowrap'") ||
+          (dash.includes('INVENTORY_COL_FIT_CLASS') && !dash.includes("INVENTORY_COL_FIT_CLASS = 'w-[1%]"));
+        // Table ACTIONS cell: forced inline + SSOT fit class (literal whitespace-nowrap lives in adaptiveDashboard).
+        const tableActionsInline =
+          products.includes('presentationOverride="inline"') &&
+          products.includes('text-right ${INVENTORY_COL_FIT_CLASS}') &&
+          fitIsNowrap;
+        return (
+          products.includes('AdaptiveRowActions') &&
+          products.includes("tone: 'primary'") &&
+          products.includes("tone: 'muted'") &&
+          products.includes("tone: 'danger'") &&
+          tableActionsInline &&
+          !products.includes("appearance: 'link'")
+        );
+      })(),
+      'Products table ACTIONS match Adjustments: outlined buttons in one horizontal nowrap row',
     );
     gate(
       'FOOTER_NO_COLLAPSE',

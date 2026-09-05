@@ -19,6 +19,8 @@ import { applyTableSort } from '../../lib/tableSortUtils';
 import SlideDrawer from '../../components/ui/SlideDrawer';
 import { DatePicker } from '../../components/ui/date-picker';
 import { WorkflowHelpTrigger } from '../../components/inventory/shared';
+import { InventoryColumnPicker } from '../../components/inventory/InventoryColumnPicker';
+import { useInventoryColumnPrefs } from '../../hooks/useInventoryColumnPrefs';
 import {
   AdaptivePage,
   AdaptiveToolbar,
@@ -29,6 +31,9 @@ import {
   ADAPTIVE_PAGE_PAD_CLASS,
   ADAPTIVE_TOOLBAR_CARD_CLASS,
   ADAPTIVE_WORKLIST_DENSITY,
+  INVENTORY_WORKLIST_TABLE_CLASS,
+  INVENTORY_COL_FILL_CLASS,
+  INVENTORY_COL_FIT_CLASS,
 } from '../../lib/adaptiveDashboard';
 
 type BatchSortField =
@@ -91,6 +96,8 @@ const URGENCY_SORT_ORDER: Record<ExpiryUrgency, number> = {
 
 export default function BatchManagementPage() {
   const { data: batchesData, isLoading, error, refetch } = useAllBatches();
+  const columnPrefs = useInventoryColumnPrefs('batch-management');
+  const { show: showCol } = columnPrefs;
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'ACTIVE' | 'DEPLETED' | 'EXPIRED'>(
@@ -408,6 +415,15 @@ export default function BatchManagementPage() {
                   <button type="button" role="menuitem" onClick={() => refetch()} data-batch-refresh="true">
                     Refresh
                   </button>
+                  <InventoryColumnPicker
+                    presentation="menu"
+                    catalog={columnPrefs.catalog}
+                    visibleIds={columnPrefs.visibleIds}
+                    visibleCount={columnPrefs.visibleCount}
+                    totalCount={columnPrefs.totalCount}
+                    onToggle={columnPrefs.toggle}
+                    onResetDefaults={columnPrefs.resetDefaults}
+                  />
                 </>
               }
             >
@@ -464,80 +480,108 @@ export default function BatchManagementPage() {
               </button>
             </div>
           )}
-          <table className="min-w-full divide-y divide-gray-200">
+          <table className={INVENTORY_WORKLIST_TABLE_CLASS} data-inventory-worklist-table="true">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  FEFO Order
-                </th>
-                <SortableTableHeader
-                  label="Product"
-                  field="product"
-                  activeField={sortField}
-                  direction={sortOrder}
-                  onSort={handleColumnSort}
-                />
-                <SortableTableHeader
-                  label="SKU"
-                  field="sku"
-                  activeField={sortField}
-                  direction={sortOrder}
-                  onSort={handleColumnSort}
-                />
-                <SortableTableHeader
-                  label="Batch Number"
-                  field="batchNumber"
-                  activeField={sortField}
-                  direction={sortOrder}
-                  onSort={handleColumnSort}
-                />
-                <SortableTableHeader
-                  label="Quantity"
-                  field="quantity"
-                  activeField={sortField}
-                  direction={sortOrder}
-                  onSort={handleColumnSort}
-                  align="right"
-                  filtered={filterQtyOnly}
-                />
-                <SortableTableHeader
-                  label="Expiry Date"
-                  field="expiryDate"
-                  activeField={sortField}
-                  direction={sortOrder}
-                  onSort={handleColumnSort}
-                />
-                <SortableTableHeader
-                  label="Urgency"
-                  field="urgency"
-                  activeField={sortField}
-                  direction={sortOrder}
-                  onSort={handleColumnSort}
-                />
-                <SortableTableHeader
-                  label="Value"
-                  field="value"
-                  activeField={sortField}
-                  direction={sortOrder}
-                  onSort={handleColumnSort}
-                  align="right"
-                />
-                <SortableTableHeader
-                  label="Status"
-                  field="status"
-                  activeField={sortField}
-                  direction={sortOrder}
-                  onSort={handleColumnSort}
-                />
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
+                {showCol('fefo') ? (
+                  <th className={`px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${INVENTORY_COL_FIT_CLASS}`}>
+                    FEFO Order
+                  </th>
+                ) : null}
+                {showCol('product') ? (
+                  <SortableTableHeader
+                    label="Product"
+                    field="product"
+                    activeField={sortField}
+                    direction={sortOrder}
+                    onSort={handleColumnSort}
+                    className={INVENTORY_COL_FILL_CLASS}
+                  />
+                ) : null}
+                {showCol('sku') ? (
+                  <SortableTableHeader
+                    label="SKU"
+                    field="sku"
+                    activeField={sortField}
+                    direction={sortOrder}
+                    onSort={handleColumnSort}
+                    className={INVENTORY_COL_FIT_CLASS}
+                  />
+                ) : null}
+                {showCol('batchNumber') ? (
+                  <SortableTableHeader
+                    label="Batch Number"
+                    field="batchNumber"
+                    activeField={sortField}
+                    direction={sortOrder}
+                    onSort={handleColumnSort}
+                    className={INVENTORY_COL_FIT_CLASS}
+                  />
+                ) : null}
+                {showCol('quantity') ? (
+                  <SortableTableHeader
+                    label="Quantity"
+                    field="quantity"
+                    activeField={sortField}
+                    direction={sortOrder}
+                    onSort={handleColumnSort}
+                    align="right"
+                    filtered={filterQtyOnly}
+                    className={INVENTORY_COL_FIT_CLASS}
+                  />
+                ) : null}
+                {showCol('expiryDate') ? (
+                  <SortableTableHeader
+                    label="Expiry Date"
+                    field="expiryDate"
+                    activeField={sortField}
+                    direction={sortOrder}
+                    onSort={handleColumnSort}
+                    className={INVENTORY_COL_FIT_CLASS}
+                  />
+                ) : null}
+                {showCol('urgency') ? (
+                  <SortableTableHeader
+                    label="Urgency"
+                    field="urgency"
+                    activeField={sortField}
+                    direction={sortOrder}
+                    onSort={handleColumnSort}
+                    className={INVENTORY_COL_FIT_CLASS}
+                  />
+                ) : null}
+                {showCol('value') ? (
+                  <SortableTableHeader
+                    label="Value"
+                    field="value"
+                    activeField={sortField}
+                    direction={sortOrder}
+                    onSort={handleColumnSort}
+                    align="right"
+                    className={INVENTORY_COL_FIT_CLASS}
+                  />
+                ) : null}
+                {showCol('status') ? (
+                  <SortableTableHeader
+                    label="Status"
+                    field="status"
+                    activeField={sortField}
+                    direction={sortOrder}
+                    onSort={handleColumnSort}
+                    className={INVENTORY_COL_FIT_CLASS}
+                  />
+                ) : null}
+                {showCol('actions') ? (
+                  <th className={`px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${INVENTORY_COL_FIT_CLASS}`}>
+                    Actions
+                  </th>
+                ) : null}
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {sortedBatches.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={columnPrefs.visibleCount} className="px-6 py-8 text-center text-gray-500">
                     {searchTerm || filterStatus !== 'ALL' || filterUrgency !== 'ALL'
                       ? 'No batches match your filters'
                       : 'No batches found. Create products to see batch inventory.'}
@@ -552,113 +596,123 @@ export default function BatchManagementPage() {
 
                   return (
                     <tr key={batch.id} className="hover:bg-gray-50">
-                      {/* FEFO Order */}
-                      <td className="px-4 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-800 font-bold text-sm">
-                            {index + 1}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Product */}
-                      <td className="px-4 py-4">
-                        <div className="text-sm font-medium text-gray-900">
-                          {batch.product_name}
-                        </div>
-                      </td>
-
-                      {/* SKU */}
-                      <td className="px-4 py-4 whitespace-nowrap">
-                        <span className="text-sm text-gray-700 font-mono">
-                          {batch.sku || '\u2014'}
-                        </span>
-                      </td>
-
-                      {/* Batch Number */}
-                      <td className="px-4 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900 font-mono">{batch.batch_number}</div>
-                      </td>
-
-                      {/* Quantity */}
-                      <td className="px-4 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm font-semibold text-gray-900">
-                          {batch.remaining_quantity.toFixed(2)}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {batch.unit_of_measure || 'PCS'}
-                        </div>
-                      </td>
-
-                      {/* Expiry Date */}
-                      <td className="px-4 py-4 whitespace-nowrap">
-                        {batch.expiry_date ? (
-                          <div>
-                            <div className="text-sm text-gray-900">
-                              {formatDisplayDate(batch.expiry_date)}
-                            </div>
-                            {daysUntilExpiry !== null && (
-                              <div
-                                className={`text-xs ${daysUntilExpiry < 0
-                                  ? 'text-red-600 font-bold'
-                                  : daysUntilExpiry <= 7
-                                    ? 'text-red-600'
-                                    : daysUntilExpiry <= 30
-                                      ? 'text-yellow-600'
-                                      : 'text-green-600'
-                                  }`}
-                              >
-                                {daysUntilExpiry < 0
-                                  ? `Expired ${Math.abs(daysUntilExpiry)} days ago`
-                                  : `${daysUntilExpiry} days left`}
-                              </div>
-                            )}
+                      {showCol('fefo') ? (
+                        <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
+                          <div className="flex items-center">
+                            <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-800 font-bold text-sm">
+                              {index + 1}
+                            </span>
                           </div>
-                        ) : (
-                          <span className="text-sm text-gray-400">No expiry</span>
-                        )}
-                      </td>
+                        </td>
+                      ) : null}
 
-                      {/* Urgency */}
-                      <td className="px-4 py-4 whitespace-nowrap">
-                        <span
-                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${urgencyBadge.color}`}
-                        >
-                          {urgencyBadge.icon} {urgencyBadge.label.replace(/🔴|🟡|🟢/, '').trim()}
-                        </span>
-                      </td>
+                      {showCol('product') ? (
+                        <td className={`px-4 py-4 ${INVENTORY_COL_FILL_CLASS}`}>
+                          <div className="text-sm font-medium text-gray-900 truncate min-w-0">
+                            {batch.product_name}
+                          </div>
+                        </td>
+                      ) : null}
 
-                      {/* Value */}
-                      <td className="px-4 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm font-medium text-gray-900">
-                          UGX {batchValue.toFixed(0).toLocaleString()}
-                        </div>
-                        <div className="text-xs text-gray-500">@{batch.cost_price.toFixed(2)}</div>
-                      </td>
+                      {showCol('sku') ? (
+                        <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
+                          <span className="text-sm text-gray-700 font-mono">
+                            {batch.sku || '\u2014'}
+                          </span>
+                        </td>
+                      ) : null}
 
-                      {/* Status */}
-                      <td className="px-4 py-4 whitespace-nowrap">
-                        <span
-                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${batch.status === 'ACTIVE'
-                            ? 'bg-green-100 text-green-800'
-                            : batch.status === 'DEPLETED'
-                              ? 'bg-gray-100 text-gray-800'
-                              : 'bg-red-100 text-red-800'
-                            }`}
-                        >
-                          {batch.status}
-                        </span>
-                      </td>
+                      {showCol('batchNumber') ? (
+                        <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
+                          <div className="text-sm text-gray-900 font-mono">{batch.batch_number}</div>
+                        </td>
+                      ) : null}
 
-                      {/* Actions */}
-                      <td className="px-4 py-4 whitespace-nowrap text-sm">
-                        <button
-                          onClick={() => handleViewDetails(batch)}
-                          className="text-blue-600 hover:text-blue-900 font-medium"
-                        >
-                          Details
-                        </button>
-                      </td>
+                      {showCol('quantity') ? (
+                        <td className={`px-4 py-4 text-right ${INVENTORY_COL_FIT_CLASS}`}>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {batch.remaining_quantity.toFixed(2)}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {batch.unit_of_measure || 'PCS'}
+                          </div>
+                        </td>
+                      ) : null}
+
+                      {showCol('expiryDate') ? (
+                        <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
+                          {batch.expiry_date ? (
+                            <div>
+                              <div className="text-sm text-gray-900">
+                                {formatDisplayDate(batch.expiry_date)}
+                              </div>
+                              {daysUntilExpiry !== null && (
+                                <div
+                                  className={`text-xs ${daysUntilExpiry < 0
+                                    ? 'text-red-600 font-bold'
+                                    : daysUntilExpiry <= 7
+                                      ? 'text-red-600'
+                                      : daysUntilExpiry <= 30
+                                        ? 'text-yellow-600'
+                                        : 'text-green-600'
+                                    }`}
+                                >
+                                  {daysUntilExpiry < 0
+                                    ? `Expired ${Math.abs(daysUntilExpiry)} days ago`
+                                    : `${daysUntilExpiry} days left`}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-sm text-gray-400">No expiry</span>
+                          )}
+                        </td>
+                      ) : null}
+
+                      {showCol('urgency') ? (
+                        <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
+                          <span
+                            className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${urgencyBadge.color}`}
+                          >
+                            {urgencyBadge.icon} {urgencyBadge.label.replace(/🔴|🟡|🟢/, '').trim()}
+                          </span>
+                        </td>
+                      ) : null}
+
+                      {showCol('value') ? (
+                        <td className={`px-4 py-4 text-right ${INVENTORY_COL_FIT_CLASS}`}>
+                          <div className="text-sm font-medium text-gray-900">
+                            UGX {batchValue.toFixed(0).toLocaleString()}
+                          </div>
+                          <div className="text-xs text-gray-500">@{batch.cost_price.toFixed(2)}</div>
+                        </td>
+                      ) : null}
+
+                      {showCol('status') ? (
+                        <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
+                          <span
+                            className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${batch.status === 'ACTIVE'
+                              ? 'bg-green-100 text-green-800'
+                              : batch.status === 'DEPLETED'
+                                ? 'bg-gray-100 text-gray-800'
+                                : 'bg-red-100 text-red-800'
+                              }`}
+                          >
+                            {batch.status}
+                          </span>
+                        </td>
+                      ) : null}
+
+                      {showCol('actions') ? (
+                        <td className={`px-4 py-4 text-sm ${INVENTORY_COL_FIT_CLASS}`}>
+                          <button
+                            onClick={() => handleViewDetails(batch)}
+                            className="text-blue-600 hover:text-blue-900 font-medium"
+                          >
+                            Details
+                          </button>
+                        </td>
+                      ) : null}
                     </tr>
                   );
                 })

@@ -1,8 +1,8 @@
 # PROOF — Adaptive row actions SSOT
 
 **Verdict:** PASS
-**Generated:** 2026-09-05T11:49:51.816Z
-**Gates:** 11/11
+**Generated:** 2026-09-05T17:07:47.991Z
+**Gates:** 13/13
 
 - PASS `MOBILE_SHEET` — mobile chrome uses sheet secondary actions
 - PASS `MOBILE_MENU` — 3 card actions collapse to Actions menu on phone
@@ -14,6 +14,8 @@
 - PASS `LINK_APPEARANCE` — AdaptiveRowActions supports link (no-box) appearance for detail nav
 - PASS `BAR_DELEGATES` — ResponsiveActionBar no longer stacks full-width towers
 - PASS `ADJ_USES_ROW_ACTIONS` — Adjustments wires structured AdaptiveRowActions
+- PASS `INLINE_NOWRAP_ROW` — Inline AdaptiveRowActions stay one horizontal row (match Adjustments)
+- PASS `PRODUCTS_BUTTON_ROW_ACTIONS` — Products table ACTIONS match Adjustments: outlined buttons in one horizontal nowrap row
 - PASS `FOOTER_NO_COLLAPSE` — page sticky AdaptiveActionBar keeps CTAs visible
 
 ## Integrity

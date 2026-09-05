@@ -36,6 +36,9 @@ import {
   ADAPTIVE_TOOLBAR_CARD_CLASS,
   ADAPTIVE_WORKLIST_DENSITY,
   ADAPTIVE_WORKLIST_SEARCH_DEBOUNCE_MS,
+  INVENTORY_WORKLIST_TABLE_CLASS,
+  INVENTORY_COL_FILL_CLASS,
+  INVENTORY_COL_FIT_CLASS,
 } from '../../lib/adaptiveDashboard';
 
 import { DatePicker } from '../../components/ui/date-picker';
@@ -45,6 +48,8 @@ import { downloadFile } from '../../utils/download';
 import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
 import { useServerTableSort } from '../../hooks/useServerTableSort';
+import { InventoryColumnPicker } from '../../components/inventory/InventoryColumnPicker';
+import { useInventoryColumnPrefs } from '../../hooks/useInventoryColumnPrefs';
 import type { Supplier } from '../../types';
 import {
   SupplierSelector,
@@ -1298,6 +1303,8 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
 
 export default function PurchaseOrdersPage() {
   const location = useLocation();
+  const columnPrefs = useInventoryColumnPrefs('purchase-orders');
+  const { show: showCol } = columnPrefs;
   // State
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedPO, setSelectedPO] = useState<PORow | null>(null);
@@ -1655,6 +1662,18 @@ export default function PurchaseOrdersPage() {
   }
 
   const hasDeliveryDates = purchaseOrders.some((po: PORow) => po.expectedDelivery);
+  const tableColSpan = useMemo(() => {
+    const ids = [
+      'poNumber',
+      'supplier',
+      'orderDate',
+      ...(hasDeliveryDates ? (['expectedDelivery'] as const) : []),
+      'status',
+      'totalAmount',
+      'actions',
+    ];
+    return ids.filter((id) => showCol(id)).length;
+  }, [hasDeliveryDates, showCol]);
 
   return (
     <div data-po-page="true">
@@ -1770,6 +1789,15 @@ export default function PurchaseOrdersPage() {
                   >
                     Refresh
                   </button>
+                  <InventoryColumnPicker
+                    presentation="menu"
+                    catalog={columnPrefs.catalog}
+                    visibleIds={columnPrefs.visibleIds}
+                    visibleCount={columnPrefs.visibleCount}
+                    totalCount={columnPrefs.totalCount}
+                    onToggle={columnPrefs.toggle}
+                    onResetDefaults={columnPrefs.resetDefaults}
+                  />
                 </>
               }
             >
@@ -1867,26 +1895,38 @@ export default function PurchaseOrdersPage() {
         {/* Desktop Table View */}
         <div className="hidden sm:block overflow-x-auto">
           <ResponsiveTableWrapper>
-            <table className="min-w-full divide-y divide-gray-200">
+            <table className={INVENTORY_WORKLIST_TABLE_CLASS} data-inventory-worklist-table="true">
               <thead className="bg-gray-50">
                 <tr>
-                  <SortableTableHeader label="PO Number" field="poNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
-                  <SortableTableHeader label="Supplier" field="supplier" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
-                  <SortableTableHeader label="Order Date" field="orderDate" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
-                  {hasDeliveryDates && (
-                    <SortableTableHeader label="Expected Delivery" field="expectedDelivery" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
-                  )}
-                  <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
-                  <SortableTableHeader label="Total Amount" field="totalAmount" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
+                  {showCol('poNumber') ? (
+                    <SortableTableHeader label="PO Number" field="poNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={INVENTORY_COL_FILL_CLASS} />
+                  ) : null}
+                  {showCol('supplier') ? (
+                    <SortableTableHeader label="Supplier" field="supplier" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={INVENTORY_COL_FIT_CLASS} />
+                  ) : null}
+                  {showCol('orderDate') ? (
+                    <SortableTableHeader label="Order Date" field="orderDate" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={INVENTORY_COL_FIT_CLASS} />
+                  ) : null}
+                  {hasDeliveryDates && showCol('expectedDelivery') ? (
+                    <SortableTableHeader label="Expected Delivery" field="expectedDelivery" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={INVENTORY_COL_FIT_CLASS} />
+                  ) : null}
+                  {showCol('status') ? (
+                    <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className={INVENTORY_COL_FIT_CLASS} />
+                  ) : null}
+                  {showCol('totalAmount') ? (
+                    <SortableTableHeader label="Total Amount" field="totalAmount" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" className={INVENTORY_COL_FIT_CLASS} />
+                  ) : null}
+                  {showCol('actions') ? (
+                    <th className={`px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider ${INVENTORY_COL_FIT_CLASS}`}>
+                      Actions
+                    </th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {purchaseOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={hasDeliveryDates ? 7 : 6} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={tableColSpan} className="px-6 py-8 text-center text-gray-500">
                       {selectedStatus !== 'ALL' || selectedSupplier || searchTerm
                         ? 'No purchase orders match your filters'
                         : 'No purchase orders yet. Create your first PO to get started!'}
@@ -1899,110 +1939,115 @@ export default function PurchaseOrdersPage() {
 
                     return (
                       <tr key={po.id} className="hover:bg-gray-50">
-                        {/* PO Number */}
-                        <td className="px-4 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-blue-600">{po.poNumber}</div>
-                        </td>
+                        {showCol('poNumber') ? (
+                          <td className={`px-4 py-4 ${INVENTORY_COL_FILL_CLASS}`}>
+                            <div className="text-sm font-medium text-blue-600 truncate min-w-0">{po.poNumber}</div>
+                          </td>
+                        ) : null}
 
-                        {/* Supplier */}
-                        <td className="px-4 py-4">
-                          <div className="text-sm text-gray-900">{po.supplierName}</div>
-                          {po.supplierContact && (
-                            <div className="text-xs text-gray-500">{po.supplierContact}</div>
-                          )}
-                        </td>
+                        {showCol('supplier') ? (
+                          <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
+                            <div className="text-sm text-gray-900">{po.supplierName}</div>
+                            {po.supplierContact && (
+                              <div className="text-xs text-gray-500">{po.supplierContact}</div>
+                            )}
+                          </td>
+                        ) : null}
 
-                        {/* Order Date */}
-                        <td className="px-4 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">{formatDate(po.orderDate)}</div>
-                        </td>
+                        {showCol('orderDate') ? (
+                          <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
+                            <div className="text-sm text-gray-900">{formatDate(po.orderDate)}</div>
+                          </td>
+                        ) : null}
 
-                        {/* Expected Delivery */}
-                        {hasDeliveryDates && (
-                          <td className="px-4 py-4 whitespace-nowrap">
+                        {hasDeliveryDates && showCol('expectedDelivery') ? (
+                          <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
                             <div className="text-sm text-gray-900">
                               {formatDate(po.expectedDelivery)}
                             </div>
                           </td>
-                        )}
+                        ) : null}
 
-                        {/* Status */}
-                        <td className="px-4 py-4 whitespace-nowrap">
-                          <span
-                            className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusConfig.color}`}
-                            title={statusConfig.title}
-                          >
-                            {statusConfig.icon} {statusConfig.label}
-                          </span>
-                          {shouldShowPOReceiptProgressLine(po) && (
-                            <div className="text-xs text-gray-500 mt-1">
-                              {Number(po.netReceivedQtyTotal ?? 0)} / {Number(po.orderedQtyTotal ?? 0)} net received
-                              {Number(po.openQtyTotal ?? 0) > 0
-                                ? ` · ${Number(po.openQtyTotal)} open`
-                                : ''}
-                            </div>
-                          )}
-                        </td>
-
-                        {/* Total Amount */}
-                        <td className="px-4 py-4 whitespace-nowrap text-right">
-                          <div className="text-sm font-medium text-gray-900">
-                            {formatCurrency(totalAmount.toNumber())}
-                          </div>
-                        </td>
-
-                        {/* Actions */}
-                        <td className="px-4 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <div className="flex justify-end gap-2">
-                            {po.status === 'DRAFT' && (
-                              <>
-                                {canCreatePO && (
-                                  <button
-                                    onClick={() => handleEditPO(po)}
-                                    className="text-indigo-600 hover:text-indigo-900"
-                                    title="Edit Draft PO"
-                                  >
-                                    ✏️
-                                  </button>
-                                )}
-                                {canSubmitPO && (
-                                  <button
-                                    onClick={() => handleSubmitPO(po.id)}
-                                    className="text-blue-600 hover:text-blue-900"
-                                    title="Submit PO & Send to Receiving"
-                                  >
-                                    📤
-                                  </button>
-                                )}
-                                {canDeletePO && (
-                                  <button
-                                    onClick={() => handleDeletePO(po.id)}
-                                    className="text-red-600 hover:text-red-900"
-                                    title="Delete"
-                                  >
-                                    🗑️
-                                  </button>
-                                )}
-                              </>
-                            )}
-                            {(po.status === 'DRAFT' || po.status === 'PENDING') && canCancelPO && (
-                              <button
-                                onClick={() => handleCancelPO(po.id)}
-                                className="text-orange-600 hover:text-orange-900"
-                                title="Cancel PO"
-                              >
-                                ❌
-                              </button>
-                            )}
-                            <button
-                              onClick={() => handleViewDetails(po)}
-                              className="text-gray-600 hover:text-gray-900"
-                              title="View Details"
+                        {showCol('status') ? (
+                          <td className={`px-4 py-4 ${INVENTORY_COL_FIT_CLASS}`}>
+                            <span
+                              className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusConfig.color}`}
+                              title={statusConfig.title}
                             >
-                              👁️
-                            </button>
-                          </div>
-                        </td>
+                              {statusConfig.icon} {statusConfig.label}
+                            </span>
+                            {shouldShowPOReceiptProgressLine(po) && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                {Number(po.netReceivedQtyTotal ?? 0)} / {Number(po.orderedQtyTotal ?? 0)} net received
+                                {Number(po.openQtyTotal ?? 0) > 0
+                                  ? ` · ${Number(po.openQtyTotal)} open`
+                                  : ''}
+                              </div>
+                            )}
+                          </td>
+                        ) : null}
+
+                        {showCol('totalAmount') ? (
+                          <td className={`px-4 py-4 text-right ${INVENTORY_COL_FIT_CLASS}`}>
+                            <div className="text-sm font-medium text-gray-900">
+                              {formatCurrency(totalAmount.toNumber())}
+                            </div>
+                          </td>
+                        ) : null}
+
+                        {showCol('actions') ? (
+                          <td className={`px-4 py-4 text-right text-sm font-medium ${INVENTORY_COL_FIT_CLASS}`}>
+                            <div className="flex justify-end gap-2">
+                              {po.status === 'DRAFT' && (
+                                <>
+                                  {canCreatePO && (
+                                    <button
+                                      onClick={() => handleEditPO(po)}
+                                      className="text-indigo-600 hover:text-indigo-900"
+                                      title="Edit Draft PO"
+                                    >
+                                      ✏️
+                                    </button>
+                                  )}
+                                  {canSubmitPO && (
+                                    <button
+                                      onClick={() => handleSubmitPO(po.id)}
+                                      className="text-blue-600 hover:text-blue-900"
+                                      title="Submit PO & Send to Receiving"
+                                    >
+                                      📤
+                                    </button>
+                                  )}
+                                  {canDeletePO && (
+                                    <button
+                                      onClick={() => handleDeletePO(po.id)}
+                                      className="text-red-600 hover:text-red-900"
+                                      title="Delete"
+                                    >
+                                      🗑️
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                              {(po.status === 'DRAFT' || po.status === 'PENDING') && canCancelPO && (
+                                <button
+                                  onClick={() => handleCancelPO(po.id)}
+                                  className="text-orange-600 hover:text-orange-900"
+                                  title="Cancel PO"
+                                >
+                                  ❌
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleViewDetails(po)}
+                                className="text-gray-600 hover:text-gray-900"
+                                title="View Details"
+                              >
+                                👁️
+                              </button>
+                            </div>
+                          </td>
+                        ) : null}
                       </tr>
                     );
                   })

@@ -93,7 +93,7 @@ function actionButtonClass(
 /**
  * Global list/card row actions.
  * Dense/sheet chrome → single "Actions" control (no stacked full-width CTAs).
- * Roomy chrome → compact horizontal row.
+ * Roomy chrome → compact horizontal row (nowrap — never a vertical CTA tower in a narrow Actions cell).
  */
 export function AdaptiveRowActions({
   actions,
@@ -124,7 +124,7 @@ export function AdaptiveRowActions({
     if (actions && actions.length > 0) {
       return (
         <div
-          className={`flex flex-row flex-wrap items-center justify-end gap-1.5 ${className}`.trim()}
+          className={`flex flex-row flex-nowrap items-center justify-end gap-1.5 ${className}`.trim()}
           data-adaptive-row-actions="true"
           data-row-actions-presentation="inline"
         >
@@ -146,7 +146,7 @@ export function AdaptiveRowActions({
 
     return (
       <div
-        className={`flex flex-row flex-wrap items-center justify-end gap-1.5 ${className}`.trim()}
+        className={`flex flex-row flex-nowrap items-center justify-end gap-1.5 ${className}`.trim()}
         data-adaptive-row-actions="true"
         data-row-actions-presentation="inline"
       >

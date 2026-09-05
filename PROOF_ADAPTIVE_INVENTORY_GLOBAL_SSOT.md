@@ -1,7 +1,7 @@
 # PROOF — Adaptive inventory global SSOT
 
 **Verdict:** PASS
-**Generated:** 2026-09-05T12:42:31.198Z
+**Generated:** 2026-09-05T17:07:47.975Z
 **Gates:** 51/51
 
 - PASS `WORKLIST_2UP` — worklist grids are 2-up on phone
