@@ -56,7 +56,7 @@ export function AdaptiveActionBar({
         ].join(' ')}
         data-action-bar-placement="sticky"
       >
-        <ResponsiveActionBar divider={false} className="sm:justify-end">
+        <ResponsiveActionBar divider={false} adaptiveCollapse={false} className="sm:justify-end">
           {children}
           {!primaryFab ? null : (
             <div className="hidden sm:contents">{primaryFab}</div>

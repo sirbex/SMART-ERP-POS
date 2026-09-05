@@ -20,12 +20,21 @@ import { useBusinessPerformance } from '../../hooks/useApi';
 import { computeDateRange } from '../../utils/dateRangePresets';
 import {
   AdaptivePage,
+  AdaptiveReportFilters,
   AdaptiveReportShell,
   AdaptiveReportSummary,
   type AdaptiveReportMetric,
+  useAdaptiveLayoutOptional,
 } from '../../components/adaptive';
 import { CustomerReceiptsByDayPanel } from '../../components/reports/CustomerReceiptsByDayPanel';
 import { ReportBackLink } from '../../components/reports/ReportBackLink';
+import {
+  REPORT_FILTER_CONTROL_CLASS,
+  REPORT_FILTER_FIELDS_CLASS,
+  REPORT_FILTER_LABEL_CLASS,
+  REPORT_PAGE_FRAME_CLASS,
+  resolveReportDatePickersMode,
+} from '../../lib/adaptiveReports';
 
 // ---------------------------------------------------------------------------
 // Types matching the new ledger-based API response
@@ -180,6 +189,9 @@ const BusinessPerformancePage: React.FC = () => {
   const [includeStockAdj, setIncludeStockAdj] = useState(true);
   const [includeExpenses, setIncludeExpenses] = useState(true);
   const [visibleSection, setVisibleSection] = useState<SectionKey>('ALL');
+  const layout = useAdaptiveLayoutOptional();
+  const tier = layout?.tier ?? 'desktop';
+  const datePickersMode = resolveReportDatePickersMode(tier);
 
   const showSection = (key: SectionKey) => visibleSection === 'ALL' || visibleSection === key;
 
@@ -242,84 +254,105 @@ const BusinessPerformancePage: React.FC = () => {
     ]
     : [];
 
-  const kpiMetrics: AdaptiveReportMetric[] = summaryCards.map((card, idx) => ({
-    id: card.label,
-    label: card.label,
-    value: card.value,
-    sub: card.sub,
-    toneClassName: card.color,
-    priority: (idx < 2 ? 'primary' : 'secondary') as AdaptiveReportMetric['priority'],
-  }));
+  const kpiMetrics: AdaptiveReportMetric[] = summaryCards.map((card) => {
+    const primary =
+      card.label === 'Total Revenue' ||
+      card.label === 'Gross Profit' ||
+      card.label === 'Net Profit';
+    return {
+      id: card.label,
+      label: card.label,
+      value: card.value,
+      sub: card.sub,
+      toneClassName: card.color,
+      priority: (primary ? 'primary' : 'secondary') as AdaptiveReportMetric['priority'],
+    };
+  });
 
   return (
     <Layout>
       <AdaptivePage
-        className="p-6 max-w-7xl mx-auto"
+        className={REPORT_PAGE_FRAME_CLASS}
         title="Management P&L by Category"
         description="Ledger-based report — where did money come from, and where did it go?"
         backLink={<ReportBackLink />}
         toolbar={
-          <div className="bg-white rounded-lg border shadow-sm p-4 space-y-4" data-bp-filters="true">
-            <DateRangeFilter
-              startDate={startDate}
-              endDate={endDate}
-              onStartDateChange={setStartDate}
-              onEndDateChange={setEndDate}
-              defaultPreset="THIS_MONTH"
-            />
-            <div className="flex flex-wrap gap-4 items-end">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Section
-                </label>
-                <select
-                  value={visibleSection}
-                  onChange={(e) => setVisibleSection(e.target.value as SectionKey)}
-                  className="border rounded-md px-3 py-1.5 text-sm bg-white min-h-[var(--layout-touch-target)]"
-                >
-                  {SECTION_OPTIONS.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Payment Method
-                </label>
-                <select
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                  className="border rounded-md px-3 py-1.5 text-sm bg-white min-h-[var(--layout-touch-target)]"
-                >
-                  {PAYMENT_METHODS.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer min-h-[var(--layout-touch-target)]">
-                <input
-                  type="checkbox"
-                  checked={includeStockAdj}
-                  onChange={(e) => setIncludeStockAdj(e.target.checked)}
-                  className="rounded border-gray-300"
+          <AdaptiveReportFilters
+            dataAttr="bp"
+            secondaryLabel="More options"
+            primary={
+              <div data-bp-filters="true" className="space-y-3 sm:space-y-4">
+                <DateRangeFilter
+                  startDate={startDate}
+                  endDate={endDate}
+                  onStartDateChange={setStartDate}
+                  onEndDateChange={setEndDate}
+                  defaultPreset="THIS_MONTH"
+                  pickersMode={datePickersMode}
                 />
-                Include Stock Adjustments
-              </label>
-              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer min-h-[var(--layout-touch-target)]">
-                <input
-                  type="checkbox"
-                  checked={includeExpenses}
-                  onChange={(e) => setIncludeExpenses(e.target.checked)}
-                  className="rounded border-gray-300"
-                />
-                Include Expenses
-              </label>
-            </div>
-          </div>
+                <div className={REPORT_FILTER_FIELDS_CLASS}>
+                  <div className="min-w-0">
+                    <label className={REPORT_FILTER_LABEL_CLASS} htmlFor="bp-section">
+                      Section
+                    </label>
+                    <select
+                      id="bp-section"
+                      value={visibleSection}
+                      onChange={(e) => setVisibleSection(e.target.value as SectionKey)}
+                      className={REPORT_FILTER_CONTROL_CLASS}
+                      data-bp-section="true"
+                    >
+                      {SECTION_OPTIONS.map((s) => (
+                        <option key={s.value} value={s.value}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="min-w-0">
+                    <label className={REPORT_FILTER_LABEL_CLASS} htmlFor="bp-payment">
+                      Payment Method
+                    </label>
+                    <select
+                      id="bp-payment"
+                      value={paymentMethod}
+                      onChange={(e) => setPaymentMethod(e.target.value)}
+                      className={REPORT_FILTER_CONTROL_CLASS}
+                      data-bp-payment="true"
+                    >
+                      {PAYMENT_METHODS.map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            }
+            secondary={
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="flex items-center gap-2.5 text-sm font-medium text-slate-800 cursor-pointer min-h-[var(--layout-touch-target)]">
+                  <input
+                    type="checkbox"
+                    checked={includeStockAdj}
+                    onChange={(e) => setIncludeStockAdj(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  Include Stock Adjustments
+                </label>
+                <label className="flex items-center gap-2.5 text-sm font-medium text-slate-800 cursor-pointer min-h-[var(--layout-touch-target)]">
+                  <input
+                    type="checkbox"
+                    checked={includeExpenses}
+                    onChange={(e) => setIncludeExpenses(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  Include Expenses
+                </label>
+              </div>
+            }
+          />
         }
       >
         {/* Loading */}
@@ -338,16 +371,15 @@ const BusinessPerformancePage: React.FC = () => {
 
         {report && !isLoading && (
           <AdaptiveReportShell
-            detailLabel="P&L detail"
             summary={
               kpiMetrics.length > 0 ? <AdaptiveReportSummary metrics={kpiMetrics} /> : null
             }
             table={
-              <div className="space-y-6" data-bp-detail="table">
+              <div className="space-y-4 sm:space-y-6" data-bp-detail="sections">
             {/* ── Section 1: Money In ── */}
             {showSection('MONEY_IN') && (
               <div className="bg-white rounded-lg border shadow-sm">
-                <div className="px-6 py-4 border-b">
+                <div className="px-3 py-3 sm:px-6 sm:py-4 border-b">
                   <div className="flex items-center gap-2">
                     <Wallet className="h-5 w-5 text-blue-600" />
                     <h2 className="text-lg font-semibold text-gray-900">
@@ -470,7 +502,7 @@ const BusinessPerformancePage: React.FC = () => {
             {/* ── Section 2: Revenue by Product Category ── */}
             {showSection('REVENUE') && (
               <div className="bg-white rounded-lg border shadow-sm">
-                <div className="px-6 py-4 border-b">
+                <div className="px-3 py-3 sm:px-6 sm:py-4 border-b">
                   <div className="flex items-center gap-2">
                     <ShoppingCart className="h-5 w-5 text-green-600" />
                     <h2 className="text-lg font-semibold text-gray-900">
@@ -591,7 +623,7 @@ const BusinessPerformancePage: React.FC = () => {
             {/* ── Section 3: Cost & Stock Impact ── */}
             {showSection('COST_STOCK') && (
               <div className="bg-white rounded-lg border shadow-sm">
-                <div className="px-6 py-4 border-b">
+                <div className="px-3 py-3 sm:px-6 sm:py-4 border-b">
                   <div className="flex items-center gap-2">
                     <Package className="h-5 w-5 text-orange-600" />
                     <h2 className="text-lg font-semibold text-gray-900">
@@ -670,7 +702,7 @@ const BusinessPerformancePage: React.FC = () => {
             {/* ── Section 4: Expenses by GL Account ── */}
             {includeExpenses && showSection('EXPENSES') && (
               <div className="bg-white rounded-lg border shadow-sm">
-                <div className="px-6 py-4 border-b">
+                <div className="px-3 py-3 sm:px-6 sm:py-4 border-b">
                   <div className="flex items-center gap-2">
                     <DollarSign className="h-5 w-5 text-red-600" />
                     <h2 className="text-lg font-semibold text-gray-900">
@@ -758,7 +790,7 @@ const BusinessPerformancePage: React.FC = () => {
             {/* ── Section 4b: Supplier Payments by Funding Account ── */}
             {report.supplierPaymentsByAccount && report.supplierPaymentsByAccount.length > 0 && (
               <div className="bg-white rounded-lg border shadow-sm">
-                <div className="px-6 py-4 border-b">
+                <div className="px-3 py-3 sm:px-6 sm:py-4 border-b">
                   <div className="flex items-center gap-2">
                     <CreditCard className="h-5 w-5 text-orange-600" />
                     <h2 className="text-lg font-semibold text-gray-900">
@@ -878,7 +910,7 @@ const BusinessPerformancePage: React.FC = () => {
               (report.customerDeposits.depositCount > 0 ||
                 report.customerDeposits.outstandingLiability > 0) && (
               <div className="bg-white rounded-lg border shadow-sm">
-                <div className="px-6 py-4 border-b">
+                <div className="px-3 py-3 sm:px-6 sm:py-4 border-b">
                   <div className="flex items-center gap-2">
                     <Landmark className="h-5 w-5 text-purple-600" />
                     <h2 className="text-lg font-semibold text-gray-900">
@@ -942,7 +974,7 @@ const BusinessPerformancePage: React.FC = () => {
             {/* ── Section 5: Net Business Position (Income Statement) ── */}
             {showSection('NET_POSITION') && (
               <div className="bg-white rounded-lg border shadow-sm">
-                <div className="px-6 py-4 border-b">
+                <div className="px-3 py-3 sm:px-6 sm:py-4 border-b">
                   <div className="flex items-center gap-2">
                     <BarChart3 className="h-5 w-5 text-indigo-600" />
                     <h2 className="text-lg font-semibold text-gray-900">
@@ -1061,27 +1093,6 @@ const BusinessPerformancePage: React.FC = () => {
                 </div>
               </div>
             )}
-              </div>
-            }
-            cards={
-              <div className="space-y-4" data-bp-detail="cards">
-                {kpiMetrics.map((m) => (
-                  <div
-                    key={m.id}
-                    className="rounded-lg border bg-white p-4 shadow-sm"
-                  >
-                    <div className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                      {m.label}
-                    </div>
-                    <div className={`mt-1 text-lg font-bold ${m.toneClassName || 'text-gray-900'}`}>
-                      {m.value}
-                    </div>
-                    {m.sub ? <div className="mt-0.5 text-xs text-gray-500">{m.sub}</div> : null}
-                  </div>
-                ))}
-                <p className="text-sm text-gray-500 px-1">
-                  Expand Details on larger screens for full P&amp;L sections, or switch workspace to desktop.
-                </p>
               </div>
             }
           />

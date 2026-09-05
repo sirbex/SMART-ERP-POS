@@ -1,12 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useAdaptiveLayoutOptional } from './AdaptiveAppShell';
-import type { LayoutTier } from '../../lib/layoutTiers';
-
-/** Secondary options start collapsed on mobile; primary filters never use this. */
-function resolveReportSecondaryFiltersCollapsedDefault(tier: LayoutTier): boolean {
-  return tier === 'mobile';
-}
+import { resolveReportSecondaryFiltersCollapsedDefault } from '../../lib/adaptiveReports';
 
 type AdaptiveReportFiltersProps = {
   /**

@@ -14,15 +14,15 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 describe('adaptive reports (Phase 4)', () => {
   it('maps tiers to summary columns and detail modes', () => {
-    expect(resolveReportSummaryColumns('mobile')).toBe(2);
-    expect(resolveReportSummaryColumns('compact')).toBe(3);
+    expect(resolveReportSummaryColumns('mobile')).toBe(1);
+    expect(resolveReportSummaryColumns('compact')).toBe(2);
     expect(resolveReportSummaryColumns('desktop')).toBe(4);
     expect(resolveReportSummaryColumns('wide')).toBe(6);
 
     expect(resolveReportDetailMode('mobile')).toBe('cards');
     expect(resolveReportDetailMode('compact')).toBe('reduced');
     expect(resolveReportDetailMode('desktop')).toBe('table');
-    expect(resolveReportDetailCollapsedDefault('mobile')).toBe(true);
+    expect(resolveReportDetailCollapsedDefault('mobile')).toBe(false);
     expect(resolveReportDetailCollapsedDefault('desktop')).toBe(false);
   });
 
@@ -51,8 +51,8 @@ describe('adaptive reports (Phase 4)', () => {
     const src = readFileSync(resolve(here, '../lib/print.ts'), 'utf8');
     expect(src).toContain('export async function printHtmlDocument');
     expect(src).toContain('export async function printReportDocument');
-    expect(src).toContain('printHtmlDocument(receiptHTML)');
-    expect(src).toContain('localhost:1811/print');
+    expect(src).toContain('return printHtmlDocument(html)');
+    expect(src).toContain("fetch(`${origin}/print`");
   });
 });
 

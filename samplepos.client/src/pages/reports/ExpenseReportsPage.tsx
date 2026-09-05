@@ -23,6 +23,7 @@ import {
   AdaptiveReportSummary,
   type AdaptiveReportMetric,
 } from '../../components/adaptive';
+import { REPORT_PAGE_FRAME_CLASS } from '../../lib/adaptiveReports';
 import {
   Columns3,
   Download,
@@ -363,7 +364,7 @@ export default function ExpenseReportsPage() {
   return (
     <Layout>
       <AdaptivePage
-        className="mx-auto max-w-7xl p-6"
+        className={REPORT_PAGE_FRAME_CLASS}
         title="Expense reports"
         description="Recognized expense hits P&L on approval; pay clears AP from Cash / Bank / MoMo / Petty. Cancelled vouchers are excluded."
         backLink={<ReportBackLink />}
@@ -421,6 +422,7 @@ export default function ExpenseReportsPage() {
               onStartDateChange={setStartDate}
               onEndDateChange={setEndDate}
               defaultPreset="THIS_MONTH"
+              pickersMode="custom"
             />
           </div>
           {catalog.length > 0 && (

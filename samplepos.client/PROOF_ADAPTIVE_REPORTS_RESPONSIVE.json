@@ -1,0 +1,284 @@
+{
+  "feature": "ADAPTIVE_REPORTS_RESPONSIVE",
+  "verdict": "PASS",
+  "passed": 51,
+  "total": 51,
+  "integrity": {
+    "ssot": "samplepos.client/src/lib/adaptiveReports.ts",
+    "shell": "samplepos.client/src/components/adaptive/AdaptiveReportShell.tsx",
+    "filters": "samplepos.client/src/components/adaptive/AdaptiveReportFilters.tsx",
+    "consumers": [
+      "pages/reports/BusinessPerformancePage.tsx",
+      "pages/reports/ExpenseReportsPage.tsx",
+      "pages/reports/SalesAnalysisReportPage.tsx",
+      "pages/reports/OrdersReportPage.tsx",
+      "pages/accounting/AgedBalancePage.tsx",
+      "pages/accounting/TrialBalancePage.tsx"
+    ],
+    "invariants": [
+      "Primary filters always visible",
+      "Report body always visible (no Details accordion)",
+      "No brand/UA layout forks",
+      "Hub title stacks above shortcuts on narrow viewports",
+      "P&L mobile shows real sections via table fallback"
+    ]
+  },
+  "gates": [
+    {
+      "id": "KPI_COLS_MATRIX",
+      "ok": true,
+      "detail": "{\"mobile\":1,\"compact\":2,\"desktop\":4,\"wide\":6}"
+    },
+    {
+      "id": "DETAIL_MODE_MATRIX",
+      "ok": true,
+      "detail": "{\"mobile\":\"cards\",\"compact\":\"reduced\",\"desktop\":\"table\"}"
+    },
+    {
+      "id": "BODY_OPEN_MOBILE",
+      "ok": true,
+      "detail": "mobile: body never collapsed"
+    },
+    {
+      "id": "PRIMARY_OPEN_MOBILE",
+      "ok": true,
+      "detail": "mobile: primary filters never collapsed"
+    },
+    {
+      "id": "BODY_OPEN_COMPACT",
+      "ok": true,
+      "detail": "compact: body never collapsed"
+    },
+    {
+      "id": "PRIMARY_OPEN_COMPACT",
+      "ok": true,
+      "detail": "compact: primary filters never collapsed"
+    },
+    {
+      "id": "BODY_OPEN_DESKTOP",
+      "ok": true,
+      "detail": "desktop: body never collapsed"
+    },
+    {
+      "id": "PRIMARY_OPEN_DESKTOP",
+      "ok": true,
+      "detail": "desktop: primary filters never collapsed"
+    },
+    {
+      "id": "BODY_OPEN_WIDE",
+      "ok": true,
+      "detail": "wide: body never collapsed"
+    },
+    {
+      "id": "PRIMARY_OPEN_WIDE",
+      "ok": true,
+      "detail": "wide: primary filters never collapsed"
+    },
+    {
+      "id": "SECONDARY_ONLY_MOBILE",
+      "ok": true,
+      "detail": "More options collapses on mobile only"
+    },
+    {
+      "id": "DATE_PICKERS_MATRIX",
+      "ok": true,
+      "detail": "custom pickers on phone/compact; always on desk"
+    },
+    {
+      "id": "FRAME_TIGHT_GUTTERS",
+      "ok": true,
+      "detail": "mx-auto max-w-7xl p-3 sm:p-4 md:p-6"
+    },
+    {
+      "id": "PRIMARY_GRID",
+      "ok": true,
+      "detail": "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 items-end"
+    },
+    {
+      "id": "KPI_VALUE_READABLE",
+      "ok": true,
+      "detail": "mt-1 text-base font-bold tabular-nums leading-snug break-words sm:text-lg"
+    },
+    {
+      "id": "SELECT_MOBILE_PRIMARY",
+      "ok": true,
+      "detail": "mobile keeps primary metrics only"
+    },
+    {
+      "id": "SELECT_DESK_ALL",
+      "ok": true,
+      "detail": "desktop keeps all metrics"
+    },
+    {
+      "id": "NO_BRAND_FORK",
+      "ok": true,
+      "detail": "doc forbids brand layout forks"
+    },
+    {
+      "id": "NO_UA_FORK",
+      "ok": true,
+      "detail": "no UA/platform runtime forks"
+    },
+    {
+      "id": "ENTERPRISE_BODY_RULE",
+      "ok": true,
+      "detail": "SSOT documents primary filters + always-visible body"
+    },
+    {
+      "id": "SHELL_BODY_VISIBLE",
+      "ok": true,
+      "detail": "body always mounted; cards fall back to table"
+    },
+    {
+      "id": "SHELL_NO_ACCORDION",
+      "ok": true,
+      "detail": "Details accordion removed from shell"
+    },
+    {
+      "id": "FILTERS_PRIMARY_PROP",
+      "ok": true,
+      "detail": "primary slot required"
+    },
+    {
+      "id": "FILTERS_SECONDARY_PROP",
+      "ok": true,
+      "detail": "secondary uses More options only"
+    },
+    {
+      "id": "FILTERS_PRIMARY_FORCED_OPEN",
+      "ok": true,
+      "detail": "primary bar never marks collapsed"
+    },
+    {
+      "id": "CONSUMER_BUSINESSPERFORMANCEPAGE_SHELL",
+      "ok": true,
+      "detail": "pages/reports/BusinessPerformancePage.tsx uses AdaptiveReportShell"
+    },
+    {
+      "id": "CONSUMER_BUSINESSPERFORMANCEPAGE_NO_DESKTOP_ONLY_STUB",
+      "ok": true,
+      "detail": "pages/reports/BusinessPerformancePage.tsx does not tell users to switch to desktop for the report body"
+    },
+    {
+      "id": "CONSUMER_EXPENSEREPORTSPAGE_SHELL",
+      "ok": true,
+      "detail": "pages/reports/ExpenseReportsPage.tsx uses AdaptiveReportShell"
+    },
+    {
+      "id": "CONSUMER_EXPENSEREPORTSPAGE_NO_DESKTOP_ONLY_STUB",
+      "ok": true,
+      "detail": "pages/reports/ExpenseReportsPage.tsx does not tell users to switch to desktop for the report body"
+    },
+    {
+      "id": "CONSUMER_SALESANALYSISREPORTPAGE_SHELL",
+      "ok": true,
+      "detail": "pages/reports/SalesAnalysisReportPage.tsx uses AdaptiveReportShell"
+    },
+    {
+      "id": "CONSUMER_SALESANALYSISREPORTPAGE_NO_DESKTOP_ONLY_STUB",
+      "ok": true,
+      "detail": "pages/reports/SalesAnalysisReportPage.tsx does not tell users to switch to desktop for the report body"
+    },
+    {
+      "id": "CONSUMER_ORDERSREPORTPAGE_SHELL",
+      "ok": true,
+      "detail": "pages/reports/OrdersReportPage.tsx uses AdaptiveReportShell"
+    },
+    {
+      "id": "CONSUMER_ORDERSREPORTPAGE_NO_DESKTOP_ONLY_STUB",
+      "ok": true,
+      "detail": "pages/reports/OrdersReportPage.tsx does not tell users to switch to desktop for the report body"
+    },
+    {
+      "id": "CONSUMER_AGEDBALANCEPAGE_SHELL",
+      "ok": true,
+      "detail": "pages/accounting/AgedBalancePage.tsx uses AdaptiveReportShell"
+    },
+    {
+      "id": "CONSUMER_AGEDBALANCEPAGE_NO_DESKTOP_ONLY_STUB",
+      "ok": true,
+      "detail": "pages/accounting/AgedBalancePage.tsx does not tell users to switch to desktop for the report body"
+    },
+    {
+      "id": "CONSUMER_TRIALBALANCEPAGE_SHELL",
+      "ok": true,
+      "detail": "pages/accounting/TrialBalancePage.tsx uses AdaptiveReportShell"
+    },
+    {
+      "id": "CONSUMER_TRIALBALANCEPAGE_NO_DESKTOP_ONLY_STUB",
+      "ok": true,
+      "detail": "pages/accounting/TrialBalancePage.tsx does not tell users to switch to desktop for the report body"
+    },
+    {
+      "id": "BP_PRIMARY_SECTION",
+      "ok": true,
+      "detail": "Section always in primary"
+    },
+    {
+      "id": "BP_PRIMARY_PAYMENT",
+      "ok": true,
+      "detail": "Payment Method primary"
+    },
+    {
+      "id": "BP_SECONDARY_TOGGLES",
+      "ok": true,
+      "detail": "include toggles secondary"
+    },
+    {
+      "id": "BP_NO_BURIED_LABEL",
+      "ok": true,
+      "detail": "no buried Date & filters chip"
+    },
+    {
+      "id": "BP_FRAME",
+      "ok": true,
+      "detail": "REPORT_PAGE_FRAME_CLASS"
+    },
+    {
+      "id": "BP_PICKERS",
+      "ok": true,
+      "detail": "tier-driven date pickers"
+    },
+    {
+      "id": "BP_SECTIONS_BODY",
+      "ok": true,
+      "detail": "mobile falls through to real P&L sections (no KPI-only cards prop)"
+    },
+    {
+      "id": "BP_HAS_MONEY_IN",
+      "ok": true,
+      "detail": "Money In section present in body"
+    },
+    {
+      "id": "HUB_TITLE_STACK",
+      "ok": true,
+      "detail": "title is column-first — not crushed beside chips"
+    },
+    {
+      "id": "HUB_SHORTCUTS_WRAP",
+      "ok": true,
+      "detail": "shortcut chips wrap under title"
+    },
+    {
+      "id": "EXPENSE_FRAME",
+      "ok": true,
+      "detail": "Expense frame + custom date pickers"
+    },
+    {
+      "id": "EXPENSE_ROWS_CARDS",
+      "ok": true,
+      "detail": "Expense report has detail markers"
+    },
+    {
+      "id": "AGED_FRAME",
+      "ok": true,
+      "detail": "Aged balances frame"
+    },
+    {
+      "id": "AGED_ENTITY_CARDS",
+      "ok": true,
+      "detail": "Aged mobile cards are entity rows, not KPI clones"
+    }
+  ],
+  "generatedAt": "2026-09-05T21:28:58.899Z"
+}

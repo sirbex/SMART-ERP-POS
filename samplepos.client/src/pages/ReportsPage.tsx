@@ -46,6 +46,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { formatCurrency } from '../utils/currency';
 import { api } from '../services/api';
+import { api as inventoryApi } from '../utils/api';
 import CustomerAgingReport from '../components/reports/CustomerAgingReport';
 import ReportCustomerCombobox from '../components/reports/ReportCustomerCombobox';
 import ReportSupplierCombobox from '../components/reports/ReportSupplierCombobox';
@@ -1074,6 +1075,8 @@ export default function ReportsPage() {
   const [error, setError] = useState<string | null>(null);
   /** Expiring Items KPI card → register filter (all | expired | critical | warning | watch). */
   const [expiringBandFilter, setExpiringBandFilter] = useState<ExpiryBandFilter>('all');
+  const [expiringQuarantineBusyId, setExpiringQuarantineBusyId] = useState<string | null>(null);
+  const [expiringQuarantineMsg, setExpiringQuarantineMsg] = useState<string | null>(null);
 
   // Filter states
   const [groupBy, setGroupBy] = useState<'day' | 'week' | 'month' | 'product' | 'customer' | 'payment_method'>('day');
@@ -2468,8 +2471,22 @@ export default function ReportsPage() {
               <span className="font-semibold text-slate-800">Shelf-life register: </span>
               Active batches still on hand that are <strong>already expired</strong> or expire within
               the horizon. Value at risk = remaining qty × unit cost (inventory cost). Click a KPI card
-              to show only that band in the list (click again to show all).
+              to show only that band in the list (click again to show all).{' '}
+              <strong>Expired</strong> rows can be sent to quarantine (no P&amp;L) — then dispose from the{' '}
+              <Link to="/inventory/quarantine" className="text-slate-900 underline font-semibold">
+                Quarantine workqueue
+              </Link>
+              .
             </p>
+
+            {expiringQuarantineMsg && (
+              <p className="text-sm text-teal-800 bg-teal-50 border border-teal-100 rounded-lg px-4 py-2">
+                {expiringQuarantineMsg}{' '}
+                <Link to="/inventory/quarantine" className="underline font-semibold">
+                  Open quarantine
+                </Link>
+              </p>
+            )}
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-expiring-kpi-cards="true">
               <button
@@ -2574,10 +2591,72 @@ export default function ReportsPage() {
                     )}
                   </p>
                 </div>
-                <span className="text-slate-300 text-xs">
-                  {filteredRows.length}
-                  {expiringBandFilter !== 'all' ? ` of ${allRows.length}` : ''} batches
-                </span>
+                <div className="flex flex-wrap items-center gap-3">
+                  {(() => {
+                    const expiredIds = filteredRows
+                      .filter((r) => resolveExpiryRowBand({
+                        urgency: r.urgency != null ? String(r.urgency) : null,
+                        daysUntilExpiry: Number(r.daysUntilExpiry ?? 0),
+                      }) === 'expired' && r.batchId)
+                      .map((r) => String(r.batchId));
+                    if (!expiredIds.length) return null;
+                    return (
+                      <button
+                        type="button"
+                        disabled={expiringQuarantineBusyId === 'bulk'}
+                        className="text-xs px-2.5 py-1 rounded bg-amber-500/90 text-slate-900 font-semibold hover:bg-amber-400 disabled:opacity-50"
+                        data-expiring-quarantine-bulk="true"
+                        onClick={async () => {
+                          if (
+                            !window.confirm(
+                              `Quarantine ${expiredIds.length} expired batch(es)? This does not post P&L — dispose later from Quarantine.`,
+                            )
+                          ) {
+                            return;
+                          }
+                          setExpiringQuarantineBusyId('bulk');
+                          setExpiringQuarantineMsg(null);
+                          try {
+                            const res = await inventoryApi.inventory.quarantineFromExpiringReportBulk({
+                              inventoryBatchIds: expiredIds,
+                              memo: 'Bulk quarantine from Expiring Items report',
+                            });
+                            const data = (res.data?.data ?? {}) as {
+                              okCount?: number;
+                              failCount?: number;
+                            };
+                            setExpiringQuarantineMsg(
+                              `Quarantined ${data.okCount ?? 0} batch(es)` +
+                                (data.failCount ? ` · ${data.failCount} skipped` : '') +
+                                '. Refresh the report to update the register.',
+                            );
+                          } catch (err) {
+                            setExpiringQuarantineMsg(
+                              err instanceof Error ? err.message : 'Bulk quarantine failed',
+                            );
+                          } finally {
+                            setExpiringQuarantineBusyId(null);
+                          }
+                        }}
+                      >
+                        {expiringQuarantineBusyId === 'bulk'
+                          ? '…'
+                          : `Quarantine expired (${expiredIds.length})`}
+                      </button>
+                    );
+                  })()}
+                  <Link
+                    to="/inventory/quarantine"
+                    className="text-xs text-amber-200 underline hover:text-white"
+                    data-expiring-quarantine-link="true"
+                  >
+                    Quarantine workqueue
+                  </Link>
+                  <span className="text-slate-300 text-xs">
+                    {filteredRows.length}
+                    {expiringBandFilter !== 'all' ? ` of ${allRows.length}` : ''} batches
+                  </span>
+                </div>
               </div>
               {!allRows.length ? (
                 <div className="p-8 text-center text-sm text-slate-500">
@@ -2608,6 +2687,7 @@ export default function ReportsPage() {
                         <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Qty</th>
                         <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Unit cost</th>
                         <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Value at risk</th>
+                        <th className="px-3 py-3 text-right text-xs font-bold text-slate-600 uppercase">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -2625,6 +2705,8 @@ export default function ReportsPage() {
                               : band === 'warning'
                                 ? 'bg-amber-100 text-amber-800'
                                 : 'bg-slate-100 text-slate-700';
+                        const batchId = row.batchId != null ? String(row.batchId) : '';
+                        const canQuarantine = band === 'expired' && Boolean(batchId);
                         return (
                           <tr key={idx} className="hover:bg-slate-50">
                             <td className="px-3 py-2.5">
@@ -2659,6 +2741,52 @@ export default function ReportsPage() {
                             </td>
                             <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-amber-900">
                               {formatCurrency(Number(row.potentialLoss ?? 0))}
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                              {canQuarantine ? (
+                                <button
+                                  type="button"
+                                  disabled={expiringQuarantineBusyId === batchId}
+                                  data-expiring-quarantine-row="true"
+                                  className="text-xs px-2 py-1 rounded border border-red-200 text-red-800 hover:bg-red-50 disabled:opacity-50"
+                                  onClick={async () => {
+                                    if (
+                                      !window.confirm(
+                                        `Quarantine ${row.productName ?? 'batch'}? No P&L until you dispose from Quarantine.`,
+                                      )
+                                    ) {
+                                      return;
+                                    }
+                                    setExpiringQuarantineBusyId(batchId);
+                                    setExpiringQuarantineMsg(null);
+                                    try {
+                                      const res =
+                                        await inventoryApi.inventory.quarantineFromExpiringReport({
+                                          inventoryBatchId: batchId,
+                                          memo: 'Quarantine from Expiring Items report',
+                                        });
+                                      const data = (res.data?.data ?? {}) as {
+                                        quarantineMode?: string;
+                                        quantityMoved?: number;
+                                        movementNumber?: string;
+                                      };
+                                      setExpiringQuarantineMsg(
+                                        `${data.quarantineMode === 'HARD' ? 'Moved' : 'Soft-quarantined'} ${data.quantityMoved ?? ''} (${data.movementNumber ?? ''}). Refresh report to drop ACTIVE rows.`,
+                                      );
+                                    } catch (err) {
+                                      setExpiringQuarantineMsg(
+                                        err instanceof Error ? err.message : 'Quarantine failed',
+                                      );
+                                    } finally {
+                                      setExpiringQuarantineBusyId(null);
+                                    }
+                                  }}
+                                >
+                                  {expiringQuarantineBusyId === batchId ? '…' : 'Quarantine'}
+                                </button>
+                              ) : (
+                                <span className="text-xs text-slate-400">—</span>
+                              )}
                             </td>
                           </tr>
                         );
@@ -5392,31 +5520,50 @@ export default function ReportsPage() {
     <Layout>
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
         <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6 lg:py-8 max-w-7xl">
-          {/* Header */}
-          <div className="mb-6 sm:mb-8 flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 mb-2">📊 Reports & Analytics</h1>
-              <p className="text-sm sm:text-base text-gray-600">Generate comprehensive reports across sales, inventory, and financial metrics</p>
+          {/* Header — title full-width on small screens; shortcut chips wrap below */}
+          <div className="mb-6 sm:mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0 w-full lg:flex-1">
+              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 mb-2">
+                Reports & Analytics
+              </h1>
+              <p className="text-sm sm:text-base text-gray-600 max-w-2xl">
+                Generate comprehensive reports across sales, inventory, and financial metrics
+              </p>
             </div>
-            <div className="flex gap-2">
+            <div
+              className="flex w-full flex-wrap gap-2 lg:w-auto lg:max-w-xl lg:justify-end"
+              data-reports-shortcuts="true"
+            >
               <Link to="/reports/business-performance">
-                <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2">
-                  📊 Business Performance
+                <button
+                  type="button"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 sm:px-4 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2 text-sm min-h-[var(--layout-touch-target)]"
+                >
+                  Business Performance
                 </button>
               </Link>
               <Link to="/reports/expenses">
-                <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2">
-                  💰 Expense Reports
+                <button
+                  type="button"
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 sm:px-4 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2 text-sm min-h-[var(--layout-touch-target)]"
+                >
+                  Expense Reports
                 </button>
               </Link>
               <Link to="/reports/tax-compliance">
-                <button className="bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2">
-                  📋 Tax Compliance
+                <button
+                  type="button"
+                  className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 sm:px-4 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2 text-sm min-h-[var(--layout-touch-target)]"
+                >
+                  Tax Compliance
                 </button>
               </Link>
               <Link to="/reports/liquidity-movements">
-                <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2">
-                  🏦 Liquidity Movements
+                <button
+                  type="button"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 sm:px-4 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2 text-sm min-h-[var(--layout-touch-target)]"
+                >
+                  Liquidity Movements
                 </button>
               </Link>
             </div>

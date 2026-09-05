@@ -197,6 +197,10 @@ const NEEDLES = [
   'Choose columns to show',
   'Reset defaults',
   'data-inventory-column-picker',
+  // Adaptive reports responsive SSOT
+  'data-report-filters-primary',
+  'mx-auto max-w-7xl p-3 sm:p-4 md:p-6',
+  'More options',
 ];
 const found = {};
 for (const a of discovered) {

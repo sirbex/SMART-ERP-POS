@@ -10,6 +10,7 @@ import {
   AdaptiveReportSummary,
   type AdaptiveReportMetric,
 } from '../../components/adaptive';
+import { REPORT_PAGE_FRAME_CLASS } from '../../lib/adaptiveReports';
 
 /** Per-party aging row (API: entities) */
 interface AgedEntityRow {
@@ -186,7 +187,7 @@ export default function AgedBalancePage() {
 
   return (
     <AdaptivePage
-      className="p-6 max-w-6xl mx-auto"
+      className={REPORT_PAGE_FRAME_CLASS.replace('max-w-7xl', 'max-w-6xl')}
       title="Aged Balances"
       description="Analyze outstanding receivables and payables by aging bucket"
       primaryActions={

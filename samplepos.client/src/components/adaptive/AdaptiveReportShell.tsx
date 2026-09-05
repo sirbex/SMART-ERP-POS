@@ -1,30 +1,33 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { useAdaptiveLayoutOptional } from './AdaptiveAppShell';
 import {
-  resolveReportDetailCollapsedDefault,
   resolveReportDetailMode,
   type AdaptiveReportDetailMode,
 } from '../../lib/adaptiveReports';
 
 type AdaptiveReportShellProps = {
-  /** KPI / summary strip (always first on mobile). */
+  /** KPI / summary strip (always first). */
   summary?: ReactNode;
   /** Optional insight chips under summary. */
   insights?: ReactNode;
   /** Detail body: pass both table and cards; shell picks by tier. */
   table: ReactNode;
-  cards: ReactNode;
+  /**
+   * Mobile/card presentation of the SAME report sections/lines — not a KPI
+   * duplicate. Prefer real rows/sections; fall back to table if omitted.
+   */
+  cards?: ReactNode;
   /** Optional reduced/compact table (falls back to table). */
   reducedTable?: ReactNode;
   className?: string;
+  /** @deprecated Accordion chrome removed — body is always visible. */
   detailLabel?: string;
   detailModeOverride?: AdaptiveReportDetailMode;
 };
 
 /**
- * Report composition: summary-first on mobile, tier-driven detail chrome.
- * Does not change data or print backends — layout only.
+ * Report composition: KPIs + always-visible body (enterprise analytical pattern).
+ * Tier only changes chrome density (cards / reduced / table) — never hides content.
  */
 export function AdaptiveReportShell({
   summary,
@@ -33,51 +36,28 @@ export function AdaptiveReportShell({
   cards,
   reducedTable,
   className = '',
-  detailLabel = 'Details',
   detailModeOverride,
 }: AdaptiveReportShellProps) {
   const layout = useAdaptiveLayoutOptional();
   const tier = layout?.tier ?? 'desktop';
   const detailMode = detailModeOverride ?? resolveReportDetailMode(tier);
-  const collapseDefault = resolveReportDetailCollapsedDefault(tier);
-  const [detailOpen, setDetailOpen] = useState(!collapseDefault);
-
-  useEffect(() => {
-    setDetailOpen(!resolveReportDetailCollapsedDefault(tier));
-  }, [tier]);
 
   const detailBody =
     detailMode === 'cards'
-      ? cards
+      ? (cards ?? reducedTable ?? table)
       : detailMode === 'reduced'
         ? (reducedTable ?? table)
         : table;
 
   return (
-    <div className={`space-y-4 ${className}`.trim()} data-report-detail-mode={detailMode}>
+    <div
+      className={`space-y-4 ${className}`.trim()}
+      data-report-detail-mode={detailMode}
+      data-report-body-visible="true"
+    >
       {summary}
       {insights}
-
-      {collapseDefault ? (
-        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setDetailOpen((o) => !o)}
-            className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-semibold text-slate-800 min-h-[var(--layout-touch-target)] hover:bg-slate-50"
-            aria-expanded={detailOpen}
-          >
-            <span>{detailLabel}</span>
-            {detailOpen ? (
-              <ChevronDown className="h-4 w-4 text-slate-500" />
-            ) : (
-              <ChevronRight className="h-4 w-4 text-slate-500" />
-            )}
-          </button>
-          {detailOpen && <div className="border-t border-slate-100 p-2 sm:p-3">{detailBody}</div>}
-        </div>
-      ) : (
-        detailBody
-      )}
+      <div data-report-detail-body="true">{detailBody}</div>
     </div>
   );
 }

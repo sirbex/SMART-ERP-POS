@@ -1,6 +1,12 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { useAdaptiveLayoutOptional } from './AdaptiveAppShell';
 import {
+  REPORT_KPI_CARD_ACCENT_CLASS,
+  REPORT_KPI_CARD_CLASS,
+  REPORT_KPI_GRID_GAP_CLASS,
+  REPORT_KPI_LABEL_CLASS,
+  REPORT_KPI_SUB_CLASS,
+  REPORT_KPI_VALUE_CLASS,
   resolveReportSummaryColumns,
   selectReportMetrics,
   type AdaptiveReportMetricPriority,
@@ -20,11 +26,11 @@ type AdaptiveReportSummaryProps = {
   metrics: AdaptiveReportMetric[];
   className?: string;
   /** Force column count (tests). Default: from layout tier. */
-  columnsOverride?: 2 | 3 | 4 | 6;
+  columnsOverride?: 1 | 2 | 3 | 4 | 6;
 };
 
 /**
- * Tier-driven KPI summary strip — mobile emphasizes primary metrics.
+ * Tier-driven KPI summary — chrome from adaptiveDashboard SSOT (global).
  */
 export function AdaptiveReportSummary({
   metrics,
@@ -44,34 +50,24 @@ export function AdaptiveReportSummary({
 
   return (
     <div
-      className={`grid gap-2 lg:gap-3 ${className}`.trim()}
+      className={`${REPORT_KPI_GRID_GAP_CLASS} ${className}`.trim()}
       style={style}
       data-report-summary="true"
       data-summary-columns={columns}
+      data-summary-tier={tier}
+      data-kpi-ssot="adaptiveDashboard"
     >
       {visible.map((k) => (
         <div
           key={k.id}
-          className={`rounded-xl border px-3 py-2.5 ${
-            k.accent
-              ? 'border-blue-200 bg-gradient-to-br from-blue-50 to-white'
-              : 'border-slate-200 bg-white'
-          }`}
+          className={k.accent ? REPORT_KPI_CARD_ACCENT_CLASS : REPORT_KPI_CARD_CLASS}
           data-metric-priority={k.priority ?? 'primary'}
         >
-          <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-            {k.label}
-          </div>
-          <div
-            className={`mt-0.5 text-sm font-semibold tabular-nums sm:text-base ${
-              k.toneClassName || 'text-slate-900'
-            }`}
-          >
+          <div className={REPORT_KPI_LABEL_CLASS}>{k.label}</div>
+          <div className={`${REPORT_KPI_VALUE_CLASS} ${k.toneClassName || 'text-slate-900'}`}>
             {k.value}
           </div>
-          {k.sub != null && (
-            <div className="mt-0.5 text-[11px] text-slate-500">{k.sub}</div>
-          )}
+          {k.sub != null && <div className={REPORT_KPI_SUB_CLASS}>{k.sub}</div>}
         </div>
       ))}
     </div>

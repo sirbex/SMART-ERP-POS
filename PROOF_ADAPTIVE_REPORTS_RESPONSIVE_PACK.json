@@ -1,0 +1,43 @@
+{
+  "proof": "ADAPTIVE_REPORTS_RESPONSIVE_PACK",
+  "verdict": "PASS",
+  "generatedAt": "2026-09-05T21:28:55.596Z",
+  "vitest": {
+    "ok": true,
+    "status": 0,
+    "suites": [
+      "src/__tests__/adaptive-reports-responsive.evidence.test.ts",
+      "src/__tests__/adaptive-dashboard-kpi-density.evidence.test.ts",
+      "src/__tests__/adaptive-phase4.evidence.test.ts",
+      "src/__tests__/adaptive-pwa-phase6-accounting.evidence.test.ts",
+      "src/__tests__/report-back-link.evidence.test.ts",
+      "src/__tests__/reports-ui-ssot-brand.evidence.test.ts"
+    ]
+  },
+  "evidence": {
+    "verdict": "PASS",
+    "passed": 51,
+    "total": 51,
+    "integrity": {
+      "ssot": "samplepos.client/src/lib/adaptiveReports.ts",
+      "shell": "samplepos.client/src/components/adaptive/AdaptiveReportShell.tsx",
+      "filters": "samplepos.client/src/components/adaptive/AdaptiveReportFilters.tsx",
+      "consumers": [
+        "pages/reports/BusinessPerformancePage.tsx",
+        "pages/reports/ExpenseReportsPage.tsx",
+        "pages/reports/SalesAnalysisReportPage.tsx",
+        "pages/reports/OrdersReportPage.tsx",
+        "pages/accounting/AgedBalancePage.tsx",
+        "pages/accounting/TrialBalancePage.tsx"
+      ],
+      "invariants": [
+        "Primary filters always visible",
+        "Report body always visible (no Details accordion)",
+        "No brand/UA layout forks",
+        "Hub title stacks above shortcuts on narrow viewports",
+        "P&L mobile shows real sections via table fallback"
+      ]
+    }
+  },
+  "guarantee": "If PASS: adaptiveReports SSOT + AdaptiveReportShell/Filters + hub/P&L consumers are consistent — primary filters and report body stay visible on small screens; no brand/UA forks; pack suites green."
+}
