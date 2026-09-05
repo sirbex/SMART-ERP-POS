@@ -26,6 +26,10 @@ import {
   AdaptiveToolbar,
   AdaptiveSearch,
   AdaptiveKpiStrip,
+  AdaptiveFilterPanel,
+  AdaptiveFilterField,
+  AdaptiveFilterDoneButton,
+  adaptiveFilterControlClass,
 } from '../../components/adaptive';
 import {
   ADAPTIVE_PAGE_PAD_CLASS,
@@ -1686,72 +1690,67 @@ export default function PurchaseOrdersPage() {
               }
               secondaryLabel="Filters"
               secondary={({ close }) => (
-                <div className="space-y-3 w-full" data-po-filter-panel="true">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-1">
-                        Status
-                      </label>
-                      <select
-                        id="status-filter"
-                        value={selectedStatus}
-                        onChange={(e) => {
-                          setSelectedStatus(e.target.value as POStatus | 'ALL');
+                <AdaptiveFilterPanel
+                  panelKey="po"
+                  data-po-filter-panel="true"
+                  footer={
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedStatus('ALL');
+                          setSelectedSupplier('');
+                          setSearchTerm('');
                           setPage(1);
                           close();
                         }}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                        className="w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700 min-h-[var(--layout-touch-target)] hover:bg-stone-50"
                       >
-                        <option value="ALL">All Statuses</option>
-                        {Object.entries(PO_STATUSES).map(([key, { label, icon }]) => (
-                          <option key={key} value={key}>
-                            {icon} {label}
-                          </option>
-                        ))}
-                      </select>
+                        Clear filters
+                      </button>
+                      <AdaptiveFilterDoneButton onClick={() => close()}>Done</AdaptiveFilterDoneButton>
                     </div>
-                    <div>
-                      <label
-                        htmlFor="supplier-filter"
-                        className="block text-sm font-medium text-gray-700 mb-1"
-                      >
-                        Supplier
-                      </label>
-                      <select
-                        id="supplier-filter"
-                        value={selectedSupplier}
-                        onChange={(e) => {
-                          setSelectedSupplier(e.target.value);
-                          setPage(1);
-                          close();
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
-                      >
-                        <option value="">All Suppliers</option>
-                        {suppliers.map((supplier: Supplier) => (
-                          <option key={supplier.id} value={supplier.id}>
-                            {supplier.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedStatus('ALL');
-                        setSelectedSupplier('');
-                        setSearchTerm('');
+                  }
+                >
+                  <AdaptiveFilterField label="Status" htmlFor="status-filter">
+                    <select
+                      id="status-filter"
+                      value={selectedStatus}
+                      onChange={(e) => {
+                        setSelectedStatus(e.target.value as POStatus | 'ALL');
                         setPage(1);
                         close();
                       }}
-                      className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors min-h-[var(--layout-touch-target)]"
+                      className={adaptiveFilterControlClass}
                     >
-                      Clear Filters
-                    </button>
-                  </div>
-                </div>
+                      <option value="ALL">All statuses</option>
+                      {Object.entries(PO_STATUSES).map(([key, { label, icon }]) => (
+                        <option key={key} value={key}>
+                          {icon} {label}
+                        </option>
+                      ))}
+                    </select>
+                  </AdaptiveFilterField>
+                  <AdaptiveFilterField label="Supplier" htmlFor="supplier-filter">
+                    <select
+                      id="supplier-filter"
+                      value={selectedSupplier}
+                      onChange={(e) => {
+                        setSelectedSupplier(e.target.value);
+                        setPage(1);
+                        close();
+                      }}
+                      className={adaptiveFilterControlClass}
+                    >
+                      <option value="">All suppliers</option>
+                      {suppliers.map((supplier: Supplier) => (
+                        <option key={supplier.id} value={supplier.id}>
+                          {supplier.name}
+                        </option>
+                      ))}
+                    </select>
+                  </AdaptiveFilterField>
+                </AdaptiveFilterPanel>
               )}
               more={
                 <>

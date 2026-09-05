@@ -333,9 +333,42 @@ describe('PROOF: global inventory adaptive SSOT', () => {
       'FILTERS_POPOVER',
       toolbar.includes("data-secondary-presentation=\"popover\"") &&
         toolbar.includes('data-adaptive-toolbar-filter-anchor') &&
-        toolbar.includes('filterPopoverAlign') &&
+        toolbar.includes('data-filter-fit="full-bleed"') &&
         toolbar.includes("e.key === 'Escape'"),
-      'Filters popover: align start/end + Escape/outside-click close',
+      'Filters: full-bleed overlay under chrome + Escape/outside-click close',
+    );
+    gate(
+      'FILTERS_MORE_MUTEX',
+      toolbar.includes('onMoreOpenChange') &&
+        toolbar.includes('setMoreOpen(false)') &&
+        toolbar.includes('setSecondaryOpen(false)') &&
+        toolbar.includes("data-toolbar-panel={") &&
+        moreMenu.includes('onOpenChange') &&
+        moreMenu.includes('openControlled') &&
+        moreMenu.includes('max-h-[min(70vh,24rem)]'),
+      'Filters XOR More: controlled AdaptiveMoreMenu + scroll panel — never stacked overlays',
+    );
+    gate(
+      'SORT_MENU_LABEL_SSOT',
+      sortUi.includes('formatMobileSortMenuLabel') &&
+        sortUi.includes("replace(/^Sort by\\s+/i") &&
+        !sortUi.includes("Sort: {opt.label}"),
+      'More sort items use Sort by X once — never Sort: Sort by …',
+    );
+    gate(
+      'FILTER_PANEL_PHONE_SSOT',
+      (() => {
+        const panel = read('components/adaptive/AdaptiveFilterPanel.tsx');
+        const tokens = read('lib/adaptiveDashboard.ts');
+        return (
+          panel.includes('data-adaptive-filter-panel') &&
+          panel.includes('ADAPTIVE_FILTER_GRID_CLASS') &&
+          tokens.includes("ADAPTIVE_FILTER_GRID_CLASS = 'grid grid-cols-2 gap-2'") &&
+          tokens.includes('ADAPTIVE_FILTER_LABEL_CLASS') &&
+          toolbar.includes('data-filter-fit="full-bleed"')
+        );
+      })(),
+      'AdaptiveFilterPanel: dense 2-up grid + full-bleed Filters fit on phone',
     );
   });
 });
@@ -351,7 +384,7 @@ afterAll(() => {
     total: gates.length,
     gates,
     integrity:
-      'Global inventory adaptive SSOT: dense + toolbarInline + AdaptiveSearch on every worklist; create-first CTAs; debounced server search for PO/GR/Movements/Returns; Filters popover; AdaptiveKpiStrip — no blank toolbar bands or per-page chrome forks.',
+      'Global inventory adaptive SSOT: dense + toolbarInline + AdaptiveSearch; Filters XOR More (mutex); sort labels SSOT; create-first CTAs; debounced server search; Filters popover — no stacked chrome or Sort: Sort by forks.',
   };
   const json = JSON.stringify(payload, null, 2);
   const md = `# PROOF — Adaptive inventory global SSOT

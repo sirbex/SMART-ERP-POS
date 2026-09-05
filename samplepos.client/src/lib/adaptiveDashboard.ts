@@ -59,6 +59,25 @@ export const ADAPTIVE_WORKLIST_DENSITY = 'dense' as const;
 export const ADAPTIVE_WORKLIST_SEARCH_DEBOUNCE_MS = 300;
 
 /**
+ * Worklist Filters popover body — GLOBAL phone-fit SSOT.
+ * 2-up grid from the smallest width; dense labels; pair short fields.
+ */
+export const ADAPTIVE_FILTER_PANEL_CLASS = 'w-full space-y-2';
+
+export const ADAPTIVE_FILTER_GRID_CLASS = 'grid grid-cols-2 gap-2';
+
+export const ADAPTIVE_FILTER_FIELD_CLASS = 'min-w-0';
+
+export const ADAPTIVE_FILTER_LABEL_CLASS =
+  'block text-[11px] font-medium text-stone-600 mb-0.5 leading-tight';
+
+export const ADAPTIVE_FILTER_CONTROL_CLASS =
+  'w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-md bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]';
+
+export const ADAPTIVE_FILTER_DONE_CLASS =
+  'w-full rounded-md bg-stone-900 px-3 py-2 text-sm font-medium text-white min-h-[var(--layout-touch-target)]';
+
+/**
  * Accent / gradient KPI strip — Sales Analytics overview, similar surfaces.
  * 2-up on phone; 5-up only on wide (xl).
  */

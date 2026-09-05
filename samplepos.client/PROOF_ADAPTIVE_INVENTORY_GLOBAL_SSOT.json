@@ -1,9 +1,9 @@
 {
   "proof": "ADAPTIVE_INVENTORY_GLOBAL_SSOT",
   "verdict": "PASS",
-  "generatedAt": "2026-09-05T11:49:51.662Z",
-  "passed": 48,
-  "total": 48,
+  "generatedAt": "2026-09-05T12:42:31.198Z",
+  "passed": 51,
+  "total": 51,
   "gates": [
     {
       "id": "WORKLIST_2UP",
@@ -243,8 +243,23 @@
     {
       "id": "FILTERS_POPOVER",
       "ok": true,
-      "detail": "Filters popover: align start/end + Escape/outside-click close"
+      "detail": "Filters: full-bleed overlay under chrome + Escape/outside-click close"
+    },
+    {
+      "id": "FILTERS_MORE_MUTEX",
+      "ok": true,
+      "detail": "Filters XOR More: controlled AdaptiveMoreMenu + scroll panel — never stacked overlays"
+    },
+    {
+      "id": "SORT_MENU_LABEL_SSOT",
+      "ok": true,
+      "detail": "More sort items use Sort by X once — never Sort: Sort by …"
+    },
+    {
+      "id": "FILTER_PANEL_PHONE_SSOT",
+      "ok": true,
+      "detail": "AdaptiveFilterPanel: dense 2-up grid + full-bleed Filters fit on phone"
     }
   ],
-  "integrity": "Global inventory adaptive SSOT: dense + toolbarInline + AdaptiveSearch on every worklist; create-first CTAs; debounced server search for PO/GR/Movements/Returns; Filters popover; AdaptiveKpiStrip — no blank toolbar bands or per-page chrome forks."
+  "integrity": "Global inventory adaptive SSOT: dense + toolbarInline + AdaptiveSearch; Filters XOR More (mutex); sort labels SSOT; create-first CTAs; debounced server search; Filters popover — no stacked chrome or Sort: Sort by forks."
 }

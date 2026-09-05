@@ -1,7 +1,7 @@
 {
   "proof": "ADAPTIVE_INVENTORY_RECEIVING_DENSITY",
   "verdict": "PASS",
-  "generatedAt": "2026-09-05T11:49:51.599Z",
+  "generatedAt": "2026-09-05T12:42:31.105Z",
   "passed": 18,
   "total": 18,
   "gates": [
@@ -48,7 +48,7 @@
     {
       "id": "FILTERS_CLOSE_API",
       "ok": true,
-      "detail": "date/status/billing in AdaptiveToolbar secondary with close()/Done; dense create-first"
+      "detail": "date/status/cost in AdaptiveFilterPanel with close()/Done; dense create-first"
     },
     {
       "id": "BILLING_FACETS_ON_FILTERS_ROW",
@@ -66,9 +66,9 @@
       "detail": "GR detail meta uses AdaptiveMetaGrid (label|value same line on phone)"
     },
     {
-      "id": "COST_BASELINE_MORE",
+      "id": "COST_BASELINE_IN_FILTERS",
       "ok": true,
-      "detail": "cost baseline under AdaptiveToolbar More; Create CTAs on Filters row"
+      "detail": "cost baseline in Filters; custom dates only when Custom range; billing via facets — phone-fit SSOT"
     },
     {
       "id": "PRIMARY_CTAS_COMPACT",

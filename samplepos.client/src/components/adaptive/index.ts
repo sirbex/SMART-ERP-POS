@@ -25,6 +25,12 @@ export { AdaptiveReportFilters } from './AdaptiveReportFilters';
 export { AdaptivePage } from './AdaptivePage';
 export { AdaptiveToolbar } from './AdaptiveToolbar';
 export { AdaptiveSearch } from './AdaptiveSearch';
+export {
+  AdaptiveFilterPanel,
+  AdaptiveFilterField,
+  AdaptiveFilterDoneButton,
+  adaptiveFilterControlClass,
+} from './AdaptiveFilterPanel';
 export { AdaptiveKpiStrip } from './AdaptiveKpiStrip';
 export type { AdaptiveKpiItem } from './AdaptiveKpiStrip';
 export { AdaptiveRowActions } from './AdaptiveRowActions';

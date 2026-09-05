@@ -90,12 +90,16 @@ import { DatePicker } from '../../components/ui/date-picker';
 import SlideDrawer from '../../components/ui/SlideDrawer';
 import {
   AdaptiveFacetChips,
+  AdaptiveFilterDoneButton,
+  AdaptiveFilterField,
+  AdaptiveFilterPanel,
   AdaptiveMetaGrid,
   AdaptiveMetaItem,
   AdaptivePage,
   AdaptiveRowActions,
   AdaptiveSearch,
   AdaptiveToolbar,
+  adaptiveFilterControlClass,
 } from '../../components/adaptive';
 import {
   ADAPTIVE_PAGE_PAD_CLASS,
@@ -329,7 +333,15 @@ interface GRDetailData {
 }
 
 // ── Date range helpers (same pattern as StockMovementsPage) ───────────────
-type DateRangePreset = 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom';
+type DateRangePreset =
+  | 'all'
+  | 'today'
+  | 'yesterday'
+  | 'this_week'
+  | 'last_week'
+  | 'this_month'
+  | 'last_month'
+  | 'custom';
 
 const formatLocalDate = (date: Date): string => {
   const year = date.getFullYear();
@@ -369,6 +381,8 @@ const getDateRange = (preset: DateRangePreset): { start: string; end: string } =
       return { start: formatLocalDate(lms), end: formatLocalDate(lme) };
     }
     case 'custom':
+      return { start: '', end: '' };
+    case 'all':
     default:
       return { start: '', end: '' };
   }
@@ -382,7 +396,7 @@ export default function GoodsReceiptsPage() {
   const [billingFilter, setBillingFilter] = useState<'' | 'TO_INVOICE' | 'INVOICED' | 'REVERSED'>('');
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('custom');
+  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const {
@@ -1513,145 +1527,114 @@ export default function GoodsReceiptsPage() {
               }
               secondaryLabel="Filters"
               secondary={({ close }) => (
-                <div className="space-y-3 w-full" data-gr-filter-panel="true">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label htmlFor="grn-date-preset" className="block text-sm font-medium text-gray-700 mb-1">
-                        Date Range
-                      </label>
-                      <select
-                        id="grn-date-preset"
-                        value={dateRangePreset}
-                        onChange={(e) => {
-                          const preset = e.target.value as DateRangePreset;
-                          setDateRangePreset(preset);
-                          const range = getDateRange(preset);
-                          setStartDate(range.start);
-                          setEndDate(range.end);
-                          setPage(1);
-                          if (preset !== 'custom') close();
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
-                      >
-                        <option value="custom">All Dates</option>
-                        <option value="today">Today</option>
-                        <option value="yesterday">Yesterday</option>
-                        <option value="this_week">This Week</option>
-                        <option value="last_week">Last Week</option>
-                        <option value="this_month">This Month</option>
-                        <option value="last_month">Last Month</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-1">
-                        Status
-                      </label>
-                      <select
-                        id="status-filter"
-                        value={statusFilter}
-                        onChange={(e) => {
-                          setStatusFilter(e.target.value);
-                          setPage(1);
-                          close();
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
-                      >
-                        <option value="">All Statuses</option>
-                        <option value="DRAFT">Draft</option>
-                        <option value="COMPLETED">Completed</option>
-                        <option value="CANCELLED">Cancelled</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Start Date
-                      </label>
-                      <DatePicker
-                        value={startDate}
-                        onChange={(date) => {
-                          setStartDate(date);
-                          setDateRangePreset('custom');
-                          setPage(1);
-                        }}
-                        placeholder="Select start date"
-                        maxDate={endDate ? new Date(endDate) : undefined}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        End Date
-                      </label>
-                      <DatePicker
-                        value={endDate}
-                        onChange={(date) => {
-                          setEndDate(date);
-                          setDateRangePreset('custom');
-                          setPage(1);
-                        }}
-                        placeholder="Select end date"
-                        minDate={startDate ? new Date(startDate) : undefined}
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label htmlFor="billing-filter" className="block text-sm font-medium text-gray-700 mb-1">
-                        Supplier invoice
-                      </label>
-                      <select
-                        id="billing-filter"
-                        value={billingFilter}
-                        onChange={(e) => {
-                          setBillingFilter(e.target.value as '' | 'TO_INVOICE' | 'INVOICED' | 'REVERSED');
-                          setPage(1);
-                          close();
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
-                      >
-                        <option value="">All</option>
-                        <option value="TO_INVOICE">To invoice (not billed)</option>
-                        <option value="INVOICED">Invoiced (bill posted)</option>
-                        <option value="REVERSED">Reversed (uninvoiced undo)</option>
-                      </select>
-                    </div>
-                  </div>
-                  {dateRangePreset === 'custom' ? (
-                    <button
-                      type="button"
+                <AdaptiveFilterPanel
+                  panelKey="gr"
+                  data-gr-filter-panel="true"
+                  footer={
+                    <AdaptiveFilterDoneButton
                       onClick={() => close()}
-                      className="w-full rounded-md bg-stone-900 px-3 py-2 text-sm font-medium text-white min-h-[var(--layout-touch-target)]"
                       data-gr-filters-done="true"
                     >
                       Done
-                    </button>
+                    </AdaptiveFilterDoneButton>
+                  }
+                >
+                  <AdaptiveFilterField label="Date range" htmlFor="grn-date-preset">
+                    <select
+                      id="grn-date-preset"
+                      value={dateRangePreset}
+                      onChange={(e) => {
+                        const preset = e.target.value as DateRangePreset;
+                        setDateRangePreset(preset);
+                        const range = getDateRange(preset);
+                        setStartDate(range.start);
+                        setEndDate(range.end);
+                        setPage(1);
+                        if (preset !== 'custom') close();
+                      }}
+                      className={adaptiveFilterControlClass}
+                    >
+                      <option value="all">All dates</option>
+                      <option value="today">Today</option>
+                      <option value="yesterday">Yesterday</option>
+                      <option value="this_week">This week</option>
+                      <option value="last_week">Last week</option>
+                      <option value="this_month">This month</option>
+                      <option value="last_month">Last month</option>
+                      <option value="custom">Custom range</option>
+                    </select>
+                  </AdaptiveFilterField>
+                  <AdaptiveFilterField label="Status" htmlFor="status-filter">
+                    <select
+                      id="status-filter"
+                      value={statusFilter}
+                      onChange={(e) => {
+                        setStatusFilter(e.target.value);
+                        setPage(1);
+                        close();
+                      }}
+                      className={adaptiveFilterControlClass}
+                    >
+                      <option value="">All statuses</option>
+                      <option value="DRAFT">Draft</option>
+                      <option value="COMPLETED">Completed</option>
+                      <option value="CANCELLED">Cancelled</option>
+                    </select>
+                  </AdaptiveFilterField>
+                  {dateRangePreset === 'custom' ? (
+                    <>
+                      <AdaptiveFilterField label="Start">
+                        <DatePicker
+                          value={startDate}
+                          onChange={(date) => {
+                            setStartDate(date);
+                            setDateRangePreset('custom');
+                            setPage(1);
+                          }}
+                          placeholder="Start date"
+                          maxDate={endDate ? new Date(endDate) : undefined}
+                        />
+                      </AdaptiveFilterField>
+                      <AdaptiveFilterField label="End">
+                        <DatePicker
+                          value={endDate}
+                          onChange={(date) => {
+                            setEndDate(date);
+                            setDateRangePreset('custom');
+                            setPage(1);
+                          }}
+                          placeholder="End date"
+                          minDate={startDate ? new Date(startDate) : undefined}
+                        />
+                      </AdaptiveFilterField>
+                    </>
                   ) : null}
-                </div>
+                  <AdaptiveFilterField label="Cost baseline" htmlFor="gr-cost-baseline" span={2}>
+                    <div data-gr-cost-baseline="true">
+                      <select
+                        id="gr-cost-baseline"
+                        aria-label="Cost variance baseline"
+                        title="Cost variance baseline"
+                        className={adaptiveFilterControlClass}
+                        value={baseline}
+                        onChange={(e) => setBaseline(e.target.value as 'PO' | 'PRODUCT')}
+                      >
+                        <option value="PO">PO cost</option>
+                        <option value="PRODUCT">Product cost</option>
+                      </select>
+                    </div>
+                  </AdaptiveFilterField>
+                </AdaptiveFilterPanel>
               )}
               more={
-                <>
-                  <MobileSortSelect
-                    presentation="menu"
-                    sortField={sortField}
-                    sortOrder={sortOrder}
-                    options={mobileSortOptions}
-                    onFieldChange={handleColumnSort}
-                    onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
-                  />
-                  <div data-gr-cost-baseline="true" className="px-2.5 py-2 space-y-1.5" onClick={(e) => e.stopPropagation()}>
-                    <label htmlFor="gr-cost-baseline" className="block text-xs font-medium text-stone-600">
-                      Cost variance baseline
-                    </label>
-                    <select
-                      id="gr-cost-baseline"
-                      aria-label="Cost variance baseline"
-                      title="Cost variance baseline"
-                      className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm"
-                      value={baseline}
-                      onChange={(e) => setBaseline(e.target.value as 'PO' | 'PRODUCT')}
-                    >
-                      <option value="PO">PO Cost</option>
-                      <option value="PRODUCT">Product Cost</option>
-                    </select>
-                  </div>
-                </>
+                <MobileSortSelect
+                  presentation="menu"
+                  sortField={sortField}
+                  sortOrder={sortOrder}
+                  options={mobileSortOptions}
+                  onFieldChange={handleColumnSort}
+                  onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+                />
               }
             >
               {canCreateGR ? (

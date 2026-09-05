@@ -1,8 +1,8 @@
 # PROOF — Adaptive inventory global SSOT
 
 **Verdict:** PASS
-**Generated:** 2026-09-05T11:49:51.662Z
-**Gates:** 48/48
+**Generated:** 2026-09-05T12:42:31.198Z
+**Gates:** 51/51
 
 - PASS `WORKLIST_2UP` — worklist grids are 2-up on phone
 - PASS `WORKLIST_RESOLVER` — worklistKpiGridClass maps count → grid class
@@ -51,7 +51,10 @@
 - PASS `CREATE_FIRST_RESPONSIVE` — create-first: no phone flex-basis blank band; sm+ Search grows on one row
 - PASS `MORE_OVERFLOW_ELLIPSIS` — More trigger is ··· on phone (SAP/Square overflow), labeled More on sm+
 - PASS `MOBILE_SORT_IN_MORE` — Phone sort lives in More overflow — no separate Sort row under Search
-- PASS `FILTERS_POPOVER` — Filters popover: align start/end + Escape/outside-click close
+- PASS `FILTERS_POPOVER` — Filters: full-bleed overlay under chrome + Escape/outside-click close
+- PASS `FILTERS_MORE_MUTEX` — Filters XOR More: controlled AdaptiveMoreMenu + scroll panel — never stacked overlays
+- PASS `SORT_MENU_LABEL_SSOT` — More sort items use Sort by X once — never Sort: Sort by …
+- PASS `FILTER_PANEL_PHONE_SSOT` — AdaptiveFilterPanel: dense 2-up grid + full-bleed Filters fit on phone
 
 ## Integrity
-Global inventory adaptive SSOT: dense + toolbarInline + AdaptiveSearch on every worklist; create-first CTAs; debounced server search for PO/GR/Movements/Returns; Filters popover; AdaptiveKpiStrip — no blank toolbar bands or per-page chrome forks.
+Global inventory adaptive SSOT: dense + toolbarInline + AdaptiveSearch; Filters XOR More (mutex); sort labels SSOT; create-first CTAs; debounced server search; Filters popover — no stacked chrome or Sort: Sort by forks.

@@ -19,6 +19,13 @@ interface MobileSortSelectProps {
   presentation?: 'bar' | 'menu';
 }
 
+/** Labels often say "Sort by X" for native <select>; menu must not double-prefix. */
+export function formatMobileSortMenuLabel(label: string): string {
+  const trimmed = label.trim();
+  const stripped = trimmed.replace(/^Sort\s*:\s*/i, '').replace(/^Sort by\s+/i, '');
+  return stripped ? `Sort by ${stripped}` : trimmed;
+}
+
 /**
  * Mobile list sort — SSOT.
  * Prefer presentation="menu" inside AdaptiveToolbar `more` (SAP/Square overflow).
@@ -45,7 +52,7 @@ export function MobileSortSelect({
             data-mobile-sort-field={opt.value}
           >
             {sortField === opt.value ? '✓ ' : ''}
-            Sort: {opt.label}
+            {formatMobileSortMenuLabel(opt.label)}
           </button>
         ))}
         <button

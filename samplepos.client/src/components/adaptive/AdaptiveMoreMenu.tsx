@@ -12,20 +12,35 @@ type AdaptiveMoreMenuProps = {
   className?: string;
   /** Align panel to trigger start/end. Default end (right). */
   align?: 'start' | 'end';
+  /**
+   * Controlled open (AdaptiveToolbar SSOT: mutually exclusive with Filters).
+   * Omit both for uncontrolled internal state.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
 /**
  * Global overflow "More" menu — SSOT for page / toolbar secondary commands.
  * Phone: "···" (SAP/Square-style); sm+: labeled More.
  * Escape + outside click close; choosing an item closes the menu.
+ * Long lists scroll — never tower over Filters (pair with toolbar exclusion).
  */
 export function AdaptiveMoreMenu({
   children,
   label = 'More',
   className = '',
   align = 'end',
+  open: openControlled,
+  onOpenChange,
 }: AdaptiveMoreMenuProps) {
-  const [open, setOpen] = useState(false);
+  const [openUncontrolled, setOpenUncontrolled] = useState(false);
+  const controlled = typeof onOpenChange === 'function';
+  const open = controlled ? Boolean(openControlled) : openUncontrolled;
+  const setOpen = (next: boolean) => {
+    if (controlled) onOpenChange(next);
+    else setOpenUncontrolled(next);
+  };
   const rootRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
 
@@ -51,7 +66,7 @@ export function AdaptiveMoreMenu({
       document.removeEventListener('mousedown', onPointer);
       document.removeEventListener('touchstart', onPointer);
     };
-  }, [open]);
+  }, [open, controlled, onOpenChange]);
 
   return (
     <div
@@ -67,7 +82,7 @@ export function AdaptiveMoreMenu({
         aria-haspopup="menu"
         aria-controls={panelId}
         aria-label={label}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(!open)}
         data-adaptive-more-trigger="true"
         data-adaptive-page-more-trigger="true"
       >
@@ -81,7 +96,7 @@ export function AdaptiveMoreMenu({
           id={panelId}
           role="menu"
           className={[
-            'absolute top-full z-40 mt-1 min-w-[11rem] max-w-[min(100vw-2rem,18rem)] rounded-md border border-stone-200 bg-white p-1.5 shadow-md',
+            'absolute top-full z-50 mt-1 min-w-[11rem] max-w-[min(100vw-2rem,18rem)] max-h-[min(70vh,24rem)] overflow-y-auto rounded-md border border-stone-200 bg-white p-1.5 shadow-md',
             align === 'end' ? 'right-0' : 'left-0',
           ].join(' ')}
           data-adaptive-more-panel="true"

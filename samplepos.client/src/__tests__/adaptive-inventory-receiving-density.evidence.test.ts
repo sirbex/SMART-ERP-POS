@@ -98,13 +98,14 @@ describe('PROOF: inventory receiving adaptive density', () => {
     gate(
       'FILTERS_CLOSE_API',
       src.includes('data-gr-filter-panel') &&
+        src.includes('AdaptiveFilterPanel') &&
         src.includes('secondary={({ close })') &&
         src.includes('modeOverride="compact"') &&
         src.includes('presentationOverride="compact"') &&
         src.includes('data-gr-filters-done') &&
         src.includes('ADAPTIVE_WORKLIST_DENSITY') &&
         src.includes('actionsBeforeLeading'),
-      'date/status/billing in AdaptiveToolbar secondary with close()/Done; dense create-first',
+      'date/status/cost in AdaptiveFilterPanel with close()/Done; dense create-first',
     );
     gate(
       'BILLING_FACETS_ON_FILTERS_ROW',
@@ -129,12 +130,24 @@ describe('PROOF: inventory receiving adaptive density', () => {
       'GR detail meta uses AdaptiveMetaGrid (label|value same line on phone)',
     );
     gate(
-      'COST_BASELINE_MORE',
-      src.includes('data-gr-cost-baseline') &&
-        src.includes('more={') &&
-        src.includes('data-gr-create-from-po') &&
-        !src.includes('flex-col gap-2 w-full min-w-[12rem]'),
-      'cost baseline under AdaptiveToolbar More; Create CTAs on Filters row',
+      'COST_BASELINE_IN_FILTERS',
+      (() => {
+        const filterIdx = src.indexOf('data-gr-filter-panel');
+        const costIdx = src.indexOf('data-gr-cost-baseline');
+        const moreIdx = src.indexOf('more={');
+        return (
+          filterIdx >= 0 &&
+          costIdx > filterIdx &&
+          moreIdx > costIdx &&
+          src.includes('Cost baseline') &&
+          src.includes('MobileSortSelect') &&
+          src.includes('data-gr-create-from-po') &&
+          src.includes("value=\"custom\">Custom range") &&
+          src.includes("dateRangePreset === 'custom'") &&
+          !src.includes('flex-col gap-2 w-full min-w-[12rem]')
+        );
+      })(),
+      'cost baseline in Filters; custom dates only when Custom range; billing via facets — phone-fit SSOT',
     );
     gate(
       'PRIMARY_CTAS_COMPACT',

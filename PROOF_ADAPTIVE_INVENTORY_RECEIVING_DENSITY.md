@@ -1,7 +1,7 @@
 # PROOF — Adaptive inventory receiving density
 
 **Verdict:** PASS
-**Generated:** 2026-09-05T11:49:51.599Z
+**Generated:** 2026-09-05T12:42:31.105Z
 **Gates:** 18/18
 
 - PASS `HIDE_TITLE_PROP` — AdaptivePage exposes hideTitle for embedded workbenches
@@ -12,11 +12,11 @@
 - PASS `WB_TITLE_TABS_ROW` — Receipts/Returns tabs sit beside Receiving title — no empty header band
 - PASS `EMBED_HIDE_TITLE` — embedded GR hides AdaptivePage title + uses pad-only SSOT
 - PASS `NO_ALWAYS_ON_DATE_CARD` — no permanent on-canvas date filter card
-- PASS `FILTERS_CLOSE_API` — date/status/billing in AdaptiveToolbar secondary with close()/Done; dense create-first
+- PASS `FILTERS_CLOSE_API` — date/status/cost in AdaptiveFilterPanel with close()/Done; dense create-first
 - PASS `BILLING_FACETS_ON_FILTERS_ROW` — billing chips live on AdaptiveToolbar facets row beside Filters (no 2×2 tower)
 - PASS `CARD_ACTIONS_INLINE` — GR card taps to open detail — Finalize only as text link when needed
 - PASS `DETAIL_META_DENSE` — GR detail meta uses AdaptiveMetaGrid (label|value same line on phone)
-- PASS `COST_BASELINE_MORE` — cost baseline under AdaptiveToolbar More; Create CTAs on Filters row
+- PASS `COST_BASELINE_IN_FILTERS` — cost baseline in Filters; custom dates only when Custom range; billing via facets — phone-fit SSOT
 - PASS `PRIMARY_CTAS_COMPACT` — primary actions densified: Manual GR + From PO (same toolbar row as facets)
 - PASS `TOOLBAR_FACETS_SLOT` — create-first: facets share primary row with CTAs/Search — never a second tower
 - PASS `FACET_CHIPS_HORIZONTAL` — AdaptiveFacetChips is content-sized horizontal scroll — never steals Search flex

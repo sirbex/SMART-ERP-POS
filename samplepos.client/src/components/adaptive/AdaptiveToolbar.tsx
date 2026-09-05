@@ -55,37 +55,40 @@ type ActionsClusterProps = {
   more?: ReactNode;
   collapseSecondary: boolean;
   secondaryOpen: boolean;
+  moreOpen: boolean;
   panelId: string;
   secondaryLabel: string;
-  secondaryContent: ReactNode;
   onToggleSecondary: () => void;
-  /** Popover opens toward start (left) or end (right) of the Filters trigger. */
-  filterPopoverAlign?: 'start' | 'end';
+  onMoreOpenChange: (open: boolean) => void;
 };
 
 /**
- * Filters opens as a compact popover under the trigger — never a full-width
- * in-flow form tower that pushes the worklist down (amateur look).
+ * CTAs + Filters trigger + More. Filters *panel* renders at toolbar root
+ * (full-bleed phone fit) — never a narrow orphan under the Filters button.
+ * Filters and More are mutually exclusive (integrity SSOT).
  */
 function ActionsCluster({
   children,
   more,
   collapseSecondary,
   secondaryOpen,
+  moreOpen,
   panelId,
   secondaryLabel,
-  secondaryContent,
   onToggleSecondary,
-  filterPopoverAlign = 'start',
+  onMoreOpenChange,
 }: ActionsClusterProps) {
   return (
     <div
       className="flex shrink-0 flex-wrap items-center gap-2"
       data-adaptive-toolbar-actions="true"
+      data-toolbar-panel={
+        secondaryOpen ? 'filters' : moreOpen ? 'more' : undefined
+      }
     >
       {children}
       {collapseSecondary ? (
-        <div className="relative" data-adaptive-toolbar-filter-anchor="true">
+        <div data-adaptive-toolbar-filter-anchor="true">
           <button
             type="button"
             className="inline-flex items-center justify-center rounded-md border border-stone-200 bg-white px-3 text-sm font-medium text-stone-700 min-h-[var(--layout-touch-target)] hover:bg-stone-50"
@@ -96,34 +99,13 @@ function ActionsCluster({
           >
             {secondaryLabel}
           </button>
-          {secondaryOpen ? (
-            <div
-              id={panelId}
-              role="dialog"
-              aria-label={secondaryLabel}
-              className={[
-                'absolute top-full z-40 mt-1 w-[min(calc(100vw-2rem),22rem)] rounded-md border border-stone-200 bg-white p-3 shadow-md',
-                filterPopoverAlign === 'end' ? 'right-0' : 'left-0',
-              ].join(' ')}
-              data-adaptive-toolbar-secondary-panel="true"
-              data-secondary-presentation="popover"
-            >
-              <div className="flex flex-col gap-2.5">{secondaryContent}</div>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-      {!collapseSecondary && secondaryContent ? (
-        <div
-          className="flex flex-wrap items-center gap-2"
-          data-adaptive-toolbar-secondary="true"
-        >
-          {secondaryContent}
         </div>
       ) : null}
       {more ? (
         <div data-adaptive-toolbar-more="true">
-          <AdaptiveMoreMenu>{more}</AdaptiveMoreMenu>
+          <AdaptiveMoreMenu open={moreOpen} onOpenChange={onMoreOpenChange}>
+            {more}
+          </AdaptiveMoreMenu>
         </div>
       ) : null}
     </div>
@@ -134,7 +116,8 @@ function ActionsCluster({
  * Tier/workspace-driven toolbar density.
  * Default: Search full-width (compact), then actions — or one row when `full`.
  * `actionsBeforeLeading`: CTAs + Filters before Search on one row (Products SSOT).
- * Filters = popover (not in-flow tower). Escape / outside click / `close()`.
+ * Filters = full-bleed overlay under chrome (not in-flow tower; not narrow orphan).
+ * Escape / outside click / `close()`. Filters XOR More.
  */
 export function AdaptiveToolbar({
   leading,
@@ -159,6 +142,7 @@ export function AdaptiveToolbar({
   const stackChrome = mode === 'icon' || mode === 'compact';
   const hasActions = Boolean(children || more || secondary);
   const hasFacets = Boolean(facets);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const closeSecondary = () => setSecondaryOpen(false);
   const api: AdaptiveToolbarSecondaryApi = {
@@ -168,6 +152,19 @@ export function AdaptiveToolbar({
 
   const secondaryContent =
     typeof secondary === 'function' ? secondary(api) : secondary;
+
+  /** Integrity SSOT: only one chrome panel open (Filters XOR More). */
+  const toggleFilters = () => {
+    setSecondaryOpen((wasOpen) => {
+      if (wasOpen) return false;
+      setMoreOpen(false);
+      return true;
+    });
+  };
+  const onMoreOpenChange = (next: boolean) => {
+    if (next) setSecondaryOpen(false);
+    setMoreOpen(next);
+  };
 
   useEffect(() => {
     if (!secondaryOpen || !collapseSecondary) return;
@@ -199,11 +196,11 @@ export function AdaptiveToolbar({
       more={more}
       collapseSecondary={collapseSecondary}
       secondaryOpen={secondaryOpen}
+      moreOpen={moreOpen}
       panelId={panelId}
       secondaryLabel={secondaryLabel}
-      secondaryContent={secondaryContent}
-      onToggleSecondary={() => setSecondaryOpen((o) => !o)}
-      filterPopoverAlign={actionsBeforeLeading ? 'start' : 'end'}
+      onToggleSecondary={toggleFilters}
+      onMoreOpenChange={onMoreOpenChange}
     />
   ) : null;
 
@@ -226,16 +223,48 @@ export function AdaptiveToolbar({
     </div>
   ) : null;
 
+  const filtersPanel =
+    collapseSecondary && secondaryOpen && secondaryContent ? (
+      <div
+        id={panelId}
+        role="dialog"
+        aria-label={secondaryLabel}
+        className="absolute left-0 right-0 top-full z-50 mt-1 max-h-[min(55vh,22rem)] overflow-y-auto rounded-md border border-stone-200 bg-white p-2.5 shadow-md"
+        data-adaptive-toolbar-secondary-panel="true"
+        data-secondary-presentation="popover"
+        data-filter-fit="full-bleed"
+      >
+        {secondaryContent}
+      </div>
+    ) : null;
+
+  const inlineSecondary =
+    !collapseSecondary && secondaryContent ? (
+      <div
+        className="flex flex-wrap items-center gap-2"
+        data-adaptive-toolbar-secondary="true"
+      >
+        {secondaryContent}
+      </div>
+    ) : null;
+
+  const primaryBlock = (body: ReactNode) => (
+    <div className="relative w-full min-w-0" data-adaptive-toolbar-chrome="true">
+      {body}
+      {filtersPanel}
+    </div>
+  );
+
   /**
    * Create-first worklists — viewport CSS SSOT (not modeOverride stacking):
    * phone: CTAs then full-width Search; sm+: one row Search fills leftover width.
-   * modeOverride="compact" still collapses Filters to a popover.
+   * modeOverride="compact" still collapses Filters to a full-bleed overlay.
    */
   if (actionsBeforeLeading) {
     return (
       <div
         ref={rootRef}
-        className={['flex w-full flex-col gap-2', className].filter(Boolean).join(' ')}
+        className={['relative flex w-full flex-col gap-2', className].filter(Boolean).join(' ')}
         data-adaptive-toolbar="true"
         data-toolbar-mode={mode}
         data-toolbar-stack={stackChrome ? 'true' : 'false'}
@@ -243,14 +272,17 @@ export function AdaptiveToolbar({
         data-toolbar-has-facets={hasFacets ? 'true' : undefined}
         data-toolbar-secondary-open={collapseSecondary ? String(secondaryOpen) : undefined}
       >
-        <div
-          className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
-          data-adaptive-toolbar-primary="true"
-        >
-          {actions}
-          {facetsSlot}
-          {search}
-        </div>
+        {primaryBlock(
+          <div
+            className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
+            data-adaptive-toolbar-primary="true"
+          >
+            {actions}
+            {facetsSlot}
+            {search}
+          </div>,
+        )}
+        {inlineSecondary}
       </div>
     );
   }
@@ -260,6 +292,7 @@ export function AdaptiveToolbar({
     <div
       ref={rootRef}
       className={[
+        'relative',
         stackChrome
           ? 'flex w-full flex-col gap-2'
           : 'flex w-full flex-row flex-wrap items-center gap-2',
@@ -276,25 +309,33 @@ export function AdaptiveToolbar({
       {stackChrome ? (
         <>
           {search ? <div className="w-full min-w-0">{search}</div> : null}
-          {(actions || hasFacets) && (
+          {(actions || hasFacets)
+            ? primaryBlock(
+                <div
+                  className="flex w-full min-w-0 flex-row flex-wrap items-center gap-2"
+                  data-adaptive-toolbar-primary="true"
+                >
+                  {facetsSlot}
+                  {actions}
+                </div>,
+              )
+            : null}
+          {inlineSecondary}
+        </>
+      ) : (
+        <>
+          {primaryBlock(
             <div
               className="flex w-full min-w-0 flex-row flex-wrap items-center gap-2"
               data-adaptive-toolbar-primary="true"
             >
+              {search}
               {facetsSlot}
               {actions}
-            </div>
+            </div>,
           )}
+          {inlineSecondary}
         </>
-      ) : (
-        <div
-          className="flex w-full min-w-0 flex-row flex-wrap items-center gap-2"
-          data-adaptive-toolbar-primary="true"
-        >
-          {search}
-          {facetsSlot}
-          {actions}
-        </div>
       )}
     </div>
   );
