@@ -192,6 +192,11 @@ const NEEDLES = [
   'Reverse document',
   'Confirm reverse',
   'Opening Balance Equity (3050)',
+  // Inventory worklist Columns-in-More (202fe535+)
+  'inventory.worklist.columns.v2.',
+  'Choose columns to show',
+  'Reset defaults',
+  'data-inventory-column-picker',
 ];
 const found = {};
 for (const a of discovered) {
