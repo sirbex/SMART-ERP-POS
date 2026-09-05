@@ -827,42 +827,7 @@ export default function InventoryAdjustmentsPage() {
     };
   }, [adjustmentQuantity, adjustmentReason, previewNewQuantity]);
 
-  if (isLoading) {
-    return (
-      <div className="p-6">
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-blue-800">Loading inventory batches...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-6">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-800">Failed to load inventory. Please try again.</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!canAdjust) {
-    return (
-      <div className="p-6">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-yellow-900 mb-2">⚠️ Access Restricted</h3>
-          <p className="text-yellow-800">
-            You do not have permission to access inventory adjustments.
-            <br />
-            Required permission: <strong>inventory.adjust</strong> or{' '}
-            <strong>inventory.approve</strong>
-          </p>
-        </div>
-      </div>
-    );
-  }
-
+  // Must stay above loading/error/permission early returns — hooks order SSOT.
   const adjustmentBatchColumns: AdaptiveDataColumn<Batch>[] = useMemo(() => {
     const all: AdaptiveDataColumn<Batch>[] = [
     {
@@ -936,6 +901,42 @@ export default function InventoryAdjustmentsPage() {
   ];
     return all.filter((c) => showCol(c.id));
   }, [productCategoryMap, showCol]);
+
+  if (isLoading) {
+    return (
+      <div className="p-6">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <p className="text-blue-800">Loading inventory batches...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-red-800">Failed to load inventory. Please try again.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!canAdjust) {
+    return (
+      <div className="p-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <h3 className="text-lg font-semibold text-yellow-900 mb-2">⚠️ Access Restricted</h3>
+          <p className="text-yellow-800">
+            You do not have permission to access inventory adjustments.
+            <br />
+            Required permission: <strong>inventory.adjust</strong> or{' '}
+            <strong>inventory.approve</strong>
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div data-inventory-adjustments-page="true">

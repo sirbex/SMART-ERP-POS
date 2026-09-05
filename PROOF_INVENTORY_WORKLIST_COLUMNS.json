@@ -1,9 +1,9 @@
 {
   "proof": "INVENTORY_WORKLIST_COLUMNS",
   "verdict": "PASS",
-  "passed": 73,
-  "total": 73,
-  "invariant": "Columns control is ONLY inside AdaptiveToolbar more={...} with presentation=\"menu\" on all 8 inventory worklists; prefs SSOT heals empty/required; no table-fixed collapse.",
+  "passed": 81,
+  "total": 81,
+  "invariant": "Columns control is ONLY inside AdaptiveToolbar more={...} with presentation=\"menu\" on all 8 inventory worklists; prefs SSOT heals empty/required; no table-fixed collapse; no React hooks after isLoading early returns.",
   "gates": [
     {
       "id": "CATALOG_products",
@@ -359,6 +359,46 @@
       "id": "ADJUSTMENTS_FILTER",
       "ok": true,
       "detail": "Adjustments filters AdaptiveDataGrid columns by prefs"
+    },
+    {
+      "id": "PRODUCTS_NO_HOOK_AFTER_EARLY_RETURN",
+      "ok": true,
+      "detail": "pages/inventory/ProductsPage.tsx: no useMemo/useState/etc after isLoading early return"
+    },
+    {
+      "id": "ADJUSTMENTS_NO_HOOK_AFTER_EARLY_RETURN",
+      "ok": true,
+      "detail": "pages/inventory/InventoryAdjustmentsPage.tsx: no useMemo/useState/etc after isLoading early return"
+    },
+    {
+      "id": "STOCK_LEVELS_NO_HOOK_AFTER_EARLY_RETURN",
+      "ok": true,
+      "detail": "pages/inventory/StockLevelsPage.tsx: no useMemo/useState/etc after isLoading early return"
+    },
+    {
+      "id": "STOCK_MOVEMENTS_NO_HOOK_AFTER_EARLY_RETURN",
+      "ok": true,
+      "detail": "pages/inventory/StockMovementsPage.tsx: no useMemo/useState/etc after isLoading early return"
+    },
+    {
+      "id": "GOODS_RECEIPTS_NO_HOOK_AFTER_EARLY_RETURN",
+      "ok": true,
+      "detail": "pages/inventory/GoodsReceiptsPage.tsx: no useMemo/useState/etc after isLoading early return"
+    },
+    {
+      "id": "PURCHASE_ORDERS_NO_HOOK_AFTER_EARLY_RETURN",
+      "ok": true,
+      "detail": "pages/inventory/PurchaseOrdersPage.tsx: no useMemo/useState/etc after isLoading early return"
+    },
+    {
+      "id": "SUPPLIER_RETURNS_NO_HOOK_AFTER_EARLY_RETURN",
+      "ok": true,
+      "detail": "pages/inventory/SupplierReturnsPage.tsx: no useMemo/useState/etc after isLoading early return"
+    },
+    {
+      "id": "BATCH_MGMT_NO_HOOK_AFTER_EARLY_RETURN",
+      "ok": true,
+      "detail": "pages/inventory/BatchManagementPage.tsx: no useMemo/useState/etc after isLoading early return"
     },
     {
       "id": "NO_STANDALONE_COLUMNS_BUTTON",

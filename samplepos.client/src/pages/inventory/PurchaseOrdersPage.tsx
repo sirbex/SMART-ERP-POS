@@ -1454,6 +1454,21 @@ export default function PurchaseOrdersPage() {
     return { total, draft, pending, completed, cancelled, totalValue: totalValue.toNumber() };
   }, [purchaseOrders]);
 
+  // Must stay above loading/error early returns — hooks order SSOT.
+  const hasDeliveryDates = purchaseOrders.some((po: PORow) => po.expectedDelivery);
+  const tableColSpan = useMemo(() => {
+    const ids = [
+      'poNumber',
+      'supplier',
+      'orderDate',
+      ...(hasDeliveryDates ? (['expectedDelivery'] as const) : []),
+      'status',
+      'totalAmount',
+      'actions',
+    ];
+    return ids.filter((id) => showCol(id)).length;
+  }, [hasDeliveryDates, showCol]);
+
   const mobileSortOptions = [
     { value: 'poNumber', label: 'Sort by PO Number' },
     { value: 'supplier', label: 'Sort by Supplier' },
@@ -1660,20 +1675,6 @@ export default function PurchaseOrdersPage() {
       </div>
     );
   }
-
-  const hasDeliveryDates = purchaseOrders.some((po: PORow) => po.expectedDelivery);
-  const tableColSpan = useMemo(() => {
-    const ids = [
-      'poNumber',
-      'supplier',
-      'orderDate',
-      ...(hasDeliveryDates ? (['expectedDelivery'] as const) : []),
-      'status',
-      'totalAmount',
-      'actions',
-    ];
-    return ids.filter((id) => showCol(id)).length;
-  }, [hasDeliveryDates, showCol]);
 
   return (
     <div data-po-page="true">

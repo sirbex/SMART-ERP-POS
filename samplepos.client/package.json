@@ -26,6 +26,8 @@
     "proof:touch-keyboard-pos": "vitest run src/__tests__/touch-keyboard-pos-integration.proof.test.ts",
     "proof:pos-search-typing-perf": "vitest run src/__tests__/pos-search-typing-perf.proof.test.ts",
     "proof:foh-keyboard-ownership-deploy": "node ../scripts/proof-foh-keyboard-ownership-deploy.mjs",
+    "proof:inventory-worklist-columns": "vitest run src/__tests__/inventory-worklist-columns.evidence.test.ts",
+    "proof:adaptive-reports-responsive": "node ../scripts/proof-adaptive-reports-responsive.mjs",
     "test:ui": "vitest --ui"
   },
   "dependencies": {

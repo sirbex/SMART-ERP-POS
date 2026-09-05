@@ -1,8 +1,8 @@
 # PROOF_INVENTORY_WORKLIST_COLUMNS
 
-Verdict: **PASS** (73/73)
+Verdict: **PASS** (81/81)
 
-Columns control is ONLY inside AdaptiveToolbar more={...} with presentation="menu" on all 8 inventory worklists; prefs SSOT heals empty/required; no table-fixed collapse.
+Columns control is ONLY inside AdaptiveToolbar more={...} with presentation="menu" on all 8 inventory worklists; prefs SSOT heals empty/required; no table-fixed collapse; no React hooks after isLoading early returns.
 
 Users choose which inventory table columns to show (SKU, Status, Expiry, …). Prefs persist per worklist. Columns lives under **More**, never as a standalone toolbar button.
 
@@ -77,5 +77,13 @@ Users choose which inventory table columns to show (SKU, Status, Expiry, …). P
 - PASS `BATCH_MGMT_COLUMNS_IN_MORE`: pages/inventory/BatchManagementPage.tsx: 1 picker(s) only inside more (menu)
 - PASS `PRODUCTS_EXPIRY`: Products Columns includes Expiry (nearest batch date)
 - PASS `ADJUSTMENTS_FILTER`: Adjustments filters AdaptiveDataGrid columns by prefs
+- PASS `PRODUCTS_NO_HOOK_AFTER_EARLY_RETURN`: pages/inventory/ProductsPage.tsx: no useMemo/useState/etc after isLoading early return
+- PASS `ADJUSTMENTS_NO_HOOK_AFTER_EARLY_RETURN`: pages/inventory/InventoryAdjustmentsPage.tsx: no useMemo/useState/etc after isLoading early return
+- PASS `STOCK_LEVELS_NO_HOOK_AFTER_EARLY_RETURN`: pages/inventory/StockLevelsPage.tsx: no useMemo/useState/etc after isLoading early return
+- PASS `STOCK_MOVEMENTS_NO_HOOK_AFTER_EARLY_RETURN`: pages/inventory/StockMovementsPage.tsx: no useMemo/useState/etc after isLoading early return
+- PASS `GOODS_RECEIPTS_NO_HOOK_AFTER_EARLY_RETURN`: pages/inventory/GoodsReceiptsPage.tsx: no useMemo/useState/etc after isLoading early return
+- PASS `PURCHASE_ORDERS_NO_HOOK_AFTER_EARLY_RETURN`: pages/inventory/PurchaseOrdersPage.tsx: no useMemo/useState/etc after isLoading early return
+- PASS `SUPPLIER_RETURNS_NO_HOOK_AFTER_EARLY_RETURN`: pages/inventory/SupplierReturnsPage.tsx: no useMemo/useState/etc after isLoading early return
+- PASS `BATCH_MGMT_NO_HOOK_AFTER_EARLY_RETURN`: pages/inventory/BatchManagementPage.tsx: no useMemo/useState/etc after isLoading early return
 - PASS `NO_STANDALONE_COLUMNS_BUTTON`: zero inventory worklists use Columns as a primary toolbar button
 - PASS `WORKLIST_PAGE_COUNT`: proof covers every registered worklist page

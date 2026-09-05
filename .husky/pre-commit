@@ -147,6 +147,22 @@ if echo "$STAGED_FILES" | grep -qE "\.(ts|tsx|js)$"; then
   fi
 fi
 
+# Inventory worklist Columns / hooks-order — when worklist prefs or inventory pages change
+INVENTORY_WORKLIST_FILES=$(echo "$STAGED_FILES" | grep -E "(samplepos\.client/src/pages/inventory/|InventoryColumnPicker|useInventoryColumnPrefs|inventoryWorklistColumnsSsot|inventory-worklist-columns\.evidence)" || true)
+if [ ! -z "$INVENTORY_WORKLIST_FILES" ]; then
+  echo "🛡️  Inventory worklist columns + hooks-order integrity..."
+  cd samplepos.client
+  npm run proof:inventory-worklist-columns 2>&1 | tail -40
+  if [ $? -ne 0 ]; then
+    echo "❌ Inventory worklist columns proof failed — hooks after early return or Columns placement"
+    HAS_ERRORS=1
+  else
+    echo "✅ Inventory worklist columns proof passed"
+  fi
+  cd ..
+  echo ""
+fi
+
 # POS pricing regression — when protected pricing, sales guard, or POS cart files change
 PRICING_REGRESSION_FILES=$(echo "$STAGED_FILES" | grep -E "(atCostIssuePrice|pricingEngineService|saleBelowCostGuard|salePriceAuditService|atCostSalePricingGuard|cogsDriftGuard|inventorySubledgerCoupling|419_sale_line_price|posCartAtCost|posCartLine|posCartUom|PosUnitPriceInput|POSPage\.tsx|salesService\.ts)" || true)
 if [ ! -z "$PRICING_REGRESSION_FILES" ]; then

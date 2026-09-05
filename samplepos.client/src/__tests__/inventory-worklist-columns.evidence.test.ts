@@ -98,6 +98,30 @@ function countPickerTags(src: string): number {
   return (src.match(/<InventoryColumnPicker\b/g) || []).length;
 }
 
+/**
+ * Deploy integrity: React hooks must never run after isLoading/error early returns
+ * and before the page's main return. Nested components later in the file are ignored.
+ * This is the exact class of bug that crashed PurchaseOrdersPage in production.
+ */
+function hasHookAfterEarlyReturn(src: string): boolean {
+  const exportDefault = src.lastIndexOf('export default function');
+  if (exportDefault < 0) return false;
+  const body = src.slice(exportDefault);
+  const loadMatch = body.match(/if\s*\(\s*isLoading\s*\)\s*\{[\s\S]*?\n\s*\}/);
+  if (!loadMatch || loadMatch.index == null) return false;
+  let rest = body.slice(loadMatch.index + loadMatch[0].length);
+  for (;;) {
+    const next = rest.match(/^\s*if\s*\([^)]+\)\s*\{[\s\S]*?\n\s*\}/);
+    if (!next || !/\breturn\b/.test(next[0])) break;
+    rest = rest.slice(next[0].length);
+  }
+  // Only the gap before this component's main JSX return (not nested helpers below).
+  const mainReturn = rest.search(/\n  return\s*\(/);
+  if (mainReturn < 0) return false;
+  const between = rest.slice(0, mainReturn);
+  return /\buse(Memo|Callback|Effect|State|Ref|LayoutEffect|ImperativeHandle)\s*\(/.test(between);
+}
+
 /** Every InventoryColumnPicker must sit inside a more={...} with presentation="menu". */
 function assertColumnsOnlyInMore(src: string): { ok: boolean; detail: string } {
   const total = countPickerTags(src);
@@ -286,6 +310,15 @@ describe('PROOF: inventory worklist column prefs', () => {
       adj.includes('all.filter((c) => showCol(c.id))'),
       'Adjustments filters AdaptiveDataGrid columns by prefs',
     );
+    // Permanent: every worklist — zero hooks after isLoading early returns.
+    for (const p of WORKLIST_PAGES) {
+      const src = readClient(p.file);
+      gate(
+        `${p.id}_NO_HOOK_AFTER_EARLY_RETURN`,
+        !hasHookAfterEarlyReturn(src),
+        `${p.file}: no useMemo/useState/etc after isLoading early return`,
+      );
+    }
 
     // Global: no inventory page ships a standalone Columns button beside primary CTAs.
     let anyStandalone = false;
@@ -315,7 +348,7 @@ afterAll(() => {
     passed,
     total: gates.length,
     invariant:
-      'Columns control is ONLY inside AdaptiveToolbar more={...} with presentation="menu" on all 8 inventory worklists; prefs SSOT heals empty/required; no table-fixed collapse.',
+      'Columns control is ONLY inside AdaptiveToolbar more={...} with presentation="menu" on all 8 inventory worklists; prefs SSOT heals empty/required; no table-fixed collapse; no React hooks after isLoading early returns.',
     gates,
   };
   const json = JSON.stringify(payload, null, 2);
