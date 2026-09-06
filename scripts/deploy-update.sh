@@ -53,6 +53,18 @@ echo "Date: $(date)"
 echo "Git: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo ""
 
+# Free Docker layer cache / dangling images so builds do not fail with
+# "no space left on device" (seen on 209.38.203.138 during extract).
+echo ">>> Disk before prune:"
+df -h / /var/lib/docker 2>/dev/null || df -h /
+echo ">>> Pruning unused Docker images/containers/build cache (keeps volumes)..."
+docker container prune -f >/dev/null 2>&1 || true
+docker image prune -af >/dev/null 2>&1 || true
+docker builder prune -af >/dev/null 2>&1 || true
+echo ">>> Disk after prune:"
+df -h / /var/lib/docker 2>/dev/null || df -h /
+echo ""
+
 # shellcheck source=lib/discover-tenant-databases.sh
 source "$SCRIPT_DIR/lib/discover-tenant-databases.sh"
 
