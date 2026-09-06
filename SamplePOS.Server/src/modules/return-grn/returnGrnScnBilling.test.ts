@@ -146,6 +146,38 @@ describe('returnGrnService — SCN requires supplier bill', () => {
         ).rejects.toMatchObject({ errorCode: 'ERR_SCN_FULL_REVERSE' });
     });
 
+    it('resolves bill via GRN link even when InternalReference is INV-GR-… (Henber pattern)', async () => {
+        mockClientQuery.mockImplementation(async (sql: unknown) => {
+            const s = String(sql);
+            if (isActiveScnExistenceSql(s)) {
+                return { rows: [] };
+            }
+            if (s.includes('reversed_by_return_grn_id')) {
+                return { rows: [{ reversed_by_return_grn_id: null }] };
+            }
+            if (s.includes('FROM goods_receipts g') && s.includes('supplier')) {
+                return { rows: [{ supplier_id: 'sup-1', supplier_name: 'Test Supplier' }] };
+            }
+            // Bill lookup must accept junction without requiring empty InternalReference
+            if (
+                s.includes("document_type = 'SUPPLIER_INVOICE'") &&
+                s.includes('supplier_invoice_grn_links') &&
+                s.includes("'INV-' ||")
+            ) {
+                return { rows: [{ Id: 'bill-uuid' }] };
+            }
+            if (s.includes('FROM supplier_invoices') && s.includes('"TotalAmount"')) {
+                return { rows: [{ TotalAmount: '2000.00', Status: 'Pending' }] };
+            }
+            return { rows: [] };
+        });
+
+        // Will fail later without full SCN mocks — but must NOT be ERR_RETURN_GRN_001
+        await expect(
+            returnGrnService.createCreditNoteFromReturn(pool, 'rgrn-uuid'),
+        ).rejects.not.toMatchObject({ errorCode: SUPPLIER_BILL_REQUIRED_FOR_SCN_CODE });
+    });
+
     it('throws BusinessError ERR_RETURN_GRN_001 when GR has no supplier bill', async () => {
         await expect(
             returnGrnService.createCreditNoteFromReturn(pool, 'rgrn-uuid'),

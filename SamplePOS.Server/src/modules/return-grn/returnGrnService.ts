@@ -504,6 +504,9 @@ export const returnGrnService = {
                             OR si."InternalReferenceNumber" = (
                               SELECT receipt_number FROM goods_receipts WHERE id = $1
                             )
+                            OR si."InternalReferenceNumber" = (
+                              SELECT 'INV-' || receipt_number FROM goods_receipts WHERE id = $1
+                            )
                           )
                      ) AS has_invoice`,
                     [rgrn.grnId],
@@ -730,8 +733,12 @@ export const returnGrnService = {
 
             // 5. Find the original Supplier Invoice for THIS goods receipt only.
             //    Never fall back to PurchaseOrderId — that credits a sibling GR's bill.
-            //    Prefer InternalReferenceNumber = this GR; allow junction only when
-            //    InternalReference is null or also matches this receipt.
+            //    SSOT aligned with return-grn worklist hasSupplierBill:
+            //      - junction link for this GR (authoritative), OR
+            //      - InternalReferenceNumber = receipt_number, OR
+            //      - InternalReferenceNumber = 'INV-' || receipt_number (Henber bill create pattern)
+            //    Do NOT require empty InternalReference for junction matches — bills often
+            //    store INV-GR-… while links correctly point at the GR (ERR_RETURN_GRN_001 false positive).
             let referenceInvoiceId: string | undefined = knownReferenceInvoiceId;
             if (!referenceInvoiceId) {
                 const siResult = await client.query(
@@ -741,15 +748,15 @@ export const returnGrnService = {
                        AND si.deleted_at IS NULL
                        AND UPPER(COALESCE(si."Status",'')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
                        AND (
-                         si."InternalReferenceNumber" = (
+                         si."Id" IN (
+                           SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl
+                           WHERE sigl.grn_id = $1
+                         )
+                         OR si."InternalReferenceNumber" = (
                            SELECT receipt_number FROM goods_receipts WHERE id = $1
                          )
-                         OR (
-                           COALESCE(si."InternalReferenceNumber", '') = ''
-                           AND si."Id" IN (
-                             SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl
-                             WHERE sigl.grn_id = $1
-                           )
+                         OR si."InternalReferenceNumber" = (
+                           SELECT 'INV-' || receipt_number FROM goods_receipts WHERE id = $1
                          )
                        )
                      ORDER BY si."CreatedAt" DESC LIMIT 1`,
